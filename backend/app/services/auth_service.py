@@ -217,25 +217,31 @@ async def refresh_user_token(db: AsyncSession, refresh_token_str: str) -> dict:
 
 
 async def _get_or_create_admin_role(db: AsyncSession, tenant_id: int):
-    """Find-or-create the "admin" Role for opt-in tenant self-signup.
+    """Find-or-create the tenant-scoped "admin" Role for opt-in tenant self-signup.
 
-    `Role.name` is GLOBALLY unique (a known deferred quirk -- roles aren't
-    yet fully tenant-scoped), so an "admin" role created for any tenant is
-    found and reused by name rather than duplicated.
+    `Role.name` is unique per (tenantId, name) -- see alembic migration
+    036_role_permission_tenant_scoped and the composite UniqueConstraint on
+    the Role model. Each tenant gets its own physical "admin" row; one
+    tenant's self-signup can never collapse onto (or be blocked by) another
+    tenant's role.
 
-    Registration is unauthenticated, so there is normally no tenant context
-    and this SELECT runs unfiltered. But it can still run inside a tenant
-    context (e.g. tests that set one globally), in which case the tenant
-    ORM event filter (app.core.tenant_events) may append a `tenantId`
-    predicate and hide an existing global "admin" row, racing us into
-    trying to create a second one. Guard that with a SAVEPOINT: create the
-    role in a nested transaction so that a unique-constraint violation only
-    rolls back the savepoint (not the caller's pending tenant/user rows),
-    then re-query for the row the concurrent registration created.
+    The lookup explicitly filters on `Role.tenantId == tenant_id` rather than
+    relying on the ambient `TenantContext` (app.core.tenant_events' SELECT
+    filter), because registration is unauthenticated and normally runs with
+    no tenant context at all -- and even when a context IS set (e.g. tests
+    that set one globally), it need not match `tenant_id`, so relying on it
+    could hide the very row we're looking for. A SAVEPOINT still guards
+    against two concurrent registrations for the SAME tenant racing each
+    other: create the role in a nested transaction so that a unique-
+    constraint violation only rolls back the savepoint (not the caller's
+    pending tenant/user rows), then re-query for the row the concurrent
+    registration created.
     """
     from app.models.role import Role
 
-    result = await db.execute(select(Role).where(Role.name == "admin"))
+    result = await db.execute(
+        select(Role).where(Role.name == "admin", Role.tenantId == tenant_id)
+    )
     admin_role = result.scalar_one_or_none()
     if admin_role:
         return admin_role
@@ -250,7 +256,9 @@ async def _get_or_create_admin_role(db: AsyncSession, tenant_id: int):
             db.add(admin_role)
             await db.flush()
     except IntegrityError:
-        result = await db.execute(select(Role).where(Role.name == "admin"))
+        result = await db.execute(
+            select(Role).where(Role.name == "admin", Role.tenantId == tenant_id)
+        )
         admin_role = result.scalar_one_or_none()
         if admin_role is None:
             raise

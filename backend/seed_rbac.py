@@ -1,14 +1,24 @@
-"""Seed database with default roles and permissions for Phase 2."""
+"""Seed database with default roles and permissions for Phase 2.
+
+Role.name and Permission.name are unique per (tenantId, name) -- not
+globally (see alembic migration 036_role_permission_tenant_scoped) -- so
+every row this script creates needs an explicit tenantId. Pass one via the
+SEED_TENANT_ID env var; if unset, the first existing tenant (by id) is used,
+and if no tenant exists yet at all, a bootstrap "Default Tenant" is created.
+Re-running this script only clears/reseeds the CATALOG for that one tenant,
+never other tenants' roles/permissions.
+"""
 
 import asyncio
 import os
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.db.base import Base
 from app.models.permission import Permission
-from app.models.role import Role, role_permissions
+from app.models.role import Role, role_permissions, user_roles
+from app.models.tenant import Tenant
 
 DATABASE_URL = (
     os.environ.get("DATABASE_URL")
@@ -275,6 +285,34 @@ ROLE_PERMISSION_MAP = {
 }
 
 
+async def _resolve_seed_tenant_id(session: AsyncSession) -> int:
+    """Determine which tenant to seed the RBAC catalog for.
+
+    Explicit SEED_TENANT_ID env var wins. Otherwise use the first existing
+    tenant (by id). If no tenant exists at all yet, bootstrap one -- a fresh
+    on-prem install may run this seed script before any tenant/user exists.
+    """
+    env_tenant_id = os.environ.get("SEED_TENANT_ID")
+    if env_tenant_id:
+        tenant_id = int(env_tenant_id)
+        result = await session.execute(select(Tenant).where(Tenant.id == tenant_id))
+        if result.scalar_one_or_none() is None:
+            raise RuntimeError(
+                f"SEED_TENANT_ID={tenant_id} does not match any existing tenant."
+            )
+        return tenant_id
+
+    result = await session.execute(select(Tenant).order_by(Tenant.id))
+    tenant = result.scalars().first()
+    if tenant:
+        return tenant.id
+
+    bootstrap_tenant = Tenant(tenant_name="Default Tenant", tenant_code="default")
+    session.add(bootstrap_tenant)
+    await session.flush()
+    return bootstrap_tenant.id
+
+
 async def seed():
     engine = create_async_engine(DATABASE_URL)
 
@@ -286,11 +324,28 @@ async def seed():
 
     async with async_session as session:
         async with session.begin():
-            # Clear existing
-            await session.execute(text("DELETE FROM role_permissions"))
-            await session.execute(text("DELETE FROM user_roles"))
-            await session.execute(text("DELETE FROM permissions"))
-            await session.execute(text("DELETE FROM roles"))
+            tenant_id = await _resolve_seed_tenant_id(session)
+
+            # Clear existing catalog for THIS tenant only -- never touch other
+            # tenants' roles/permissions.
+            existing_role_ids = (
+                (await session.execute(select(Role.id).where(Role.tenantId == tenant_id)))
+                .scalars()
+                .all()
+            )
+            if existing_role_ids:
+                await session.execute(
+                    role_permissions.delete().where(
+                        role_permissions.c.role_id.in_(existing_role_ids)
+                    )
+                )
+                await session.execute(
+                    user_roles.delete().where(user_roles.c.role_id.in_(existing_role_ids))
+                )
+                await session.execute(Role.__table__.delete().where(Role.tenantId == tenant_id))
+            await session.execute(
+                Permission.__table__.delete().where(Permission.tenantId == tenant_id)
+            )
 
             # Create permissions
             perm_map = {}
@@ -300,6 +355,7 @@ async def seed():
                     resource=perm_data["resource"],
                     action=perm_data["action"],
                     description=perm_data["description"],
+                    tenantId=tenant_id,
                 )
                 session.add(perm)
                 await session.flush()
@@ -308,7 +364,11 @@ async def seed():
             # Create roles
             role_map = {}
             for role_data in DEFAULT_ROLES:
-                role = Role(name=role_data["name"], description=role_data["description"])
+                role = Role(
+                    name=role_data["name"],
+                    description=role_data["description"],
+                    tenantId=tenant_id,
+                )
                 session.add(role)
                 await session.flush()
                 role_map[role.name] = role.id

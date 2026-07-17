@@ -9,11 +9,15 @@ real world. This migration converts each of these columns from a bare
 `unique=True` to a composite UniqueConstraint("tenantId", <column>) — the
 same key is now only required to be unique *within* a tenant.
 
-Role.name and Permission.name are intentionally left alone: RBAC roles and
-permissions are a shared, tenant-agnostic catalog (referenced via the
-`user_roles`/`role_permissions` association tables, which carry no tenantId
-of their own). User.email/username, UserSession.sessionToken, and
-TokenBlacklist.jti are also left alone — those are authentication/security
+Role.name and Permission.name are handled separately, in migration
+036_role_permission_tenant_scoped, not here: both models already carry a
+non-nullable tenantId (TenantAwareMixin), so leaving their bare global
+unique=True in place was not a settled "shared catalog" design — it was the
+same cross-tenant-coupling bug this migration fixes everywhere else, merely
+deferred. See 036 for the fix and rationale.
+
+User.email/username, UserSession.sessionToken, and TokenBlacklist.jti are
+left alone here and remain so — those are authentication/security
 identifiers, not business keys, and changing their uniqueness scope is an
 auth-architecture decision outside this migration's remit.
 
