@@ -17,6 +17,7 @@ export const KEYS = {
   LANG: "bbox_lang",
   SAVED_SEARCHES: "__bbox_saved_searches",
   SUPPLIER_USERS: "__bbox_supplier_users",
+  NAV_COLLAPSED: "__bbox_nav_collapsed",
 };
 
 function get(key, fallback = null) {
@@ -176,5 +177,11 @@ export const storage = {
   supplierUsers: {
     get: () => getJSON(KEYS.SUPPLIER_USERS, []),
     set: (u) => setJSON(KEYS.SUPPLIER_USERS, u),
+  },
+
+  nav: {
+    // Persisted collapsed state for the primary navigation rail.
+    getCollapsed: () => get(KEYS.NAV_COLLAPSED) === "1",
+    setCollapsed: (v) => set(KEYS.NAV_COLLAPSED, v ? "1" : "0"),
   },
 };
