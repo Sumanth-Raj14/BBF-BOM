@@ -62,4 +62,20 @@ describe('dataService', () => {
     const result = await dataService.refresh('parts');
     expect(result).toBeNull();
   });
+
+  // R9: dataService.set()/update()/remove() must propagate a real API
+  // failure as a rejection instead of silently resolving as if the write
+  // succeeded (previously the try/catch swallowed the error and only
+  // enqueued it for a background retry the caller was never told about).
+  it('set() rejects when the API write actually fails while online', async () => {
+    window.api = { parts: { create: vi.fn().mockRejectedValue(new Error('API down')) } };
+    dataService.setOnline(true);
+    await expect(dataService.set('parts', [{ id: 1 }])).rejects.toThrow('API down');
+  });
+
+  it('update() rejects when the API write actually fails while online', async () => {
+    window.api = { workOrders: { update: vi.fn().mockRejectedValue(new Error('API down')) } };
+    dataService.setOnline(true);
+    await expect(dataService.update('workOrders', 1, { status: 'done' })).rejects.toThrow('API down');
+  });
 });

@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+const mockToast = vi.fn();
+vi.mock('../../utils/toast.js', () => ({ toast: (...args) => mockToast(...args) }));
+
 const mockStorage = {
   bomRows: { get: vi.fn(() => null), set: vi.fn(), remove: vi.fn() },
   poDraft: { get: vi.fn(() => []), set: vi.fn(), remove: vi.fn() },
@@ -85,16 +88,36 @@ describe('screenDataBridge', () => {
       expect(mockStorage.bomRows.set).toHaveBeenCalledWith(newPart);
     });
 
-    it('falls back to localStorage on create failure', async () => {
+    // R9: a failed API create must NOT resolve as a silent success — the
+    // caller (and ultimately the user) needs to know the save didn't reach
+    // the server, not be told everything is fine while only localStorage was
+    // written.
+    it('rejects and toasts on create failure instead of masking it as success', async () => {
       setMockApi('parts', { create: vi.fn().mockRejectedValue(new Error('fail')) });
-      const result = await screenData.parts.create({ pn: 'TEST' });
-      expect(result).toEqual({ pn: 'TEST' });
+      await expect(screenData.parts.create({ pn: 'TEST' })).rejects.toThrow('fail');
+      // The optimistic local write still happens so the UI isn't stuck...
+      expect(mockStorage.bomRows.set).toHaveBeenCalledWith({ pn: 'TEST' });
+      // ...but the user must be told the server save failed.
+      expect(mockToast).toHaveBeenCalledWith(
+        expect.stringContaining('fail'),
+        expect.objectContaining({ kind: 'error' })
+      );
     });
 
     it('removes part via API', async () => {
       setMockApi('parts', { delete: vi.fn().mockResolvedValue({}) });
       await screenData.parts.remove(1);
       expect(mockStorage.bomRows.remove).toHaveBeenCalled();
+    });
+
+    it('rejects and toasts on remove failure instead of masking it as success', async () => {
+      setMockApi('parts', { delete: vi.fn().mockRejectedValue(new Error('gone')) });
+      await expect(screenData.parts.remove(1)).rejects.toThrow('gone');
+      expect(mockStorage.bomRows.remove).toHaveBeenCalled();
+      expect(mockToast).toHaveBeenCalledWith(
+        expect.stringContaining('gone'),
+        expect.objectContaining({ kind: 'error' })
+      );
     });
   });
 

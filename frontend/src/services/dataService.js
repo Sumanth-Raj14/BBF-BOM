@@ -282,17 +282,25 @@ export const dataService = {
     return api || fallback;
   },
 
+  // R9 fix: a failed write must not resolve as if it succeeded. We still keep
+  // the offline queue for genuinely-offline writes (legitimate deferred
+  // sync), but when we ARE online and the API call actually throws, we
+  // enqueue for retry AND re-throw so the caller's promise rejects instead of
+  // silently reporting success. (The underlying screenData writer already
+  // surfaces a toast for this — see screenDataBridge.js.)
   async set(domain, value) {
     setLocal(domain, value);
     const writer = apiWriters[domain];
-    if (!writer || !_online) {
-      if (!_online && writer) enqueueWrite(domain, 'create', value);
+    if (!writer) return;
+    if (!_online) {
+      enqueueWrite(domain, 'create', value);
       return;
     }
     try {
       if (writer.create) await writer.create(value);
-    } catch {
+    } catch (err) {
       enqueueWrite(domain, 'create', value);
+      throw err;
     }
   },
 
@@ -303,14 +311,16 @@ export const dataService = {
       setLocal(domain, value);
     }
     const writer = apiWriters[domain];
-    if (!writer || !_online) {
-      if (!_online && writer) enqueueWrite(domain, 'update', { id, ...value });
+    if (!writer) return;
+    if (!_online) {
+      enqueueWrite(domain, 'update', { id, ...value });
       return;
     }
     try {
       if (writer.update) await writer.update({ id, ...value });
-    } catch {
+    } catch (err) {
       enqueueWrite(domain, 'update', { id, ...value });
+      throw err;
     }
   },
 
@@ -319,14 +329,16 @@ export const dataService = {
       // Direct API sync instead of local mutation
     }
     const writer = apiWriters[domain];
-    if (!writer || !_online) {
-      if (!_online && writer) enqueueWrite(domain, 'delete', id);
+    if (!writer) return;
+    if (!_online) {
+      enqueueWrite(domain, 'delete', id);
       return;
     }
     try {
       if (writer.remove) await writer.remove(id);
-    } catch {
+    } catch (err) {
       enqueueWrite(domain, 'delete', id);
+      throw err;
     }
   },
 

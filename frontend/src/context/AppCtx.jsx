@@ -236,7 +236,11 @@ function AppCtxProvider({ children }) {
   }, [apiVendors]);
 
   React.useEffect(() => {
-    dataService.set("parts", rows);
+    // dataService.set() now rejects (instead of silently "succeeding") when
+    // the API write actually fails — screenDataBridge already toasts the
+    // user, so just swallow the rejection here to avoid an unhandled-promise
+    // warning from this fire-and-forget effect.
+    dataService.set("parts", rows).catch(() => {});
   }, [rows]);
   React.useEffect(() => {
     storage.notifications.set(notifications);
