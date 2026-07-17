@@ -1,51 +1,56 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { __t } from "../i18n";
-import { apiRequest } from "../../api";
-import { toast } from "../utils/toast";
+import {
+  ScreenHeader,
+  Tabs,
+  DataTable,
+  StatusPill,
+  EmptyState,
+  Spinner,
+} from "../components/ui";
 
-const S = {
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 },
-  title: { fontSize: 24, fontWeight: 700, margin: 0, letterSpacing: "-0.5px" },
-  subtitle: { fontSize: 14, color: "var(--muted)", marginTop: 4 },
-  tabs: { display: "flex", gap: 16, borderBottom: "1px solid var(--border)", marginBottom: 24 },
-  tab: (active) => ({
-    padding: "8px 16px",
-    cursor: "pointer",
-    borderBottom: active ? "2px solid var(--accent)" : "2px solid transparent",
-    color: active ? "var(--fg)" : "var(--muted)",
-    fontWeight: active ? 600 : 500,
-    fontSize: 14,
-    transition: "all 0.2s",
-  }),
-  card: { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, padding: 16, marginBottom: 16 },
-  grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 },
-  badge: (status) => {
-    let bg = "var(--bg)";
-    let fg = "var(--fg)";
-    if (status === "Open" || status === "Pending") { bg = "rgba(234, 179, 8, 0.1)"; fg = "#eab308"; }
-    else if (status === "Closed" || status === "Pass") { bg = "rgba(34, 197, 94, 0.1)"; fg = "#22c55e"; }
-    else if (status === "Fail" || status === "Rejected") { bg = "rgba(239, 68, 68, 0.1)"; fg = "#ef4444"; }
-    else if (status === "In Progress") { bg = "rgba(59, 130, 246, 0.1)"; fg = "#3b82f6"; }
-    return {
-      display: "inline-block",
-      padding: "2px 10px",
-      borderRadius: 12,
-      fontSize: 12,
-      fontWeight: 600,
-      background: bg,
-      color: fg,
-    };
+const NCR_COLUMNS = [
+  { key: "id", header: __t("enterprise.qms.col.id") || "ID" },
+  { key: "part", header: __t("enterprise.qms.col.part") || "Part" },
+  { key: "issue", header: __t("enterprise.qms.col.issue") || "Issue" },
+  {
+    key: "status",
+    header: __t("enterprise.qms.col.status") || "Status",
+    render: (row) => <StatusPill status={row.status} />,
   },
-};
+  { key: "date", header: __t("enterprise.qms.col.date") || "Date" },
+];
+
+const CAPA_COLUMNS = [
+  { key: "id", header: __t("enterprise.qms.col.id") || "ID" },
+  { key: "title", header: __t("enterprise.qms.col.title") || "Title" },
+  {
+    key: "status",
+    header: __t("enterprise.qms.col.status") || "Status",
+    render: (row) => <StatusPill status={row.status} />,
+  },
+  { key: "dueDate", header: __t("enterprise.qms.col.dueDate") || "Due Date" },
+];
+
+const FAI_COLUMNS = [
+  { key: "id", header: __t("enterprise.qms.col.id") || "ID" },
+  { key: "part", header: __t("enterprise.qms.col.part") || "Part" },
+  {
+    key: "result",
+    header: __t("enterprise.qms.col.result") || "Result",
+    render: (row) => <StatusPill status={row.result} />,
+  },
+  { key: "inspector", header: __t("enterprise.qms.col.inspector") || "Inspector" },
+];
 
 export function QMSDashboard() {
-  const [activeTab, setActiveTab] = React.useState("NCR");
-  const [data, setData] = React.useState({ ncrs: [], capas: [], fais: [] });
-  const [loading, setLoading] = React.useState(true);
+  const [activeTab, setActiveTab] = useState("NCR");
+  const [data, setData] = useState({ ncrs: [], capas: [], fais: [] });
+  const [loading, setLoading] = useState(true);
 
-  React.useEffect(() => {
+  useEffect(() => {
     // Mock fetch
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       setData({
         ncrs: [
           { id: "NCR-001", part: "PT-998", issue: "Dimension out of spec", status: "Open", date: "2024-03-01" },
@@ -60,121 +65,85 @@ export function QMSDashboard() {
       });
       setLoading(false);
     }, 400);
+    return () => clearTimeout(timer);
   }, []);
 
-  return (
-    <div className="main flex flex-col h-100">
-      <div className="screen-header">
-        <div className="flex items-center gap-3">
-          <h2>{__t("enterprise.qms.title") || "Quality Management (QMS)"}</h2>
-          <span className="fs-12 fg-3">{__t("enterprise.qms.subtitle") || "Manage NCRs, CAPAs, and First Article Inspections"}</span>
-        </div>
-      </div>
-      
-      <div className="tabs">
-        {["NCR", "CAPA", "FAI"].map(tab => (
-          <button 
-            key={tab} 
-            className={`tab ${activeTab === tab ? "active" : ""}`} 
-            onClick={() => setActiveTab(tab)}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
+  const tabs = [
+    { value: "NCR", label: __t("enterprise.qms.tab.ncr") || "NCR", count: data.ncrs.length },
+    { value: "CAPA", label: __t("enterprise.qms.tab.capa") || "CAPA", count: data.capas.length },
+    { value: "FAI", label: __t("enterprise.qms.tab.fai") || "FAI", count: data.fais.length },
+  ];
 
-      <div className="bom-scroll bg-surface">
+  return (
+    <div className="screen-wrap" data-screen-label="QMS Dashboard">
+      <ScreenHeader
+        title={__t("enterprise.qms.title") || "Quality Management (QMS)"}
+        description={__t("enterprise.qms.subtitle") || "Manage NCRs, CAPAs, and First Article Inspections"}
+      />
+
+      <Tabs
+        items={tabs}
+        value={activeTab}
+        onChange={setActiveTab}
+        ariaLabel={__t("enterprise.qms.tabsLabel") || "QMS record types"}
+      />
+
+      <div role="tabpanel" aria-label={activeTab} tabIndex={0} className="mt-14">
         {loading ? (
-          <div className="empty-state">Loading {activeTab}...</div>
-        ) : (
-          <div className="p-4">
-            {activeTab === "NCR" && <NCRTable ncrs={data.ncrs} />}
-            {activeTab === "CAPA" && <CAPATable capas={data.capas} />}
-            {activeTab === "FAI" && <FAITable fais={data.fais} />}
+          <div className="flex items-center gap-8 fg-3 fs-12" style={{ padding: "32px 0" }}>
+            <Spinner size="sm" label={(__t("enterprise.qms.loading") || "Loading") + " " + activeTab + "…"} />
+            <span aria-hidden="true">
+              {(__t("enterprise.qms.loading") || "Loading")} {activeTab}…
+            </span>
           </div>
+        ) : (
+          <>
+            {activeTab === "NCR" && (
+              <DataTable
+                dense
+                ariaLabel={__t("enterprise.qms.ncrTable") || "Non-conformance reports"}
+                columns={NCR_COLUMNS}
+                rows={data.ncrs}
+                empty={
+                  <EmptyState
+                    title={__t("enterprise.qms.noNcr") || "No non-conformances"}
+                    message={__t("enterprise.qms.noNcrMsg") || "No non-conformance reports found."}
+                  />
+                }
+              />
+            )}
+            {activeTab === "CAPA" && (
+              <DataTable
+                dense
+                ariaLabel={__t("enterprise.qms.capaTable") || "Corrective and preventive actions"}
+                columns={CAPA_COLUMNS}
+                rows={data.capas}
+                empty={
+                  <EmptyState
+                    title={__t("enterprise.qms.noCapa") || "No corrective actions"}
+                    message={__t("enterprise.qms.noCapaMsg") || "No corrective actions found."}
+                  />
+                }
+              />
+            )}
+            {activeTab === "FAI" && (
+              <DataTable
+                dense
+                ariaLabel={__t("enterprise.qms.faiTable") || "First article inspections"}
+                columns={FAI_COLUMNS}
+                rows={data.fais}
+                empty={
+                  <EmptyState
+                    title={__t("enterprise.qms.noFai") || "No first article inspections"}
+                    message={__t("enterprise.qms.noFaiMsg") || "No first article inspections found."}
+                  />
+                }
+              />
+            )}
+          </>
         )}
       </div>
     </div>
-  );
-}
-
-function NCRTable({ ncrs }) {
-  if (!ncrs || !ncrs.length) return <div className="empty-state">No Non-Conformances found.</div>;
-  return (
-    <table className="bom-table">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Part</th>
-          <th>Issue</th>
-          <th>Status</th>
-          <th>Date</th>
-        </tr>
-      </thead>
-      <tbody>
-        {ncrs.map(n => (
-          <tr key={n.id}>
-            <td className="font-mono">{n.id}</td>
-            <td>{n.part}</td>
-            <td>{n.issue}</td>
-            <td><span className={`status ${n.status === "Closed" ? "released" : "draft"}`}>{n.status}</span></td>
-            <td className="font-mono">{n.date}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function CAPATable({ capas }) {
-  if (!capas || !capas.length) return <div className="empty-state">No Corrective Actions found.</div>;
-  return (
-    <table className="bom-table">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Title</th>
-          <th>Status</th>
-          <th>Due Date</th>
-        </tr>
-      </thead>
-      <tbody>
-        {capas.map(c => (
-          <tr key={c.id}>
-            <td className="font-mono">{c.id}</td>
-            <td>{c.title}</td>
-            <td><span className={`status ${c.status === "In Progress" ? "draft" : "released"}`}>{c.status}</span></td>
-            <td className="font-mono">{c.dueDate}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function FAITable({ fais }) {
-  if (!fais || !fais.length) return <div className="empty-state">No First Article Inspections found.</div>;
-  return (
-    <table className="bom-table">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Part</th>
-          <th>Result</th>
-          <th>Inspector</th>
-        </tr>
-      </thead>
-      <tbody>
-        {fais.map(f => (
-          <tr key={f.id}>
-            <td className="font-mono">{f.id}</td>
-            <td>{f.part}</td>
-            <td><span className={`status ${f.result === "Pass" ? "released" : "draft"}`}>{f.result}</span></td>
-            <td>{f.inspector}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   );
 }
 
