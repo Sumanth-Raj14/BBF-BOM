@@ -212,6 +212,9 @@ function AppCtxProvider({ children }) {
   const avatarRef = React.useRef(null);
   const [bellOpen, setBellOpen] = React.useState(false);
   const [avaOpen, setAvaOpen] = React.useState(false);
+  // Off-canvas nav drawer (mobile/tablet ≤900px). The rail is always mounted;
+  // this only governs the slide-in overlay + scrim below the breakpoint.
+  const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
 
   React.useEffect(() => {
     // Dark mode was removed (a real AA dark theme is a later build); the app is
@@ -286,6 +289,11 @@ function AppCtxProvider({ children }) {
   React.useEffect(() => {
     const el = document.querySelector(".nav-item.active");
     if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [route]);
+
+  // Auto-close the mobile nav drawer after any navigation.
+  React.useEffect(() => {
+    setMobileNavOpen(false);
   }, [route]);
 
   const openModal = React.useCallback((name, ctx = null) => {
@@ -367,6 +375,8 @@ function AppCtxProvider({ children }) {
     setBellOpen,
     avaOpen,
     setAvaOpen,
+    mobileNavOpen,
+    setMobileNavOpen,
     bellRef,
     avatarRef,
     unreadCount,

@@ -153,6 +153,8 @@ export default function NavRail() {
     avatarRef,
     avaOpen,
     setAvaOpen,
+    mobileNavOpen,
+    setMobileNavOpen,
   } = ctx;
 
   const [collapsed, setCollapsed] = React.useState(() =>
@@ -162,6 +164,28 @@ export default function NavRail() {
   React.useLayoutEffect(() => {
     applyCollapsed(collapsed);
   }, [collapsed]);
+
+  // Close the mobile drawer on Escape.
+  React.useEffect(() => {
+    if (!mobileNavOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key === "Escape") setMobileNavOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileNavOpen, setMobileNavOpen]);
+
+  // If the viewport grows past the ≤900px breakpoint while the drawer is open,
+  // close it so it never lingers as a stray overlay on desktop.
+  React.useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return undefined;
+    const mq = window.matchMedia("(min-width: 901px)");
+    const onChange = (e) => {
+      if (e.matches) setMobileNavOpen(false);
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [setMobileNavOpen]);
 
   const toggleCollapsed = () => {
     setCollapsed((c) => {
@@ -174,6 +198,7 @@ export default function NavRail() {
   const go = (id) => {
     setRoute(id);
     setSelectedRow(null);
+    setMobileNavOpen(false);
   };
 
   const renderItem = (n) => {
@@ -208,11 +233,20 @@ export default function NavRail() {
             : userRole || "Viewer";
 
   return (
-    <nav
-      className="navrail"
-      aria-label="Main navigation"
-      data-collapsed={collapsed ? "true" : "false"}
-    >
+    <>
+      <div
+        className={"nav-scrim" + (mobileNavOpen ? " open" : "")}
+        aria-hidden="true"
+        hidden={!mobileNavOpen}
+        onClick={() => setMobileNavOpen(false)}
+      />
+      <nav
+        id="primary-nav"
+        className="navrail"
+        aria-label="Main navigation"
+        data-collapsed={collapsed ? "true" : "false"}
+        data-mobile-open={mobileNavOpen ? "true" : "false"}
+      >
       <div className="navrail-scroll">
         <ul className="nav-list nav-list-primary">{PRIMARY.map(renderItem)}</ul>
 
@@ -543,6 +577,7 @@ export default function NavRail() {
           </button>
         </div>
       </Popover>
-    </nav>
+      </nav>
+    </>
   );
 }

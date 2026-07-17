@@ -34,11 +34,24 @@ export default function TopBar() {
     setSearch,
     t,
     setTweak,
+    mobileNavOpen,
+    setMobileNavOpen,
   } = ctx;
 
   return (
     <>
       <header className="topbar">
+        <button
+          type="button"
+          className="icon-btn nav-toggle"
+          aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
+          title={mobileNavOpen ? "Close navigation" : "Open navigation"}
+          aria-expanded={mobileNavOpen}
+          aria-controls="primary-nav"
+          onClick={() => setMobileNavOpen((o) => !o)}
+        >
+          {mobileNavOpen ? <Icon.Close size={16} /> : <Icon.Menu size={16} />}
+        </button>
         <div className="brand">
           <img
             src="/bbf-logo.svg"

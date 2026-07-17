@@ -828,6 +828,14 @@ a:hover { text-decoration: underline; }
   background: var(--border-subtle);
 }
 
+/* ── Mobile drawer chrome (activated ≤900px; inert on desktop) ── */
+.nav-toggle { display: none; }        /* hamburger — shown only ≤900px */
+.nav-scrim { display: none; }         /* backdrop  — shown only ≤900px + open */
+@keyframes nav-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 /* Main — BBF Accent Bar */
 .main {
   overflow: hidden;
@@ -3065,8 +3073,66 @@ body.file-dragover::after {
 
 /* Mobile / tablet responsive */
 @media (max-width: 900px) {
+  /* Nav collapses out of the grid and becomes an off-canvas drawer; the main
+     content spans full width. The rail is reachable via the topbar hamburger
+     (.nav-toggle) + a tap-to-dismiss scrim — no more dead-end display:none. */
   .app { grid-template-columns: 0 1fr; }
-  .navrail { display: none; }
+  .nav-toggle { display: inline-flex; }
+
+  .navrail {
+    position: fixed;
+    top: var(--topbar-height);
+    left: 0;
+    bottom: 0;
+    width: min(300px, 84vw);
+    z-index: var(--z-drawer);
+    box-shadow: var(--shadow-xl);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform var(--dur-base) var(--ease-standard),
+                visibility 0s linear var(--dur-base);
+  }
+  .navrail[data-mobile-open="true"] {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform var(--dur-base) var(--ease-standard),
+                visibility 0s;
+  }
+
+  /* Inside the drawer the rail is always the labeled/expanded form, even if the
+     desktop rail was left collapsed — undo the icon-only overrides and hide the
+     collapse control (meaningless in a drawer). */
+  .navrail[data-collapsed="true"] .nav-item-label,
+  .navrail[data-collapsed="true"] .nav-section-text,
+  .navrail[data-collapsed="true"] .nav-section-rule,
+  .navrail[data-collapsed="true"] .nav-account-caret {
+    display: initial;
+  }
+  .navrail[data-collapsed="true"] .nav-account-meta { display: flex; }
+  .navrail[data-collapsed="true"] .nav-item,
+  .navrail[data-collapsed="true"] .nav-account,
+  .navrail[data-collapsed="true"] .nav-section-label {
+    justify-content: flex-start;
+    gap: var(--sp-2);
+    padding-left: var(--sp-2);
+    padding-right: var(--sp-2);
+  }
+  .navrail[data-collapsed="true"] .nav-section-label { height: 22px; }
+  .navrail[data-collapsed="true"] .nav-section-label::after { content: none; }
+  .nav-collapse-btn { display: none; }
+
+  .nav-scrim.open {
+    display: block;
+    position: fixed;
+    top: var(--topbar-height);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: calc(var(--z-drawer) - 1);
+    background: color-mix(in oklch, var(--fg) 45%, transparent);
+    animation: nav-scrim-in var(--dur-base) var(--ease-standard);
+  }
+
   .topbar .crumbs { display: none; }
   .topbar .search { width: 120px; }
   .topbar .search input { font-size: 11px; }

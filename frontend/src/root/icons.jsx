@@ -453,5 +453,11 @@ export const Icon = {
       }
     />
   ),
+  Menu: (p) => (
+    <ICO {...p} d={<path d="M2 4h12M2 8h12M2 12h12" />} />
+  ),
+  Close: (p) => (
+    <ICO {...p} d={<path d="M4 4l8 8M12 4l-8 8" />} />
+  ),
 };
 window.Icon = Icon;
