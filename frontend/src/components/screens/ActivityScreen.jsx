@@ -90,7 +90,7 @@ export default function ActivityScreen({ data }) {
   const filtered = activityItems.filter(matches);
 
   return (
-    <div className="screen-wrap" style={{ maxWidth: 820 }}>
+    <div className="screen-wrap">
       <div className="screen-header">
         <div>
           <h1>{__t("activity.title") || "Team Activity"}</h1>

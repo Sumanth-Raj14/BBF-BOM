@@ -9,6 +9,7 @@ import {
   INITIAL_NOTIFICATIONS,
 } from "../utils/constants.js";
 import { convertApiPartsToTree } from "../utils/bom.js";
+import { accentTokensFor } from "../utils/accent.js";
 
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
@@ -220,7 +221,15 @@ function AppCtxProvider({ children }) {
     // Dark mode was removed (a real AA dark theme is a later build); the app is
     // light-only. Density + accent remain user-adjustable via Tweaks.
     document.documentElement.setAttribute("data-density", t.density);
-    document.documentElement.style.setProperty("--accent", t.accent);
+    // Accent-preset AA rethread: a chosen preset must move the *whole* accent
+    // family together (interactive/hover/strong/strong-hover/text/focus/subtle),
+    // not just the single legacy --accent alias — otherwise components reading
+    // --accent-strong/--accent-text/--focus directly stay desynced on the
+    // default orange while --accent-driven chrome follows the new pick.
+    const tokens = accentTokensFor(t.accent);
+    for (const [prop, value] of Object.entries(tokens)) {
+      document.documentElement.style.setProperty(prop, value);
+    }
   }, [t.density, t.accent]);
 
   React.useEffect(() => {

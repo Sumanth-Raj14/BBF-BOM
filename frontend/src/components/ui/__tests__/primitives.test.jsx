@@ -5,6 +5,7 @@ import { Modal } from "../Modal.jsx";
 import { Switch } from "../Choice.jsx";
 import { Menu } from "../Menu.jsx";
 import { ScreenHeader, ContentFrame } from "../ScreenHeader.jsx";
+import { Breadcrumb } from "../Navigation.jsx";
 
 describe("Button", () => {
   it("applies variant + size token classes", () => {
@@ -143,17 +144,32 @@ describe("ScreenHeader", () => {
     render(
       <ScreenHeader
         title="Purchase Orders"
-        subtitle="42 orders"
+        description="42 orders"
         actions={<button>New PO</button>}
       />,
     );
     const heading = screen.getByRole("heading", { name: "Purchase Orders" });
     expect(heading.tagName).toBe("H1");
     expect(heading.closest(".screen-header")).toBeTruthy();
+    // Semantic <header> landmark, not a bare <div>.
+    expect(heading.closest(".screen-header").tagName).toBe("HEADER");
     expect(screen.getByText("42 orders")).toHaveClass("sub");
     expect(
       screen.getByRole("button", { name: "New PO" }).closest(".screen-header__actions"),
     ).toBeTruthy();
+  });
+
+  it("renders an optional breadcrumb slot above the title", () => {
+    render(
+      <ScreenHeader
+        title="Purchase Order #100234"
+        breadcrumbs={<Breadcrumb items={[{ label: "Purchase Orders" }, { label: "#100234" }]} />}
+      />,
+    );
+    const heading = screen.getByRole("heading", { name: "Purchase Order #100234" });
+    const crumbs = heading.closest(".screen-header").querySelector(".screen-header__crumbs");
+    expect(crumbs).toBeTruthy();
+    expect(crumbs.querySelector("nav.ui-breadcrumb")).toBeTruthy();
   });
 });
 

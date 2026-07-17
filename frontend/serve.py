@@ -122,15 +122,17 @@ class EnterpriseHandler(http.server.SimpleHTTPRequestHandler):
         )
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
 
-        # Content Security Policy — conditional on serving mode
+        # Content Security Policy — conditional on serving mode.
+        # Fonts are self-hosted (Geist/Geist Mono, UI decision #2) — no CDN
+        # font-src/style-src exceptions needed for fonts.googleapis.com/gstatic.com.
         is_babel = self.path.endswith("index.babel.html")
         if is_babel:
             # Babel standalone needs unsafe-inline/unsafe-eval for inline transform
             csp = (
                 "default-src 'self' http: https: data: blob:; "
                 "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; "
-                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-                "font-src 'self' https://fonts.gstatic.com; "
+                "style-src 'self' 'unsafe-inline'; "
+                "font-src 'self'; "
                 "img-src 'self' data: http: https:; "
                 "connect-src 'self' http://localhost:8000 http://127.0.0.1:8000 https://open.er-api.com https://v6.exchangerate-api.com https://api.exchangerate.host; "
                 "worker-src 'self' blob:; "
@@ -144,8 +146,8 @@ class EnterpriseHandler(http.server.SimpleHTTPRequestHandler):
             csp = (
                 "default-src 'self' http: https: data: blob:; "
                 "script-src 'self' https://unpkg.com https://cdn.jsdelivr.net; "
-                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-                "font-src 'self' https://fonts.gstatic.com; "
+                "style-src 'self' 'unsafe-inline'; "
+                "font-src 'self'; "
                 "img-src 'self' data: http: https:; "
                 "connect-src 'self' http://localhost:8000 http://127.0.0.1:8000 https://open.er-api.com https://v6.exchangerate-api.com https://api.exchangerate.host; "
                 "worker-src 'self' blob:; "

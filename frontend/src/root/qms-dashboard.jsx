@@ -4,7 +4,6 @@ import { apiRequest } from "../../api";
 import { toast } from "../utils/toast";
 
 const S = {
-  container: { padding: 24, maxWidth: 1200, margin: "0 auto", color: "var(--fg)" },
   header: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 },
   title: { fontSize: 24, fontWeight: 700, margin: 0, letterSpacing: "-0.5px" },
   subtitle: { fontSize: 14, color: "var(--muted)", marginTop: 4 },

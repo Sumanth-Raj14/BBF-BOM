@@ -3,26 +3,35 @@ import PropTypes from "prop-types";
 /**
  * ScreenHeader — the one title treatment every screen consumes: a single
  * title scale/weight/case/prefix (matching the existing global .screen-header
- * convention already used across ~16 screens) plus a right-aligned action
- * cluster. Deliberately reuses the pre-existing `.screen-header`/`h1`/`.sub`
- * rules in styles.css (Cross-screen tokens doc) rather than inventing a
- * second header style — screens that already hand-roll that markup can swap
- * to this component with zero visual change.
+ * convention already used across ~16 screens), an optional breadcrumb trail,
+ * an optional description, and a right-aligned action cluster. Deliberately
+ * reuses the pre-existing `.screen-header`/`h1`/`.sub` rules in styles.css
+ * (Cross-screen tokens doc) rather than inventing a second header style —
+ * screens that already hand-roll that markup can swap to this component with
+ * zero visual change. Semantic `<header>` landmark + `<h1>` for AT/SR users.
  */
-export function ScreenHeader({ title, subtitle, actions, className = "" }) {
+export function ScreenHeader({
+  title,
+  description,
+  breadcrumbs,
+  actions,
+  className = "",
+}) {
   return (
-    <div className={["screen-header", className].filter(Boolean).join(" ")}>
+    <header className={["screen-header", className].filter(Boolean).join(" ")}>
       <div>
+        {breadcrumbs ? <div className="screen-header__crumbs">{breadcrumbs}</div> : null}
         <h1>{title}</h1>
-        {subtitle ? <div className="sub">{subtitle}</div> : null}
+        {description ? <div className="sub">{description}</div> : null}
       </div>
       {actions ? <div className="screen-header__actions">{actions}</div> : null}
-    </div>
+    </header>
   );
 }
 ScreenHeader.propTypes = {
   title: PropTypes.node.isRequired,
-  subtitle: PropTypes.node,
+  description: PropTypes.node,
+  breadcrumbs: PropTypes.node,
   actions: PropTypes.node,
   className: PropTypes.string,
 };

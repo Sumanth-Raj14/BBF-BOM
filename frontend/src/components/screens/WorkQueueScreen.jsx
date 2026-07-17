@@ -120,7 +120,7 @@ export default function WorkQueueScreen() {
   const cell = { padding: "8px 10px" };
 
   return (
-    <div className="screen-wrap" style={{ maxWidth: 1000 }}>
+    <div className="screen-wrap">
       <div className="screen-header">
         <div>
           <h1>{__t("work.title") || "My Work"}</h1>
