@@ -104,6 +104,36 @@ require_viewer = RoleChecker(
 )
 
 
+async def user_has_any_role(db: AsyncSession, user: User, allowed_roles: list[str]) -> bool:
+    """Non-raising role check usable from service-layer code that isn't
+    wired through FastAPI's dependency injection (e.g. a single guardrail
+    branch inside a multi-action endpoint). Mirrors RoleChecker's role +
+    hierarchy resolution without raising HTTPException.
+    """
+    if user.isSuperuser:
+        return True
+    result = await db.execute(
+        select(Role).join(Role.users).where(Role.users.any(id=user.id))
+    )
+    held_roles = [r.name for r in result.scalars().all()]
+    for role_name in held_roles:
+        if role_name in allowed_roles:
+            return True
+        inherited = ROLE_HIERARCHY.get(role_name, [])
+        if any(r in allowed_roles for r in inherited):
+            return True
+    return False
+
+
+# R8 (ECO change control): the designated-approver gate. Approving an ECO is
+# stricter than the general `require_engineering` gate used for
+# submit/reject/implement/close — any engineer can create/submit an ECO, but
+# only an admin-level, designated approver may approve one. This closes the
+# "any engineer can approve any ECO" gap (only self-approval was previously
+# blocked).
+ECO_APPROVER_ROLES = ["admin", "superadmin"]
+
+
 # Pre-built permission checkers
 require_parts_read = PermissionChecker(["parts:read"])
 require_parts_write = PermissionChecker(["parts:write"])

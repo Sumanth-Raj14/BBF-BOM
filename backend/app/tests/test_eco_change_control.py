@@ -3,14 +3,21 @@
 Covers:
   (a) the ECO creator/requester cannot approve their own ECO (403)
   (b) approving from an invalid source state is rejected (409/422)
-  (c) a different, authorized user can approve a submitted ECO — status
-      advances and an EcoApproval row is recorded (not hardcoded order=1)
+  (c) a different, designated-approver user can approve a submitted ECO —
+      status advances and an EcoApproval row is recorded (not hardcoded
+      order=1)
+  (d) a non-approver — an engineering user who is neither the creator nor
+      holds the designated-approver role — is rejected with 403. This is
+      the "any engineer can approve any ECO" prong: merely passing the
+      endpoint's `require_engineering` gate and not being the creator must
+      NOT be sufficient to approve.
 
 NOTE: uses non-superuser, role-bearing users (rather than conftest's
 `test_user`/`auth_headers`, which are superusers) because
 `User.effective_tenant_id` returns None for superusers, and ECO creation
-needs a real tenantId. Two distinct "engineering" users are created so
-self-approval vs. other-approval can be distinguished.
+needs a real tenantId. Distinct users/roles are created so self-approval,
+designated-approver-approval, and non-approver-approval can all be
+distinguished.
 """
 
 import pytest
@@ -26,6 +33,15 @@ from app.models.user import User
 @pytest_asyncio.fixture
 async def engineering_role(db_session, test_tenant, tenant_id):
     role = Role(name="engineering", tenantId=tenant_id)
+    db_session.add(role)
+    await db_session.commit()
+    await db_session.refresh(role)
+    return role
+
+
+@pytest_asyncio.fixture
+async def admin_role(db_session, test_tenant, tenant_id):
+    role = Role(name="admin", tenantId=tenant_id)
     db_session.add(role)
     await db_session.commit()
     await db_session.refresh(role)
@@ -77,9 +93,23 @@ async def creator(db_session, tenant_id, engineering_role):
 
 
 @pytest_asyncio.fixture
-async def approver(db_session, tenant_id, engineering_role):
+async def approver(db_session, tenant_id, admin_role):
+    """A designated approver: holds the admin-level role required to
+    approve an ECO (R8's ECO_APPROVER_ROLES), distinct from plain
+    "engineering"."""
     return await _make_user(
-        db_session, tenant_id, engineering_role, "approver@example.com", "approveruser"
+        db_session, tenant_id, admin_role, "approver@example.com", "approveruser"
+    )
+
+
+@pytest_asyncio.fixture
+async def non_approver_engineer(db_session, tenant_id, engineering_role):
+    """A second engineer — NOT the creator, and NOT a designated approver
+    (only holds "engineering", not "admin"/"superadmin"). Used to prove
+    that merely being an authenticated engineer other than the creator is
+    not sufficient to approve an ECO."""
+    return await _make_user(
+        db_session, tenant_id, engineering_role, "other-engineer@example.com", "otherengineeruser"
     )
 
 
@@ -91,6 +121,11 @@ async def creator_headers(client, creator):
 @pytest_asyncio.fixture
 async def approver_headers(client, approver):
     return await _login(client, "approver@example.com")
+
+
+@pytest_asyncio.fixture
+async def non_approver_headers(client, non_approver_engineer):
+    return await _login(client, "other-engineer@example.com")
 
 
 async def _create_eco(client, headers):
@@ -142,6 +177,32 @@ async def test_approve_from_invalid_source_state_is_rejected(
         json={"action": "approve", "comments": "approving from draft"},
     )
     assert resp.status_code in (409, 422), resp.text
+
+
+@pytest.mark.asyncio
+async def test_non_approver_engineer_cannot_approve(
+    client, creator_headers, non_approver_headers, non_approver_engineer, db_session
+):
+    """(d) A user who passes the endpoint's `require_engineering` gate and is
+    NOT the creator must still be rejected if they lack the designated
+    ECO-approver role. This is the "any engineer can approve any ECO" prong
+    of D9 — distinct from self-approval, which is already covered by
+    test_self_approval_is_rejected above."""
+    eco_id = await _create_eco(client, creator_headers)
+    await _submit_eco(client, creator_headers, eco_id)
+
+    resp = await client.post(
+        f"/api/v1/eco/{eco_id}/action",
+        headers=non_approver_headers,
+        json={"action": "approve", "comments": "I'll just approve this myself"},
+    )
+    assert resp.status_code == 403, resp.text
+
+    # No approval was recorded and the ECO did not advance to "approved".
+    result = await db_session.execute(select(EcoApproval).where(EcoApproval.eco_id == eco_id))
+    assert result.scalars().all() == []
+    detail_resp = await client.get(f"/api/v1/eco/{eco_id}", headers=creator_headers)
+    assert detail_resp.json()["status"] == "review"
 
 
 @pytest.mark.asyncio

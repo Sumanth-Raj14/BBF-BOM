@@ -14,14 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user
 from app.core.pagination import PageParams, get_page_params, paginate
 from app.core.rbac import require_admin, require_engineering, require_viewer
-from app.core.tenant_context import get_tenant_id
 from app.db.session import get_db
 from app.integrations.events import emit_integration_event
-from app.models.eco import EcoApproval, EcoHeader, EcoNotification
+from app.models.eco import EcoHeader, EcoNotification
 from app.models.user import User
-from app.services.eco_service import (
-    ECO_ALLOWED_TRANSITIONS,
-)
 from app.services.eco_service import (
     add_eco_item as service_add_item,
 )
@@ -175,6 +171,14 @@ async def approve_eco(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    """Legacy/alternate approval endpoint.
+
+    R8: this is NOT a second, independently-enforced approval path — it is a
+    thin wrapper that delegates all state-machine, self-approval, and
+    designated-approver guardrails to `perform_eco_action` (the single
+    canonical code path that sets status='approved'). Kept only because it
+    has a distinct request shape (explicit `approver_id`, verified below).
+    """
     # R8 guardrail: approver-identity check — approver_id must be the acting,
     # authenticated user. Previously any admin could record an approval under
     # an arbitrary approver_id with no verification at all.
@@ -183,58 +187,22 @@ async def approve_eco(
             status_code=403,
             detail="approver_id must match the authenticated acting user",
         )
-    tid = get_tenant_id()
-    eco_stmt = select(EcoHeader).where(EcoHeader.id == eco_id)
-    if tid is not None:
-        eco_stmt = eco_stmt.where(EcoHeader.tenantId == tid)
-    result = await db.execute(eco_stmt)
-    eco = result.scalar_one_or_none()
-    if not eco:
-        raise HTTPException(status_code=404, detail="ECO not found")
-    # R8 guardrail: reject illegal source-state transitions.
-    allowed_source = ECO_ALLOWED_TRANSITIONS["approve"]
-    if eco.status not in allowed_source:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Cannot approve ECO in status '{eco.status}'. "
-                f"ECO must be in one of: {sorted(allowed_source)}"
-            ),
+    try:
+        result = await service_eco_action(
+            db=db,
+            current_user=current_user,
+            eco_id=eco_id,
+            action="approve",
+            comments=comments,
+            digital_signature=digital_signature,
         )
-    # R8 guardrail: forbid self-approval.
-    if eco.requested_by == current_user.id:
-        raise HTTPException(
-            status_code=403,
-            detail="ECO creator/requester cannot approve their own ECO",
-        )
-    count_result = await db.execute(
-        select(func.count()).select_from(EcoApproval).where(EcoApproval.eco_id == eco_id)
-    )
-    next_order = (count_result.scalar() or 0) + 1
-    approval = EcoApproval(
-        eco_id=eco_id,
-        approver_id=approver_id,
-        approval_order=next_order,
-        status="approved",
-        comments=comments,
-        signed_at=datetime.now(UTC),
-        digital_signature=digital_signature,
-        tenantId=tid,
-    )
-    db.add(approval)
-    eco.status = "approved"
-    eco.approved_by = approver_id
-    eco.approved_at = datetime.now(UTC)
-    await emit_integration_event(
-        db, current_user.tenantId, "eco", eco.id, "status_change",
-        {"ref": eco.eco_number, "status": eco.status},
-    )
-    await db.commit()
+    except ValueError as e:
+        raise HTTPException(status_code=404 if "not found" in str(e) else 400, detail=str(e))
     return {
         "eco_id": eco_id,
         "approver_id": approver_id,
-        "status": "approved",
-        "signed_at": approval.signed_at.isoformat(),
+        "status": result["status"],
+        "signed_at": result["timestamp"],
         "digital_signature_captured": digital_signature is not None,
     }
 

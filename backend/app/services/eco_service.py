@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import cache_get, cache_set
 from app.core.idempotency import check_idempotency
+from app.core.rbac import ECO_APPROVER_ROLES, user_has_any_role
 from app.core.tenant_context import get_tenant_id
 from app.integrations.events import emit_integration_event
 from app.models.audit_log import AuditLog
@@ -224,6 +225,15 @@ async def perform_eco_action(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="ECO creator/requester cannot approve their own ECO",
+            )
+        # R8 guardrail: designated-approver RBAC — the general
+        # `require_engineering` gate on the endpoint is not sufficient here;
+        # any engineer can create/submit an ECO, but only a designated
+        # approver (admin-level role) may approve one.
+        if not await user_has_any_role(db, current_user, ECO_APPROVER_ROLES):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User lacks the designated ECO-approver role",
             )
         eco.status = "approved"
         eco.approved_by = current_user.id
