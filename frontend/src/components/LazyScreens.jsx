@@ -191,3 +191,7 @@ export const ApprovalsScreen = createLazyScreen(function () {
 export const WorkQueueScreen = createLazyScreen(function () {
   return import("./screens/WorkQueueScreen.jsx");
 }, "WorkQueueScreen");
+
+export const IntegrationsScreen = createLazyScreen(function () {
+  return import("./screens/IntegrationsScreen.jsx");
+}, "IntegrationsScreen");

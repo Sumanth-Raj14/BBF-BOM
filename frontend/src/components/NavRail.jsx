@@ -161,6 +161,7 @@ export const GROUPS = [
         icon: <Icon.Activity size={18} />,
       },
       { id: "scanner", label: "Mobile Scanner", icon: <Icon.Scan size={18} /> },
+      { id: "integrations", label: "Integrations", icon: <Icon.Link size={18} /> },
     ],
   },
 ];
