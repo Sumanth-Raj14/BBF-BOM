@@ -3,7 +3,7 @@ Engineering Change Management API
 ECO/ECN/ECR workflow with approvals and digital signatures
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,7 +15,6 @@ from app.core.deps import get_current_user
 from app.core.pagination import PageParams, get_page_params, paginate
 from app.core.rbac import require_admin, require_engineering, require_viewer
 from app.db.session import get_db
-from app.integrations.events import emit_integration_event
 from app.models.eco import EcoHeader, EcoNotification
 from app.models.user import User
 from app.services.eco_service import (
@@ -214,24 +213,27 @@ async def implement_eco(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_engineering),
 ):
-    result = await db.execute(select(EcoHeader).where(EcoHeader.id == eco_id))
-    eco = result.scalar_one_or_none()
-    if not eco:
-        raise HTTPException(status_code=404, detail="ECO not found")
-    eco.status = "implemented"
-    eco.implemented_by = current_user.id
-    eco.implemented_at = datetime.now(UTC)
-    if notes:
-        eco.description = (eco.description or "") + f"\n[IMPLEMENTED] {notes}"
-    await emit_integration_event(
-        db, current_user.tenantId, "eco", eco.id, "status_change",
-        {"ref": eco.eco_number, "status": eco.status},
-    )
-    await db.commit()
+    """R8/D9 follow-up: this endpoint used to set status='implemented'
+    directly, with no source-state check and an un-tenant-scoped lookup —
+    an ECO could go draft/review -> implemented, skipping approval
+    entirely. It now delegates to the same `perform_eco_action` guard used
+    by /action and /approve, so only an 'approved' ECO can be implemented,
+    and the lookup is tenant-scoped exactly like every other action.
+    """
+    try:
+        result = await service_eco_action(
+            db=db,
+            current_user=current_user,
+            eco_id=eco_id,
+            action="implement",
+            comments=notes,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404 if "not found" in str(e) else 400, detail=str(e))
     return {
         "eco_id": eco_id,
-        "status": "implemented",
-        "implemented_at": eco.implemented_at.isoformat(),
+        "status": result["status"],
+        "implemented_at": result["timestamp"],
     }
 
 
