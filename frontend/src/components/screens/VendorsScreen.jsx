@@ -2,7 +2,8 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { DropdownButton, useAppStore } from "../../globals";
+import { Icon, LeadHeat, useAppStore } from "../../globals";
+import { Button, Menu, StatusPill, EmptyState, ScreenHeader } from "../ui";
 // ============ VENDORS ============
 export default function VendorsScreen({ data, openModal }) {
   const ctx = useAppStore();
@@ -27,9 +28,9 @@ export default function VendorsScreen({ data, openModal }) {
     toast(
       v.name +
         (v.preferred
-          ? " \u00B7 " +
+          ? " · " +
             (__t("vendor.unmarkedPreferred") || "unmarked preferred")
-          : " \u00B7 " + (__t("vendor.markedPreferred") || "marked preferred")),
+          : " · " + (__t("vendor.markedPreferred") || "marked preferred")),
       { kind: "success" },
     );
   };
@@ -49,134 +50,147 @@ export default function VendorsScreen({ data, openModal }) {
     );
   };
 
+  // Risk / lifecycle -> StatusPill semantic tone (risk labels aren't in the
+  // shared STATUS_TONES map, so resolve explicitly).
+  const riskTone = (r) => (r === "Low" ? "success" : r === "Med" ? "warning" : "danger");
+
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("vendor.title") || "Vendors"}</h1>
-          <div className="sub">
-            {vendors.length} {__t("vendor.vendors") || "vendors"} \u00B7{" "}
+      <ScreenHeader
+        title={__t("vendor.title") || "Vendors"}
+        description={
+          <>
+            {vendors.length} {__t("vendor.vendors") || "vendors"} ·{" "}
             {new Set(vendors.map((v) => v.country)).size}{" "}
-            {__t("dashboard.countries") || "countries"} \u00B7{" "}
+            {__t("dashboard.countries") || "countries"} ·{" "}
             {vendors.filter((v) => v.preferred).length}{" "}
             {__t("vendor.preferred") || "preferred"}
-          </div>
-        </div>
-        <div className="flex gap-8">
-          <div className="search w-220 h-32">
-            <Icon.Search size={12} />
-            <input
-              id="vendor-search"
-              name="vendorSearch"
-              value={vSearch}
-              onChange={(e) => setVSearch(e.target.value)}
-              placeholder={
-                __t("vendor.filterPlaceholder") || "Filter vendors\u2026"
+          </>
+        }
+        actions={
+          <div className="flex gap-8">
+            <div className="search w-220 h-32">
+              <Icon.Search size={12} />
+              <input
+                id="vendor-search"
+                name="vendorSearch"
+                value={vSearch}
+                onChange={(e) => setVSearch(e.target.value)}
+                placeholder={
+                  __t("vendor.filterPlaceholder") || "Filter vendors…"
+                }
+                aria-label={__t("vendor.filterVendors") || "Filter vendors"}
+              />
+            </div>
+            <Menu
+              ariaLabel={__t("common.risk") || "Risk"}
+              trigger={
+                <Button variant="secondary" size="sm">
+                  <Icon.Filter size={12} /> {__t("common.risk") || "Risk"}:{" "}
+                  {riskFilter} <Icon.ChevronDown size={10} />
+                </Button>
               }
-              aria-label={__t("vendor.filterVendors") || "Filter vendors"}
+              items={["All", "Low", "Med", "High"].map((r) => ({
+                icon:
+                  r === riskFilter ? (
+                    <Icon.Check size={11} />
+                  ) : (
+                    <span className="w-11" />
+                  ),
+                label:
+                  r === "All"
+                    ? __t("vendor.allRisks") || "All risks"
+                    : r + " " + (__t("common.risk") || "risk"),
+                onSelect: () => setRiskFilter(r),
+              }))}
+            />
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => openModal("new-vendor")}
+            >
+              <Icon.Plus size={12} /> {__t("vendor.newVendor") || "New vendor"}
+            </Button>
+            <Menu
+              ariaLabel={__t("common.moreOptions") || "More options"}
+              trigger={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  iconOnly
+                  aria-label={__t("common.moreOptions") || "More options"}
+                >
+                  <Icon.Dots size={12} />
+                </Button>
+              }
+              items={[
+                {
+                  icon: <Icon.Import size={11} />,
+                  label: __t("common.bulkImportCsv") || "Bulk import (CSV)",
+                  onSelect: () =>
+                    (ctx?.openModal || (() => {}))("bulk-vendor-import"),
+                },
+                {
+                  icon: <Icon.Export size={11} />,
+                  label: __t("common.exportAll") || "Export all",
+                  onSelect: () =>
+                    toast(__t("vendor.exported") || "Exported vendors.csv", {
+                      kind: "success",
+                    }),
+                },
+              ]}
             />
           </div>
-          <DropdownButton
-            width={180}
-            trigger={
-              <button className="btn">
-                <Icon.Filter size={12} /> {__t("common.risk") || "Risk"}:{" "}
-                {riskFilter} <Icon.ChevronDown size={10} />
-              </button>
-            }
-            items={["All", "Low", "Med", "High"].map((r) => ({
-              icon:
-                r === riskFilter ? (
-                  <Icon.Check size={11} />
-                ) : (
-                  <span className="w-11" />
-                ),
-              label:
-                r === "All"
-                  ? __t("vendor.allRisks") || "All risks"
-                  : r + " " + (__t("common.risk") || "risk"),
-              onClick: () => setRiskFilter(r),
-            }))}
-          />
-          <button
-            className="btn primary"
-            onClick={() => openModal("new-vendor")}
-          >
-            <Icon.Plus size={12} /> {__t("vendor.newVendor") || "New vendor"}
-          </button>
-          <DropdownButton
-            width={200}
-            trigger={
-              <button
-                className="icon-btn"
-                style={{ width: 30, height: 30, marginLeft: -4 }}
-                aria-label={__t("common.moreOptions") || "More options"}
-              >
-                <Icon.Dots size={12} />
-              </button>
-            }
-            items={[
-              {
-                icon: <Icon.Import size={11} />,
-                label: __t("common.bulkImportCsv") || "Bulk import (CSV)",
-                onClick: () =>
-                  (ctx?.openModal || (() => {}))("bulk-vendor-import"),
-              },
-              {
-                icon: <Icon.Export size={11} />,
-                label: __t("common.exportAll") || "Export all",
-                onClick: () =>
-                  toast(__t("vendor.exported") || "Exported vendors.csv", {
-                    kind: "success",
-                  }),
-              },
-            ]}
-          />
-        </div>
-      </div>
+        }
+      />
 
-      <div className="card overflow-vis">
+      <div className="card overflow-vis" data-density="dense">
         <table className="bom-table table-auto">
           <thead>
             <tr>
-              <th className="pl-16">{__t("vendor.name") || "Vendor"}</th>
-              <th>{__t("vendor.country") || "Country"}</th>
-              <th>{__t("vendor.terms") || "Terms"}</th>
-              <th>{__t("vendor.rating") || "Rating"}</th>
-              <th>{__t("vendor.leadDays") || "Lead"}</th>
-              <th className="num">{__t("vendor.moq") || "MOQ"}</th>
-              <th className="num">{__t("vendor.partsCount") || "Parts"}</th>
-              <th>{__t("vendor.risk") || "Risk"}</th>
-              <th>{__t("common.status") || "Status"}</th>
-              <th></th>
+              <th className="pl-16" scope="col">{__t("vendor.name") || "Vendor"}</th>
+              <th scope="col">{__t("vendor.country") || "Country"}</th>
+              <th scope="col">{__t("vendor.terms") || "Terms"}</th>
+              <th scope="col">{__t("vendor.rating") || "Rating"}</th>
+              <th scope="col">{__t("vendor.leadDays") || "Lead"}</th>
+              <th className="num" scope="col">{__t("vendor.moq") || "MOQ"}</th>
+              <th className="num" scope="col">{__t("vendor.partsCount") || "Parts"}</th>
+              <th scope="col">{__t("vendor.risk") || "Risk"}</th>
+              <th scope="col">{__t("common.status") || "Status"}</th>
+              <th scope="col">
+                <span className="sr-only">{__t("common.actions") || "Actions"}</span>
+              </th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={10} className="text-center p-0">
-                  <div className="empty-state">
-                    <div className="fg-3 fs-13 mb-8">
-                      {vSearch || riskFilter !== "All"
+                <td colSpan={10} className="p-0">
+                  <EmptyState
+                    title={
+                      vSearch || riskFilter !== "All"
                         ? __t("vendor.noMatchFilter") ||
                           "No vendors match your filters"
-                        : __t("vendor.noVendorsYet") || "No vendors yet"}
-                    </div>
-                    {!vSearch && riskFilter === "All" && (
-                      <button
-                        className="btn small mt-8"
-                        onClick={() =>
-                          (ctx || { openModal }).openModal?.(
-                            "vendor-detail",
-                            null,
-                          )
-                        }
-                      >
-                        <Icon.Plus size={11} />{" "}
-                        {__t("vendor.addFirstVendor") || "Add first vendor"}
-                      </button>
-                    )}
-                  </div>
+                        : __t("vendor.noVendorsYet") || "No vendors yet"
+                    }
+                    actions={
+                      !vSearch && riskFilter === "All" ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() =>
+                            (ctx || { openModal }).openModal?.(
+                              "vendor-detail",
+                              null,
+                            )
+                          }
+                        >
+                          <Icon.Plus size={11} />{" "}
+                          {__t("vendor.addFirstVendor") || "Add first vendor"}
+                        </Button>
+                      ) : null
+                    }
+                  />
                 </td>
               </tr>
             ) : (
@@ -195,7 +209,7 @@ export default function VendorsScreen({ data, openModal }) {
                         style={{
                           width: 22,
                           height: 22,
-                          borderRadius: 4,
+                          borderRadius: "var(--radius-sm, 4px)",
                           background: "var(--bg-sunk)",
                           border: "1px solid var(--line)",
                           display: "inline-flex",
@@ -206,6 +220,7 @@ export default function VendorsScreen({ data, openModal }) {
                           fontWeight: 600,
                           color: "var(--fg-2)",
                         }}
+                        aria-hidden="true"
                       >
                         {v.name
                           .split(" ")
@@ -233,55 +248,45 @@ export default function VendorsScreen({ data, openModal }) {
                   <td className="num">{v.moq}</td>
                   <td className="num">{v.parts}</td>
                   <td>
-                    <span
-                      className={
-                        "status " +
-                        (v.risk === "Low"
-                          ? "released"
-                          : v.risk === "Med"
-                            ? "review"
-                            : "deprecated")
-                      }
-                    >
-                      {v.risk}
-                    </span>
+                    <StatusPill tone={riskTone(v.risk)} label={v.risk} />
                   </td>
                   <td>
-                    <span
-                      className={
-                        "status " +
-                        (v.active === false ? "deprecated" : "released")
+                    <StatusPill
+                      tone={v.active === false ? "danger" : "success"}
+                      label={
+                        v.active === false
+                          ? __t("vendor.inactive") || "Inactive"
+                          : __t("vendor.active") || "Active"
                       }
-                    >
-                      {v.active === false
-                        ? __t("vendor.inactive") || "Inactive"
-                        : __t("vendor.active") || "Active"}
-                    </span>
+                    />
                   </td>
                   <td onClick={(e) => e.stopPropagation()}>
-                    <DropdownButton
-                      width={200}
+                    <Menu
+                      ariaLabel={__t("common.moreOptions") || "More options"}
+                      align="right"
                       trigger={
-                        <button
-                          className="icon-btn w-22 h-22"
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          iconOnly
                           aria-label={
                             __t("common.moreOptions") || "More options"
                           }
                         >
                           <Icon.Dots size={12} />
-                        </button>
+                        </Button>
                       }
                       items={[
                         {
                           icon: <Icon.Chevron size={11} />,
                           label: __t("vendor.openVendor") || "Open vendor",
-                          onClick: () =>
+                          onSelect: () =>
                             (ctx?.openModal || openModal)?.("vendor-detail", v),
                         },
                         {
                           icon: <Icon.Cart size={11} />,
                           label: __t("bom.sendRfq") || "Send RFQ",
-                          onClick: () =>
+                          onSelect: () =>
                             (ctx?.openModal || openModal)?.("send-rfq", {
                               pn: "RFQ-" + v.id.toUpperCase(),
                               name: "Multi-part RFQ",
@@ -294,7 +299,7 @@ export default function VendorsScreen({ data, openModal }) {
                         {
                           icon: <Icon.Doc size={11} />,
                           label: __t("vendor.quoteHistory") || "Quote history",
-                          onClick: () =>
+                          onSelect: () =>
                             (ctx?.openModal || openModal)?.("quote-history", v),
                         },
                         "divider",
@@ -304,7 +309,7 @@ export default function VendorsScreen({ data, openModal }) {
                             ? __t("vendor.unmarkPreferred") ||
                               "Unmark preferred"
                             : __t("vendor.markPreferred") || "Mark preferred",
-                          onClick: () => togglePreferred(v.id),
+                          onSelect: () => togglePreferred(v.id),
                         },
                         {
                           icon:
@@ -318,7 +323,7 @@ export default function VendorsScreen({ data, openModal }) {
                               ? __t("vendor.reactivate") || "Reactivate"
                               : __t("vendor.deactivate") || "Deactivate",
                           danger: v.active !== false,
-                          onClick: () => toggleActive(v.id),
+                          onSelect: () => toggleActive(v.id),
                         },
                       ]}
                     />
