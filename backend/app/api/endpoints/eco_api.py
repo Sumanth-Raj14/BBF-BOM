@@ -14,10 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user
 from app.core.pagination import PageParams, get_page_params, paginate
 from app.core.rbac import require_admin, require_engineering, require_viewer
+from app.core.tenant_context import get_tenant_id
 from app.db.session import get_db
 from app.integrations.events import emit_integration_event
 from app.models.eco import EcoApproval, EcoHeader, EcoNotification
 from app.models.user import User
+from app.services.eco_service import (
+    ECO_ALLOWED_TRANSITIONS,
+)
 from app.services.eco_service import (
     add_eco_item as service_add_item,
 )
@@ -171,18 +175,51 @@ async def approve_eco(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    result = await db.execute(select(EcoHeader).where(EcoHeader.id == eco_id))
+    # R8 guardrail: approver-identity check — approver_id must be the acting,
+    # authenticated user. Previously any admin could record an approval under
+    # an arbitrary approver_id with no verification at all.
+    if approver_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="approver_id must match the authenticated acting user",
+        )
+    tid = get_tenant_id()
+    eco_stmt = select(EcoHeader).where(EcoHeader.id == eco_id)
+    if tid is not None:
+        eco_stmt = eco_stmt.where(EcoHeader.tenantId == tid)
+    result = await db.execute(eco_stmt)
     eco = result.scalar_one_or_none()
     if not eco:
         raise HTTPException(status_code=404, detail="ECO not found")
+    # R8 guardrail: reject illegal source-state transitions.
+    allowed_source = ECO_ALLOWED_TRANSITIONS["approve"]
+    if eco.status not in allowed_source:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot approve ECO in status '{eco.status}'. "
+                f"ECO must be in one of: {sorted(allowed_source)}"
+            ),
+        )
+    # R8 guardrail: forbid self-approval.
+    if eco.requested_by == current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="ECO creator/requester cannot approve their own ECO",
+        )
+    count_result = await db.execute(
+        select(func.count()).select_from(EcoApproval).where(EcoApproval.eco_id == eco_id)
+    )
+    next_order = (count_result.scalar() or 0) + 1
     approval = EcoApproval(
         eco_id=eco_id,
         approver_id=approver_id,
-        approval_order=1,
+        approval_order=next_order,
         status="approved",
         comments=comments,
         signed_at=datetime.now(UTC),
         digital_signature=digital_signature,
+        tenantId=tid,
     )
     db.add(approval)
     eco.status = "approved"
