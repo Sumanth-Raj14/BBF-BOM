@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
 )
@@ -61,7 +62,7 @@ class BomVariantItem(Base, TenantAwareMixin):
     part_id = Column(
         Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    quantity = Column(Integer, nullable=False, default=1)
+    quantity = Column(Numeric(10, 4), nullable=False, default=1)
     substitute_part_id = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), index=True)
     is_optional = Column(Boolean, default=False)
     condition_expression = Column(Text)  # Expression to evaluate when to include

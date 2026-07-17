@@ -190,18 +190,24 @@ def _compute_levels_and_effective_qty(
             return
         item = id_map[item_id]
         parent_id = item.parent_item_id
+        # quantity is a Numeric(10,4) column (Decimal at the ORM layer) so it
+        # can hold fractional line quantities; cast to float here so the
+        # effective-qty map stays plain float as declared, matching the
+        # float-based cost arithmetic in get_cost_rollup/get_quantity_rollup
+        # below (mixing float and Decimal raises TypeError).
+        qty = float(item.quantity or 0)
         if parent_id is None or parent_id not in id_map or item_id in visiting:
             # Root item, or parent isn't part of this BOM's item set (shouldn't
             # happen for well-formed data), or a cycle — treat as a root so we
             # never recurse forever.
             levels[item_id] = 1
-            effective[item_id] = item.quantity or 0
+            effective[item_id] = qty
             return
         visiting.add(item_id)
         resolve(parent_id, visiting)
         visiting.discard(item_id)
         levels[item_id] = levels[parent_id] + 1
-        effective[item_id] = (item.quantity or 0) * effective[parent_id]
+        effective[item_id] = qty * effective[parent_id]
 
     for item in items:
         resolve(item.id, set())

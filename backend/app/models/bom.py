@@ -56,7 +56,7 @@ class BOMItem(Base, TenantAwareMixin):
     id = Column(Integer, primary_key=True)
     bom_id = Column(Integer, ForeignKey("boms.id", ondelete="CASCADE"), nullable=False, index=True)
     part_id = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), index=True)
-    quantity = Column(Integer, default=1)
+    quantity = Column(Numeric(10, 4), default=1)
     unit = Column(String, default="EA")
     reference_designator = Column(String)
     sort_order = Column(Integer, default=0)

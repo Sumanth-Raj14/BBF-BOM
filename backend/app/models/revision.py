@@ -84,7 +84,7 @@ class RevisionBomSnapshotItem(Base, TenantAwareMixin):
     part_id = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), index=True)
     part_number = Column(String(255))
     part_name = Column(String(255))
-    quantity = Column(Integer, default=1)
+    quantity = Column(Numeric(10, 4), default=1)
     reference_designator = Column(String(255))
     unit_cost = Column(Numeric(12, 4))
     extended_cost = Column(Numeric(12, 4))
