@@ -15,6 +15,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
@@ -28,12 +29,14 @@ class Currency(Base, TenantAwareMixin):
     __tablename__ = "currencies"
 
     id = Column(Integer, primary_key=True)
-    code = Column(String(3), unique=True, nullable=False)
+    code = Column(String(3), nullable=False)  # unique per tenant
     name = Column(String(100), nullable=False)
     symbol = Column(String(10))
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("tenantId", "code", name="uq_currencies_tenant_code"),)
 
     def __repr__(self):
         return f"<Currency {self.id}>"
@@ -61,7 +64,7 @@ class ComplianceCertificate(Base, TenantAwareMixin):
     __tablename__ = "compliance_certificates"
 
     id = Column(Integer, primary_key=True)
-    certificate_number = Column(String(100), unique=True, nullable=False)
+    certificate_number = Column(String(100), nullable=False)  # unique per tenant
     part_id = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), index=True)
     compliance_type = Column(String(100), nullable=False)
     issuing_body = Column(String(255))
@@ -70,6 +73,11 @@ class ComplianceCertificate(Base, TenantAwareMixin):
     status = Column(String(50), default="active")
     __table_args__ = (
         Index("idx_compliance_certificates_tenant_status", "tenantId", "status"),
+        UniqueConstraint(
+            "tenantId",
+            "certificate_number",
+            name="uq_compliance_certificates_tenant_certificate_number",
+        ),
         CheckConstraint(
             "status IN ('active', 'expired', 'revoked')", name="ck_compliance_certificates_status"
         ),

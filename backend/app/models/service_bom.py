@@ -14,6 +14,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -26,7 +27,7 @@ class ServiceBomHeader(Base, TenantAwareMixin):
     __tablename__ = "service_bom_headers"
 
     id = Column(Integer, primary_key=True)
-    bom_number = Column(String(50), unique=True, nullable=False)
+    bom_number = Column(String(50), nullable=False)  # unique per tenant
     name = Column(String(255), nullable=False)
     description = Column(Text)
     parent_product_pn = Column(String(100))
@@ -35,6 +36,9 @@ class ServiceBomHeader(Base, TenantAwareMixin):
     created_by = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     __table_args__ = (
         Index("idx_service_bom_headers_tenant_status", "tenantId", "status"),
+        UniqueConstraint(
+            "tenantId", "bom_number", name="uq_service_bom_headers_tenant_bom_number"
+        ),
         CheckConstraint(
             "status IN ('draft', 'active', 'archived')", name="ck_service_bom_headers_status"
         ),

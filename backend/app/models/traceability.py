@@ -8,6 +8,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -20,7 +21,7 @@ class SerialNumber(Base, TenantAwareMixin):
     __tablename__ = "serial_numbers"
 
     id = Column(Integer, primary_key=True)
-    serialNumber = Column(String, unique=True, nullable=False)
+    serialNumber = Column(String, nullable=False)  # unique per tenant
     partId = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True)
     lotBatchNumber = Column(String, index=True)
     poId = Column(
@@ -34,6 +35,7 @@ class SerialNumber(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_serial_numbers_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "serialNumber", name="uq_serial_numbers_tenant_serialNumber"),
         CheckConstraint(
             "status IN ('In Stock', 'Installed', 'Consumed', 'Scrapped', 'Quarantine')",
             name="ck_serial_numbers_status",
@@ -95,7 +97,7 @@ class LotBatch(Base, TenantAwareMixin):
     __tablename__ = "lot_batches"
 
     id = Column(Integer, primary_key=True)
-    lotBatchNumber = Column(String, unique=True, nullable=False)
+    lotBatchNumber = Column(String, nullable=False)  # unique per tenant
     partId = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True)
     vendorId = Column(
         Integer, ForeignKey("vendors.id", ondelete="CASCADE"), nullable=True, index=True
@@ -126,6 +128,9 @@ class LotBatch(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_lot_batches_tenant_status", "tenantId", "status"),
+        UniqueConstraint(
+            "tenantId", "lotBatchNumber", name="uq_lot_batches_tenant_lotBatchNumber"
+        ),
         CheckConstraint(
             "status IN ('Received', 'Inspected', 'Accepted', 'Rejected', 'Quarantine', 'Depleted')",
             name="ck_lot_batches_status",

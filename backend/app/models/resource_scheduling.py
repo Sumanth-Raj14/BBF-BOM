@@ -14,6 +14,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -26,7 +27,7 @@ class WorkCenter(Base, TenantAwareMixin):
     __tablename__ = "work_centers"
 
     id = Column(Integer, primary_key=True)
-    code = Column(String(50), unique=True, nullable=False)
+    code = Column(String(50), nullable=False)  # unique per tenant
     name = Column(String(255), nullable=False)
     description = Column(Text)
     capacity_per_hour = Column(Numeric(10, 4))
@@ -39,6 +40,8 @@ class WorkCenter(Base, TenantAwareMixin):
     location = Column(String(255))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("tenantId", "code", name="uq_work_centers_tenant_code"),)
 
     def __repr__(self):
         return f"<WorkCenter {self.id}>"

@@ -15,6 +15,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -27,7 +28,7 @@ class RoutingTable(Base, TenantAwareMixin):
     __tablename__ = "routing_tables"
 
     id = Column(Integer, primary_key=True)
-    routing_number = Column(String(50), unique=True, nullable=False)
+    routing_number = Column(String(50), nullable=False)  # unique per tenant
     name = Column(String(255), nullable=False)
     description = Column(Text)
     part_id = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), index=True)
@@ -35,6 +36,7 @@ class RoutingTable(Base, TenantAwareMixin):
     status = Column(String(50), default="draft")
     __table_args__ = (
         Index("idx_routing_tables_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "routing_number", name="uq_routing_tables_tenant_routing_number"),
         CheckConstraint(
             "status IN ('draft', 'active', 'archived')", name="ck_routing_tables_status"
         ),
@@ -88,7 +90,7 @@ class ProcessPlan(Base, TenantAwareMixin):
     __tablename__ = "process_plans"
 
     id = Column(Integer, primary_key=True)
-    plan_number = Column(String(50), unique=True, nullable=False)
+    plan_number = Column(String(50), nullable=False)  # unique per tenant
     name = Column(String(255), nullable=False)
     description = Column(Text)
     part_family = Column(String(100))
@@ -96,6 +98,7 @@ class ProcessPlan(Base, TenantAwareMixin):
     status = Column(String(50), default="draft")
     __table_args__ = (
         Index("idx_process_plans_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "plan_number", name="uq_process_plans_tenant_plan_number"),
         CheckConstraint(
             "status IN ('draft', 'active', 'archived')", name="ck_process_plans_status"
         ),

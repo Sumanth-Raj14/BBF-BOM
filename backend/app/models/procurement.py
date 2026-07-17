@@ -10,6 +10,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -40,7 +41,7 @@ class PurchaseOrder(Base, TenantAwareMixin):
     __tablename__ = "purchase_orders"
 
     id = Column(Integer, primary_key=True)
-    poNumber = Column(String, unique=True, index=True, nullable=False)  # PO-2026-0001
+    poNumber = Column(String, index=True, nullable=False)  # PO-2026-0001 (unique per tenant)
     partId = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True)
     vendorId = Column(
         Integer, ForeignKey("vendors.id", ondelete="CASCADE"), nullable=False, index=True
@@ -73,6 +74,7 @@ class PurchaseOrder(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_purchase_orders_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "poNumber", name="uq_purchase_orders_tenant_poNumber"),
         CheckConstraint(
             "status IN ('Not Ordered', 'RFQ Sent', 'Under Review', 'Ordered', 'In Transit', 'Received', 'Quality Check', 'Approved', 'Rejected', 'Closed')",
             name="ck_purchase_orders_status",

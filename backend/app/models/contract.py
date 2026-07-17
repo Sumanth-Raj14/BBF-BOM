@@ -10,6 +10,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -22,7 +23,7 @@ class Contract(Base, TenantAwareMixin):
     __tablename__ = "contracts"
 
     id = Column(Integer, primary_key=True)
-    contractNumber = Column(String, unique=True, nullable=False)  # CTR-2026-001
+    contractNumber = Column(String, nullable=False)  # CTR-2026-001 (unique per tenant)
     title = Column(String, nullable=False)
     vendorId = Column(
         Integer, ForeignKey("vendors.id", ondelete="CASCADE"), nullable=False, index=True
@@ -74,6 +75,7 @@ class Contract(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_contracts_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "contractNumber", name="uq_contracts_tenant_contractNumber"),
         CheckConstraint(
             "status IN ('Draft', 'Active', 'Suspended', 'Expired', 'Terminated')",
             name="ck_contracts_status",

@@ -29,12 +29,16 @@ class Warehouse(Base, TenantAwareMixin):
     __tablename__ = "warehouses"
 
     id = Column(Integer, primary_key=True)
-    warehouse_code = Column(String(50), unique=True, nullable=False)
+    warehouse_code = Column(String(50), nullable=False)  # unique per tenant
     warehouse_name = Column(String(255), nullable=False)
     address = Column(Text)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("tenantId", "warehouse_code", name="uq_warehouses_tenant_warehouse_code"),
+    )
 
     # Relationships
     bin_locations = relationship("BinLocation", back_populates="warehouse")
@@ -137,7 +141,7 @@ class InventoryTransaction(Base, TenantAwareMixin):
     }
 
     id = Column(Integer, primary_key=True)
-    transaction_number = Column(String(50), unique=True, nullable=False)
+    transaction_number = Column(String(50), nullable=False)  # unique per tenant
     part_id = Column(
         Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -157,6 +161,9 @@ class InventoryTransaction(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_inv_txn_reference", "reference_type", "reference_id"),
+        UniqueConstraint(
+            "tenantId", "transaction_number", name="uq_inventory_transactions_tenant_transaction_number"
+        ),
         CheckConstraint(
             "transaction_type IN ('receipt', 'issue', 'transfer', 'adjustment', 'return')",
             name="ck_inv_txn_transaction_type",

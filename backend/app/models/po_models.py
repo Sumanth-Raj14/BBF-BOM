@@ -8,6 +8,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -22,7 +23,7 @@ class POHeader(Base, TenantAwareMixin):
     __tablename__ = "po_headers"
 
     id = Column(Integer, primary_key=True)
-    poNumber = Column(String, unique=True, index=True, nullable=False)
+    poNumber = Column(String, index=True, nullable=False)  # unique per tenant
     poDate = Column(String)
     vendorName = Column(String, nullable=False)
     project = Column(String)
@@ -48,6 +49,7 @@ class POHeader(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_po_headers_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "poNumber", name="uq_po_headers_tenant_poNumber"),
         CheckConstraint(
             "status IN ('draft', 'submitted', 'approved', 'received', 'closed', 'cancelled', 'Not Ordered', 'RFQ Sent', 'Under Review', 'Ordered', 'In Transit', 'Quality Check', 'Rejected', 'Open')",
             name="ck_po_headers_status",

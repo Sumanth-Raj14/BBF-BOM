@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -56,7 +57,7 @@ class LifecycleDefinition(Base, TenantAwareMixin):
     __tablename__ = "lifecycle_definitions"
 
     id = Column(Integer, primary_key=True)
-    lifecycle_name = Column(String(100), unique=True, nullable=False)
+    lifecycle_name = Column(String(100), nullable=False)  # unique per tenant
     states = Column(JSON, nullable=False)  # List of states
 
     def __repr__(self):
@@ -65,3 +66,9 @@ class LifecycleDefinition(Base, TenantAwareMixin):
     transitions = Column(JSON, nullable=False)  # Allowed transitions
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenantId", "lifecycle_name", name="uq_lifecycle_definitions_tenant_lifecycle_name"
+        ),
+    )

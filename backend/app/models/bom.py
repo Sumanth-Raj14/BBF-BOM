@@ -10,6 +10,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -22,7 +23,7 @@ class BOM(Base, TenantAwareMixin):
     __tablename__ = "boms"
 
     id = Column(Integer, primary_key=True)
-    bom_number = Column(String, unique=True, nullable=False)
+    bom_number = Column(String, nullable=False)  # unique per tenant
     name = Column(String, nullable=False)
     description = Column(Text)
     status = Column(String, default="draft")
@@ -43,6 +44,7 @@ class BOM(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_boms_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "bom_number", name="uq_boms_tenant_bom_number"),
         CheckConstraint("status IN ('draft', 'active', 'archived')", name="ck_boms_status"),
     )
 

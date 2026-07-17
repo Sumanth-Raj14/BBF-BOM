@@ -16,6 +16,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -28,7 +29,7 @@ class WorkOrder(Base, TenantAwareMixin):
     __tablename__ = "work_orders"
 
     id = Column(Integer, primary_key=True)
-    wo_number = Column(String(50), unique=True, nullable=False, index=True)
+    wo_number = Column(String(50), nullable=False, index=True)  # unique per tenant
     mbom_id = Column(Integer, ForeignKey("mbom_headers.id", ondelete="CASCADE"), index=True)
     sales_order_number = Column(String(50))
     customer_name = Column(String(255))
@@ -63,6 +64,7 @@ class WorkOrder(Base, TenantAwareMixin):
     __table_args__ = (
         Index("idx_work_orders_tenant_status", "tenantId", "status"),
         Index("idx_work_orders_status_due", "status", "due_date"),
+        UniqueConstraint("tenantId", "wo_number", name="uq_work_orders_tenant_wo_number"),
         CheckConstraint(
             "status IN ('draft', 'released', 'in_progress', 'completed', 'closed', "
             "'cancelled', 'on_hold', 'scrapped')",

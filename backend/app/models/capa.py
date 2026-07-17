@@ -8,6 +8,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -20,7 +21,7 @@ class CAPA(Base, TenantAwareMixin):
     __tablename__ = "capas"
 
     id = Column(Integer, primary_key=True)
-    capaNumber = Column(String, unique=True, nullable=False)  # CAPA-2026-001
+    capaNumber = Column(String, nullable=False)  # CAPA-2026-001 (unique per tenant)
     title = Column(String, nullable=False)
     type = Column(String, nullable=False)  # "Corrective", "Preventive"
     source = Column(String)  # "Internal Audit", "Customer Complaint", "NCR", "Supplier"
@@ -67,6 +68,7 @@ class CAPA(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_capas_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "capaNumber", name="uq_capas_tenant_capaNumber"),
         CheckConstraint("type IN ('Corrective', 'Preventive')", name="ck_capas_type"),
         CheckConstraint(
             "source IN ('Internal Audit', 'Customer Complaint', 'NCR', 'Supplier', 'Other')",

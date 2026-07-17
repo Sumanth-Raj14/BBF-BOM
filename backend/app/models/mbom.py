@@ -14,6 +14,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -26,7 +27,7 @@ class MbomHeader(Base, TenantAwareMixin):
     __tablename__ = "mbom_headers"
 
     id = Column(Integer, primary_key=True)
-    mbom_number = Column(String(50), unique=True, nullable=False, index=True)
+    mbom_number = Column(String(50), nullable=False, index=True)  # unique per tenant
     ebom_id = Column(Integer, ForeignKey("boms.id", ondelete="CASCADE"), index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
@@ -39,6 +40,7 @@ class MbomHeader(Base, TenantAwareMixin):
     created_by = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     __table_args__ = (
         Index("idx_mbom_headers_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "mbom_number", name="uq_mbom_headers_tenant_mbom_number"),
         CheckConstraint(
             "status IN ('draft', 'released', 'archived')", name="ck_mbom_headers_status"
         ),
