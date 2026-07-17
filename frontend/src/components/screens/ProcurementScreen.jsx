@@ -1,8 +1,16 @@
 import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
-import { toast } from "../../utils/toast";
-import { DropdownButton, INR, poOrdersAPI } from "../../globals";
+import { Icon, INR, poOrdersAPI } from "../../globals";
+import {
+  Button,
+  Menu,
+  StatusPill,
+  EmptyState,
+  Spinner,
+  ScreenHeader,
+  toast,
+} from "../ui";
 // ============ PROCUREMENT ============
 export default function ProcurementScreen({ data, openModal }) {
   const [poData, setPoData] = React.useState([]);
@@ -120,10 +128,35 @@ export default function ProcurementScreen({ data, openModal }) {
         size={8}
         style={{
           transform: sortDir === "asc" ? "rotate(180deg)" : "none",
-          transition: "transform 0.15s",
+          transition: "transform var(--dur-fast, 0.15s)",
         }}
       />
     );
+
+  // Sortable column header: keyboard-operable button + aria-sort on the <th>.
+  const SortHeader = ({ field, align, children }) => {
+    const active = sortField === field;
+    const ariaSort = active
+      ? sortDir === "asc"
+        ? "ascending"
+        : "descending"
+      : "none";
+    return (
+      <th
+        scope="col"
+        aria-sort={ariaSort}
+        className={align === "num" ? "num" : undefined}
+      >
+        <button
+          type="button"
+          className="ui-table__sort"
+          onClick={() => toggleSort(field)}
+        >
+          {children} <SortIcon field={field} />
+        </button>
+      </th>
+    );
+  };
 
   // Summary stats
   const totalValue = filteredPOs.reduce((s, p) => s + (p.poTotal || 0), 0);
@@ -132,92 +165,98 @@ export default function ProcurementScreen({ data, openModal }) {
     0,
   );
 
-  // Status color
-  const statusColor = (s) => {
+  // Status tone (maps to StatusPill's semantic tones)
+  const statusTone = (s) => {
     const n = normalizeStatus(s);
-    if (n === "Received") return "released";
-    if (n === "Completed") return "released";
-    if (n === "Order Placed") return "approved";
-    if (n === "Cancelled") return "deprecated";
-    if (n === "Advance Paid") return "review";
-    return "draft";
+    if (n === "Received") return "success";
+    if (n === "Completed") return "success";
+    if (n === "Order Placed") return "info";
+    if (n === "Cancelled") return "danger";
+    if (n === "Advance Paid") return "warning";
+    return "neutral";
   };
+
+  const searchLabel = __t("procurement.searchPos") || "Search POs";
 
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("procurement.title") || "Purchase Orders"}</h1>
-          <div className="sub">
-            {loading
-              ? __t("common.loading") || "Loading..."
-              : `${filteredPOs.length} ${__t("procurement.orders") || "orders"} \u00B7 ${totalItems} ${__t("procurement.items") || "items"} \u00B7 ${INR(totalValue, 0)} ${__t("procurement.total") || "total"}`}
-          </div>
-        </div>
-        <div className="flex gap-8">
-          <div className="search w-220 h-32">
-            <Icon.Search size={12} />
-            <input
-              id="po-search"
-              name="poSearch"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={
-                __t("procurement.searchPlaceholder") || "Search POs..."
+      <ScreenHeader
+        title={__t("procurement.title") || "Purchase Orders"}
+        description={
+          loading
+            ? __t("common.loading") || "Loading..."
+            : `${filteredPOs.length} ${__t("procurement.orders") || "orders"} · ${totalItems} ${__t("procurement.items") || "items"} · ${INR(totalValue, 0)} ${__t("procurement.total") || "total"}`
+        }
+        actions={
+          <div className="flex gap-8">
+            <div className="search w-220 h-32">
+              <Icon.Search size={12} />
+              <input
+                id="po-search"
+                name="poSearch"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={
+                  __t("procurement.searchPlaceholder") || "Search POs..."
+                }
+                aria-label={searchLabel}
+              />
+            </div>
+            <Menu
+              ariaLabel={__t("common.status") || "Status"}
+              trigger={
+                <Button variant="secondary" size="sm">
+                  <Icon.Filter size={12} /> {__t("common.status") || "Status"}:{" "}
+                  {statusFilter} <Icon.ChevronDown size={10} />
+                </Button>
               }
-              aria-label={__t("procurement.searchPos") || "Search POs"}
+              items={statuses.map((s) => ({
+                icon:
+                  statusFilter === s ? (
+                    <Icon.Check size={11} />
+                  ) : (
+                    <span className="w-11" />
+                  ),
+                label: s,
+                onSelect: () => setStatusFilter(s),
+              }))}
             />
+            <Menu
+              ariaLabel={__t("procurement.project") || "Project"}
+              trigger={
+                <Button variant="secondary" size="sm">
+                  <Icon.Folder size={12} />{" "}
+                  {__t("procurement.project") || "Project"}:{" "}
+                  {projectFilter === "All"
+                    ? __t("common.all") || "All"
+                    : projectFilter.slice(0, 20)}{" "}
+                  <Icon.ChevronDown size={10} />
+                </Button>
+              }
+              items={projects.map((p) => ({
+                icon:
+                  projectFilter === p ? (
+                    <Icon.Check size={11} />
+                  ) : (
+                    <span className="w-11" />
+                  ),
+                label:
+                  p === "All"
+                    ? __t("procurement.allProjects") || "All projects"
+                    : p,
+                onSelect: () => setProjectFilter(p),
+              }))}
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => openModal("import-rfqs")}
+            >
+              <Icon.Import size={12} /> {__t("common.import") || "Import"}
+            </Button>
           </div>
-          <DropdownButton
-            width={180}
-            trigger={
-              <button className="btn">
-                <Icon.Filter size={12} /> {__t("common.status") || "Status"}:{" "}
-                {statusFilter} <Icon.ChevronDown size={10} />
-              </button>
-            }
-            items={statuses.map((s) => ({
-              icon:
-                statusFilter === s ? (
-                  <Icon.Check size={11} />
-                ) : (
-                  <span className="w-11" />
-                ),
-              label: s,
-              onClick: () => setStatusFilter(s),
-            }))}
-          />
-          <DropdownButton
-            width={200}
-            trigger={
-              <button className="btn">
-                <Icon.Folder size={12} />{" "}
-                {__t("procurement.project") || "Project"}:{" "}
-                {projectFilter === "All"
-                  ? __t("common.all") || "All"
-                  : projectFilter.slice(0, 20)}{" "}
-                <Icon.ChevronDown size={10} />
-              </button>
-            }
-            items={projects.map((p) => ({
-              icon:
-                projectFilter === p ? (
-                  <Icon.Check size={11} />
-                ) : (
-                  <span className="w-11" />
-                ),
-              label:
-                p === "All"
-                  ? __t("procurement.allProjects") || "All projects"
-                  : p,
-              onClick: () => setProjectFilter(p),
-            }))}
-          />
-          <button className="btn" onClick={() => openModal("import-rfqs")}>
-            <Icon.Import size={12} /> {__t("common.import") || "Import"}
-          </button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Summary KPIs */}
       {stats && (
@@ -228,7 +267,12 @@ export default function ProcurementScreen({ data, openModal }) {
             </div>
             <div className="v">{stats.totalPOs}</div>
           </div>
-          <div className="kpi l v fg-accent">{INR(stats.totalValue, 0)}</div>
+          <div className="kpi">
+            <div className="l">
+              {__t("procurement.totalValue") || "Total Value"}
+            </div>
+            <div className="v fg-accent">{INR(stats.totalValue, 0)}</div>
+          </div>
           <div className="kpi">
             <div className="l">
               {__t("procurement.totalLineItems") || "Total Line Items"}
@@ -245,69 +289,60 @@ export default function ProcurementScreen({ data, openModal }) {
       )}
 
       {/* PO Table with Expandable Rows */}
-      <div className="card overflow-vis">
+      <div className="card overflow-vis" data-density="dense">
         <table className="bom-table table-auto">
           <thead>
             <tr>
-              <th style={{ width: 30 }} className="pl-16"></th>
-              <th
-                className="cursor-pointer"
-                onClick={() => toggleSort("poDate")}
-              >
-                {__t("procurement.date") || "Date"} <SortIcon field="poDate" />
+              <th style={{ width: 30 }} className="pl-16">
+                <span className="sr-only">
+                  {__t("common.expand") || "Expand"}
+                </span>
               </th>
-              <th
-                className="cursor-pointer"
-                onClick={() => toggleSort("poNumber")}
-              >
-                {__t("procurement.poNumber") || "PO Number"}{" "}
-                <SortIcon field="poNumber" />
-              </th>
-              <th
-                className="cursor-pointer"
-                onClick={() => toggleSort("vendorName")}
-              >
-                {__t("procurement.vendor") || "Vendor"}{" "}
-                <SortIcon field="vendorName" />
-              </th>
-              <th>{__t("procurement.project") || "Project"}</th>
-              <th>{__t("procurement.items") || "Items"}</th>
-              <th
-                className="num cursor-pointer"
-                onClick={() => toggleSort("poTotal")}
-              >
-                {__t("procurement.poTotal") || "PO Total"}{" "}
-                <SortIcon field="poTotal" />
-              </th>
-              <th>{__t("common.status") || "Status"}</th>
+              <SortHeader field="poDate">
+                {__t("procurement.date") || "Date"}
+              </SortHeader>
+              <SortHeader field="poNumber">
+                {__t("procurement.poNumber") || "PO Number"}
+              </SortHeader>
+              <SortHeader field="vendorName">
+                {__t("procurement.vendor") || "Vendor"}
+              </SortHeader>
+              <th scope="col">{__t("procurement.project") || "Project"}</th>
+              <th scope="col">{__t("procurement.items") || "Items"}</th>
+              <SortHeader field="poTotal" align="num">
+                {__t("procurement.poTotal") || "PO Total"}
+              </SortHeader>
+              <th scope="col">{__t("common.status") || "Status"}</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td
-                  colSpan={8}
-                  style={{ padding: 40 }}
-                  className="text-center spinner"
-                >
-                  {__t("procurement.loadingOrders") ||
-                    "Loading purchase orders..."}
+                <td colSpan={8} style={{ padding: "var(--sp-7, 40px)" }}>
+                  <div className="flex items-center justify-center gap-8">
+                    <Spinner size="sm" label={__t("procurement.loadingOrders") || "Loading purchase orders..."} />
+                    <span className="fg-3">
+                      {__t("procurement.loadingOrders") ||
+                        "Loading purchase orders..."}
+                    </span>
+                  </div>
                 </td>
               </tr>
             ) : filteredPOs.length === 0 ? (
               <tr>
-                <td
-                  colSpan={8}
-                  style={{ padding: 40 }}
-                  className="text-center fg-3"
-                >
-                  {__t("procurement.noMatchFilter") ||
-                    "No purchase orders match your filters"}
+                <td colSpan={8}>
+                  <EmptyState
+                    title={
+                      __t("procurement.noMatchFilter") ||
+                      "No purchase orders match your filters"
+                    }
+                  />
                 </td>
               </tr>
             ) : (
               filteredPOs.map((po) => {
                 const isExpanded = expandedRow === po.id;
+                const detailId = `po-detail-${po.id}`;
                 return (
                   <React.Fragment key={po.id}>
                     <tr
@@ -320,17 +355,40 @@ export default function ProcurementScreen({ data, openModal }) {
                       className="cursor-pointer"
                     >
                       <td style={{ width: 30 }} className="pl-16">
-                        <span
-                          style={{
-                            transition: "transform 0.15s",
-                            transform: isExpanded ? "rotate(90deg)" : "none",
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          iconOnly
+                          aria-expanded={isExpanded}
+                          aria-controls={detailId}
+                          aria-label={
+                            isExpanded
+                              ? __t("procurement.collapseLineItems") ||
+                                "Collapse line items"
+                              : __t("procurement.expandLineItems") ||
+                                "Expand line items"
+                          }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleExpand(po.id);
                           }}
-                          className="items-center bg-sunk inline-flex justify-center w-18 h-18 br-4"
+                          className="w-18 h-18 br-4 bg-sunk"
                         >
-                          <Icon.Chevron size={10} />
-                        </span>
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              transition: "transform var(--dur-fast, 0.15s)",
+                              transform: isExpanded
+                                ? "rotate(90deg)"
+                                : "none",
+                            }}
+                          >
+                            <Icon.Chevron size={10} />
+                          </span>
+                        </Button>
                       </td>
-                      <td className="mono fs-11">{po.poDate || "\u2014"}</td>
+                      <td className="mono fs-11">{po.poDate || "—"}</td>
                       <td className="mono fw-600 fs-12">{po.poNumber}</td>
                       <td>
                         <div
@@ -352,31 +410,29 @@ export default function ProcurementScreen({ data, openModal }) {
                         {INR(po.poTotal, 0)}
                       </td>
                       <td>
-                        <span
-                          className={
-                            "status fs-9 overflow-h nowrap d-iblock " +
-                            statusColor(po.status)
-                          }
-                          style={{ maxWidth: 160, textOverflow: "ellipsis" }}
+                        <StatusPill
+                          tone={statusTone(po.status)}
+                          label={normalizeStatus(po.status)}
                           title={po.status}
-                        >
-                          {normalizeStatus(po.status)}
-                        </span>
+                          className="overflow-h nowrap"
+                          style={{ maxWidth: 160, textOverflow: "ellipsis" }}
+                        />
                       </td>
                     </tr>
                     {isExpanded && (
-                      <tr>
-                        <td colSpan={8} className="p-0" className="bg-sunk">
+                      <tr id={detailId}>
+                        <td colSpan={8} className="p-0 bg-sunk">
                           <div style={{ padding: "12px 16px 12px 46px" }}>
                             <div className="flex justify-between items-center mb-8">
                               <div className="font-mono fs-10 uppercase letter-sp-6 fg-3">
                                 {__t("procurement.lineItems") || "Line Items"}{" "}
-                                \u00B7 {po.items?.length || 0}{" "}
+                                · {po.items?.length || 0}{" "}
                                 {__t("procurement.items") || "items"}
                               </div>
                               <div className="flex gap-6">
-                                <button
-                                  className="btn small"
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     toast(
@@ -388,9 +444,10 @@ export default function ProcurementScreen({ data, openModal }) {
                                 >
                                   <Icon.Export size={10} />{" "}
                                   {__t("common.export") || "Export"}
-                                </button>
-                                <button
-                                  className="btn small"
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     window.routeSetter
@@ -405,9 +462,10 @@ export default function ProcurementScreen({ data, openModal }) {
                                   <Icon.Cart size={10} />{" "}
                                   {__t("procurement.trackOrder") ||
                                     "Track Order"}
-                                </button>
-                                <button
-                                  className="btn small"
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     toast(
@@ -420,7 +478,7 @@ export default function ProcurementScreen({ data, openModal }) {
                                   <Icon.Chart size={10} />{" "}
                                   {__t("procurement.vendorScorecard") ||
                                     "Vendor scorecard"}
-                                </button>
+                                </Button>
                               </div>
                             </div>
                             {po.items && po.items.length > 0 ? (
@@ -458,6 +516,8 @@ export default function ProcurementScreen({ data, openModal }) {
                                     <tr key={idx}>
                                       <td className="pl-12">
                                         <span
+                                          role="button"
+                                          tabIndex={0}
                                           className="fw-500 fs-11 fg-accent cursor-pointer"
                                           onClick={(e) => {
                                             e.stopPropagation();
@@ -466,10 +526,20 @@ export default function ProcurementScreen({ data, openModal }) {
                                                 item.itemName.slice(0, 40),
                                             );
                                           }}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter" || e.key === " ") {
+                                              e.preventDefault();
+                                              e.stopPropagation();
+                                              toast(
+                                                "Opening component: " +
+                                                  item.itemName.slice(0, 40),
+                                              );
+                                            }
+                                          }}
                                         >
                                           {item.itemName.length > 50
                                             ? item.itemName.slice(0, 50) +
-                                              "\u2026"
+                                              "…"
                                             : item.itemName}
                                         </span>
                                       </td>
@@ -477,7 +547,7 @@ export default function ProcurementScreen({ data, openModal }) {
                                         style={{ textOverflow: "ellipsis" }}
                                         className="fs-10 fg-3 overflow-h nowrap max-w-200"
                                       >
-                                        {item.itemDesc || "\u2014"}
+                                        {item.itemDesc || "—"}
                                       </td>
                                       <td className="num mono fs-11">
                                         {item.quantity}
@@ -538,13 +608,12 @@ export default function ProcurementScreen({ data, openModal }) {
                                 </tfoot>
                               </table>
                             ) : (
-                              <div
-                                style={{ padding: 16 }}
-                                className="text-center fg-3 fs-11"
-                              >
-                                {__t("procurement.noLineItems") ||
-                                  "No line items for this PO"}
-                              </div>
+                              <EmptyState
+                                title={
+                                  __t("procurement.noLineItems") ||
+                                  "No line items for this PO"
+                                }
+                              />
                             )}
                           </div>
                         </td>
