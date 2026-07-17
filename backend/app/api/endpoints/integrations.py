@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user
+from app.core.deps import get_current_superuser, get_current_user
 from app.db.session import get_db
 from app.integrations.crypto import encrypt_secret
 from app.integrations.events import emit_integration_event
@@ -44,7 +44,7 @@ async def list_connections(db: AsyncSession = Depends(get_db), user: User = Depe
 
 @router.put("/{provider}")
 async def upsert_connection(provider: str, body: ConnectionUpsert,
-                            db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+                            db: AsyncSession = Depends(get_db), user: User = Depends(get_current_superuser)):
     if provider not in _PROVIDERS:
         raise HTTPException(422, "unknown provider")
     row = (await db.execute(select(IntegrationConnection).where(
@@ -65,7 +65,7 @@ async def upsert_connection(provider: str, body: ConnectionUpsert,
 
 
 @router.delete("/{provider}")
-async def disconnect(provider: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def disconnect(provider: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_superuser)):
     row = (await db.execute(select(IntegrationConnection).where(
         IntegrationConnection.tenantId == user.tenantId,
         IntegrationConnection.provider == provider))).scalar_one_or_none()
@@ -76,7 +76,7 @@ async def disconnect(provider: str, db: AsyncSession = Depends(get_db), user: Us
 
 
 @router.post("/{provider}/test")
-async def send_test(provider: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def send_test(provider: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_superuser)):
     if provider not in _PROVIDERS:
         raise HTTPException(422, "unknown provider")
     n = await emit_integration_event(db, user.tenantId, "work_order", 0, "test",
