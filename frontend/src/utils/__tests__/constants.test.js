@@ -12,6 +12,9 @@ describe('constants', () => {
 
   it('should have 4 accent presets', () => {
     expect(ACCENT_PRESETS).toHaveLength(4);
-    expect(ACCENT_PRESETS).toContain('#ba4816');
+    // #b8480f is the canonical --accent-strong/--accent-text AA tone — the
+    // stray near-duplicate "#ba4816" was part of the four-contradictory-accent
+    // bug this initiative closed out.
+    expect(ACCENT_PRESETS).toContain('#b8480f');
   });
 });

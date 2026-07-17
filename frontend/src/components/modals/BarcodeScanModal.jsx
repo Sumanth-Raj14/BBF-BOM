@@ -153,7 +153,7 @@ export default function BarcodeScanModal({ open, onClose, onFound }) {
             <button
               className="btn"
               onClick={() => setUseCamera(!useCamera)}
-              style={{ color: useCamera ? "var(--accent)" : "var(--fg-3)" }}
+              style={{ color: useCamera ? "var(--accent-text)" : "var(--fg-3)" }}
             >
               <Icon.Scan size={12} />{" "}
               {useCamera

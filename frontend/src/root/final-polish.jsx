@@ -247,7 +247,7 @@ function RoadmapModal({ open, onClose }) {
     },
     {
       q: __t("roadmap.next") || "Next (Q3 2026)",
-      color: "var(--accent)",
+      color: "var(--accent-text)",
       items: [
         __t("roadmap.nextItem1") || "ERP integration (NetSuite, SAP)",
         __t("roadmap.nextItem2") || "Inventory management v2 (multi-warehouse)",
@@ -809,7 +809,7 @@ window.printPO = function (item, vendor) {
     "</span><strong>INR</strong></div>" +
     "<div class='row'><span>" +
     h(__t("printPo.status") || "Status") +
-    "</span><strong style='color:#e85d1f'>" +
+    "</span><strong style='color:#b8480f'>" +
     h(__t("printPo.issued") || "ISSUED") +
     "</strong></div>" +
     "</div></div>" +

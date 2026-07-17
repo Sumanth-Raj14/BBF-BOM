@@ -489,7 +489,7 @@ function ApprovalsTile({ role }) {
       <div className="flex items-baseline gap-8 mb-10">
         <span
           className="font-mono fs-28 fw-700"
-          style={{ color: my > 0 ? "var(--accent)" : "var(--fg)" }}
+          style={{ color: my > 0 ? "var(--accent-text)" : "var(--fg)" }}
         >
           {my}
         </span>
@@ -505,7 +505,7 @@ function ApprovalsTile({ role }) {
           <span>{r}</span>
           <span
             style={{
-              color: counts[r.toLowerCase()] ? "var(--accent)" : "var(--fg-4)",
+              color: counts[r.toLowerCase()] ? "var(--accent-text)" : "var(--fg-4)",
             }}
           >
             {counts[r.toLowerCase()]}

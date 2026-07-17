@@ -4,6 +4,7 @@ import { StatusPill, Badge, toneForStatus } from "../Badge.jsx";
 import { Modal } from "../Modal.jsx";
 import { Switch } from "../Choice.jsx";
 import { Menu } from "../Menu.jsx";
+import { ScreenHeader, ContentFrame } from "../ScreenHeader.jsx";
 
 describe("Button", () => {
   it("applies variant + size token classes", () => {
@@ -134,5 +135,37 @@ describe("Modal", () => {
       </Modal>,
     );
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("ScreenHeader", () => {
+  it("renders the shared .screen-header/h1/.sub markup plus an actions cluster", () => {
+    render(
+      <ScreenHeader
+        title="Purchase Orders"
+        subtitle="42 orders"
+        actions={<button>New PO</button>}
+      />,
+    );
+    const heading = screen.getByRole("heading", { name: "Purchase Orders" });
+    expect(heading.tagName).toBe("H1");
+    expect(heading.closest(".screen-header")).toBeTruthy();
+    expect(screen.getByText("42 orders")).toHaveClass("sub");
+    expect(
+      screen.getByRole("button", { name: "New PO" }).closest(".screen-header__actions"),
+    ).toBeTruthy();
+  });
+});
+
+describe("ContentFrame", () => {
+  it("applies the centered content-frame class by default", () => {
+    render(<ContentFrame>hi</ContentFrame>);
+    expect(screen.getByText("hi")).toHaveClass("content-frame");
+    expect(screen.getByText("hi")).not.toHaveClass("content-frame--full");
+  });
+
+  it("applies the full-bleed variant when full is set", () => {
+    render(<ContentFrame full>hi</ContentFrame>);
+    expect(screen.getByText("hi")).toHaveClass("content-frame", "content-frame--full");
   });
 });

@@ -15,6 +15,7 @@ export { Tooltip } from "./Tooltip.jsx";
 export { Menu } from "./Menu.jsx";
 export { Breadcrumb, Pagination } from "./Navigation.jsx";
 export { Spinner, Skeleton, EmptyState } from "./Feedback.jsx";
+export { ScreenHeader, ContentFrame } from "./ScreenHeader.jsx";
 
 import { Button } from "./Button.jsx";
 import { Field, Input, Textarea, Select } from "./Field.jsx";
@@ -29,6 +30,7 @@ import { Tooltip } from "./Tooltip.jsx";
 import { Menu } from "./Menu.jsx";
 import { Breadcrumb, Pagination } from "./Navigation.jsx";
 import { Spinner, Skeleton, EmptyState } from "./Feedback.jsx";
+import { ScreenHeader, ContentFrame } from "./ScreenHeader.jsx";
 
 // Bridge for the legacy window.* screens (root/*.jsx) that don't yet use ES
 // imports. Namespaced under window.UI so it never clobbers existing globals
@@ -60,6 +62,8 @@ export const UI = {
   Spinner,
   Skeleton,
   EmptyState,
+  ScreenHeader,
+  ContentFrame,
 };
 
 if (typeof window !== "undefined") {

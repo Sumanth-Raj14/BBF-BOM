@@ -125,7 +125,7 @@ export default function PODetailModal({ open, onClose, item }) {
                     borderRadius: 99,
                     background:
                       i === currentStatusIdx
-                        ? "var(--accent)"
+                        ? "var(--accent-strong)"
                         : i < currentStatusIdx &&
                             allStatuses[currentStatusIdx] !== "Rejected"
                           ? "var(--ok)"
@@ -161,7 +161,7 @@ export default function PODetailModal({ open, onClose, item }) {
                     fontSize: 8,
                     marginTop: 3,
                     color:
-                      i === currentStatusIdx ? "var(--accent)" : "var(--fg-3)",
+                      i === currentStatusIdx ? "var(--accent-text)" : "var(--fg-3)",
                     fontWeight: i === currentStatusIdx ? 700 : 400,
                   }}
                 >

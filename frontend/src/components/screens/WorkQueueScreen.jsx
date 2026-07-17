@@ -9,8 +9,8 @@ import { apiRequest } from "../../../api.js";
 const STATUS_COLORS = {
   open: "var(--fg-3)",
   draft: "var(--fg-3)",
-  released: "var(--accent)",
-  in_progress: "var(--accent)",
+  released: "var(--accent-strong)",
+  in_progress: "var(--accent-strong)",
   pending_verification: "var(--warn)",
   completed: "var(--ok)",
   closed: "var(--ok)",

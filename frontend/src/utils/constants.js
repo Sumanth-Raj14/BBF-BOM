@@ -3,7 +3,9 @@ export const TWEAK_DEFAULTS = {
   "accent": "#e85d1f"
 };
 
-export const ACCENT_PRESETS = ["#e85d1f", "#ba4816", "#0288d1", "#2e7d32"];
+// #b8480f is the canonical --accent-strong/--accent-text AA tone (styles.css)
+// — was the stray near-duplicate "#ba4816" (four-contradictory-accents bug).
+export const ACCENT_PRESETS = ["#e85d1f", "#b8480f", "#0288d1", "#2e7d32"];
 
 export const INITIAL_COMMENTS = {
   "EL-MCU-STM32H7": [

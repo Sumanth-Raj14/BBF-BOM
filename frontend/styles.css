@@ -192,7 +192,8 @@
   --nav-width: 240px;          /* labeled rail (expanded) */
   --nav-width-collapsed: 56px; /* icon-only rail */
   --topbar-height: 44px;
-  
+  --content-max: 1400px;       /* centered reading/card/form frame (UI decision #7) */
+
   /* Elevation scale */
   --shadow-xs: 0 1px 1px rgba(0,0,0,0.04);
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
@@ -901,7 +902,7 @@ a:hover { text-decoration: underline; }
   padding: 2px 6px;
   border-radius: 3px;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   border: 1px solid var(--accent);
 }
 
@@ -1297,7 +1298,7 @@ a:hover { text-decoration: underline; }
   color: var(--fg-2);
   background: var(--bg-elev);
 }
-.cat.assembly { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.cat.assembly { color: var(--accent-text); border-color: var(--accent); background: var(--accent-soft); }
 .cat.electrical { color: oklch(0.50 0.13 240); border-color: oklch(0.80 0.04 240); background: oklch(0.95 0.02 240); }
 .cat.mechanical { color: oklch(0.40 0.06 60); border-color: oklch(0.78 0.04 60); background: oklch(0.94 0.02 60); }
 .cat.hardware { color: oklch(0.50 0.10 145); border-color: oklch(0.78 0.04 145); background: oklch(0.94 0.02 145); }
@@ -1611,7 +1612,7 @@ a:hover { text-decoration: underline; }
   margin-bottom: 4px;
 }
 .deptree .node.parent { border-color: var(--fg-3); }
-.deptree .node.self { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.deptree .node.self { border-color: var(--accent); color: var(--accent-text); background: var(--accent-soft); }
 .deptree .branch {
   margin-left: 18px;
   padding-left: 10px;
@@ -1683,6 +1684,21 @@ a:hover { text-decoration: underline; }
 .empty h3 { margin: 0; font-size: 14px; color: var(--fg-2); }
 .empty p { margin: 0; font-size: 12px; max-width: 360px; }
 
+/* Content frame — centered ~1360-1440px reading/card/form width (UI decision
+   #7); `--full` is the escape hatch for anything inside a framed container
+   that still needs edge-to-edge (BOM/Parts grids use it directly instead —
+   they never opt into `.screen-wrap`/`.content-frame` in the first place). */
+.content-frame,
+.screen-wrap {
+  max-width: var(--content-max);
+  margin-inline: auto;
+  width: 100%;
+}
+.content-frame--full,
+.screen-wrap--full {
+  max-width: none;
+}
+
 /* Secondary screens */
 .screen-wrap {
   flex: 1;
@@ -1693,6 +1709,7 @@ a:hover { text-decoration: underline; }
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  gap: var(--sp-3);
   margin-bottom: 18px;
 }
 .screen-header h1 {
@@ -1713,6 +1730,13 @@ a:hover { text-decoration: underline; }
   font-family: var(--font-brand);
   font-size: 11px;
   color: var(--text-muted);
+}
+.screen-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  flex: none;
 }
 
 /* Cards */
@@ -2232,7 +2256,7 @@ a:hover { text-decoration: underline; }
 .toast .msg { flex: 1; }
 .toast .action {
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-text);
   border: none;
   font-size: 11px;
   font-weight: 600;
@@ -2357,7 +2381,7 @@ a:hover { text-decoration: underline; }
   letter-spacing: 0.06em;
   color: var(--fg-3);
 }
-.field .req { color: var(--accent); }
+.field .req { color: var(--accent-text); }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .field-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
 .input, .select, textarea.input {
@@ -2434,7 +2458,7 @@ textarea.input { height: auto; min-height: 72px; padding: var(--sp-2); resize: v
   font-family: var(--font-mono);
   cursor: pointer;
 }
-.popover-h .act:hover { color: var(--accent); }
+.popover-h .act:hover { color: var(--accent-text); }
 .popover-list {
   max-height: 320px;
   overflow-y: auto;
@@ -2605,7 +2629,7 @@ body.file-dragover::after {
   font-family: var(--font-mono);
   font-size: 18px;
   letter-spacing: 0.06em;
-  color: var(--accent);
+  color: var(--accent-text);
   border: 3px dashed var(--accent);
   pointer-events: none;
 }
@@ -2693,7 +2717,7 @@ body.file-dragover::after {
   width: 100%;
   max-width: 380px;
 }
-.auth-card a { color: var(--accent); cursor: pointer; text-decoration: none; }
+.auth-card a { color: var(--accent-text); cursor: pointer; text-decoration: none; }
 .auth-card a:hover { text-decoration: underline; }
 .auth-legal {
   margin-top: 28px;
@@ -2748,7 +2772,7 @@ body.file-dragover::after {
   font-weight: 700;
   border: 1px solid var(--line);
 }
-.ob-dot.active { background: var(--accent); color: white; border-color: var(--accent); }
+.ob-dot.active { background: var(--accent-strong); color: white; border-color: var(--accent-strong); }
 .ob-dot.done { background: var(--ok); color: white; border-color: var(--ok); }
 .ob-line {
   width: 64px;
@@ -3236,7 +3260,7 @@ body.file-dragover::after {
 .facet-h button {
   background: transparent;
   border: none;
-  color: var(--accent);
+  color: var(--accent-text);
   font-family: var(--font-mono);
   font-size: 10px;
   cursor: pointer;
@@ -3677,7 +3701,7 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
 .fg-2          { color: var(--fg-2); }
 .fg-3          { color: var(--fg-3); }
 .fg-4          { color: var(--fg-4); }
-.fg-accent     { color: var(--accent); }
+.fg-accent     { color: var(--accent-text); }
 .fg-danger     { color: var(--danger); }
 .fg-ok         { color: var(--ok); }
 
@@ -4426,7 +4450,8 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
 .fs-22 { font-size: 22px; }
 .fs-28 { font-size: 28px; }
 .font-mono { font-family: var(--font-mono); }
-.fg-accent { color: var(--accent); }
+/* .fg-accent lives in the earlier utility block (deduped — was defined twice
+   with conflicting cascade order; AA text color: var(--accent-text)). */
 .fg-2 { color: var(--fg-2); }
 .fg-3 { color: var(--fg-3); }
 .fg-4 { color: var(--fg-4); }
@@ -4521,7 +4546,7 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
 .grid-cols-2 { grid-template-columns: 1fr 1fr; }
 .grid-cols-3 { grid-template-columns: 1fr 1fr 1fr; }
 .grid-gap-1 { gap: 1px; }
-.hover-fg-accent:hover { color: var(--accent); }
+.hover-fg-accent:hover { color: var(--accent-text); }
 .hover-bg-elev:hover { background: var(--bg-elev); }
 .transition-fast { transition: all 0.15s ease; }
 .z-1 { z-index: 1; }
