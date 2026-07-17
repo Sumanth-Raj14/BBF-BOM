@@ -1,0 +1,107 @@
+/* ============================================
+   BLACKBOX BOM — Strict BBF Enterprise Branding
+   ============================================ */
+
+:root {
+  /* Enforce Strict Typography */
+  --font-sans: "Montserrat", sans-serif !important;
+  --font-brand: "Montserrat", sans-serif !important;
+
+  /* Redefine Semantic Scales to be tighter (Engineering Density) */
+  --row-h: 30px !important;
+  --r-1: 1px !important;
+  --r-2: 2px !important;
+  --r-3: 2px !important;
+  --r-4: 3px !important;
+}
+
+/* Base element overrides */
+body {
+  font-family: var(--font-sans);
+  color: var(--bbf-dark-grey);
+  background: var(--bg-app, #FDFDFD);
+}
+
+h1, .h1 {
+  font-family: var(--font-brand) !important;
+  font-weight: 900 !important;
+  text-transform: uppercase !important;
+  color: var(--bbf-black) !important;
+}
+
+h2, .h2 {
+  font-family: var(--font-brand) !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  color: var(--bbf-black) !important;
+}
+
+/* Force /// prefix on screen titles if not present */
+.screen-header h1::before {
+  content: "/// " !important;
+  color: var(--bbf-olive) !important;
+  margin-right: 8px !important;
+}
+
+/* Grid & Table Density overrides */
+.bom-table {
+  border: 1px solid #CCCCCC !important;
+}
+
+.bom-table tbody td {
+  padding: 0 8px !important;
+  height: 30px !important;
+  font-size: 11px !important;
+  border-bottom: 1px solid #E5E5E5 !important;
+  border-right: 1px solid #E5E5E5 !important;
+}
+
+.bom-table thead th {
+  padding: 8px 8px !important;
+  font-size: 10px !important;
+  background: #E5E5E5 !important;
+  color: var(--bbf-black) !important;
+  border-bottom: 2px solid var(--bbf-olive) !important;
+  border-right: 1px solid #CCCCCC !important;
+  font-weight: 700 !important;
+}
+
+/* Replace big floating cards with structured panels */
+.card, .panel {
+  border-radius: 2px !important;
+  box-shadow: none !important;
+  border: 1px solid #CCCCCC !important;
+}
+
+/* Buttons */
+.btn {
+  border-radius: 2px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+}
+
+.btn.primary {
+  background: var(--bbf-olive) !important;
+  color: var(--bbf-white) !important;
+}
+.btn.primary:hover {
+  background: var(--bbf-orange) !important;
+}
+
+/* Strip generic gradients/glassmorphism */
+.glass {
+  background: var(--bbf-white) !important;
+  backdrop-filter: none !important;
+  border: 1px solid #CCCCCC !important;
+}
+
+/* Sidebar NavRail Updates */
+.navrail {
+  background: var(--bbf-white) !important;
+  border-right: 1px solid #CCCCCC !important;
+}
+.navrail .nav-item.active {
+  background: var(--bbf-sunk, #F5F5F5) !important;
+  border-left: 3px solid var(--bbf-olive) !important;
+}

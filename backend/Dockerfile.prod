@@ -1,0 +1,45 @@
+FROM python:3.11-slim AS builder
+# To pin: docker pull python:3.11-slim && docker inspect python:3.11-slim --format '{{index .RepoDigests 0}}'
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libpq-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+FROM python:3.11-slim
+
+RUN groupadd -r bom && useradd -r -g bom -d /app -s /sbin/nologin bom && \
+    mkdir -p /app/backups /app/uploads /app/logs && \
+    chown -R bom:bom /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-client \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /root/.local /root/.local
+ENV PATH=/root/.local/bin:$PATH
+
+COPY --chown=bom:bom app/ ./app/
+COPY --chown=bom:bom alembic/ ./alembic/
+COPY --chown=bom:bom alembic.ini ./
+COPY --chown=bom:bom scripts/ ./scripts/
+
+RUN python -c "import app.main" 2>/dev/null || true
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \
+    CMD python -c "import http.client; c=http.client.HTTPConnection('localhost:8000'); c.request('GET','/api/v1/health'); r=c.getresponse(); exit(0) if r.status==200 else exit(1)"
+
+RUN apt-get update && apt-get install -y tini && rm -rf /var/lib/apt/lists/*
+
+USER bom
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

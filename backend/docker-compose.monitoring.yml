@@ -1,0 +1,17 @@
+version: "3.8"
+services:
+  prometheus:
+    # TODO: Pin to SHA256 digest
+    image: prom/prometheus:v2.53.0
+    ports: ["9090:9090"]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+  grafana:
+    # TODO: Pin to SHA256 digest
+    image: grafana/grafana:11.1.0
+    ports: ["3001:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set for production}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning

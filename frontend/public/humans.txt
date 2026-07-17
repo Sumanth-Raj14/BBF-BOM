@@ -1,0 +1,15 @@
+# Blackbox BOM — humans.txt
+# https://blackbox-bom.com
+
+## Team
+  Developer: Blackbox Engineering
+  Contact: dev@blackbox-bom.com
+  Location: San Francisco, CA
+
+## Site
+  Language: English
+  Framework: React 18, Vite 6
+  Design: Dark mode, mobile-first PWA
+
+## Thanks
+  Built with Three.js, Playwright, ESLint

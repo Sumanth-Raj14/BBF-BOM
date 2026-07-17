@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+*.pyo
+.env
+.git
+.gitignore
+*.md
+test.db
+bom.db
+.DS_Store
+.venv
+venv
+node_modules
+dist
+*.sqlite
+backups/
+uploads/*.gz

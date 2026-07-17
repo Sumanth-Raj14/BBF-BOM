@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Blackbox BOM</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+  <meta http-equiv="Pragma" content="no-cache"/>
+  <meta http-equiv="Expires" content="0"/>
+  <link rel="manifest" href="manifest.json"/>
+  <meta name="theme-color" content="#e85d1f"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css"/>
+</head>
+<body>
+  <div id="root">
+    <div style="padding:40px;font-family:monospace;font-size:14px;">
+      <h2>Loading Blackbox BOM...</h2>
+      <p>If this stays visible, a script failed to load. Check browser console (F12).</p>
+      <div id="load-status"></div>
+    </div>
+  </div>
+
+  <script>
+    var _v = Date.now();
+  </script>
+
+  <!-- React + Babel (local copies) -->
+  <script crossorigin src="react.development.js?v=1"></script>
+  <script crossorigin src="react-dom.development.js?v=1"></script>
+  <script crossorigin src="babel.min.js?v=1"></script>
+
+  <script>
+    window.addEventListener('error', function(e) {
+      var el = document.getElementById('load-status');
+      if (el) el.innerHTML += '<div style="color:red;margin:4px 0">ERROR: ' + (e.message || e.filename || 'unknown') + ' (line ' + (e.lineno || '?') + ')</div>';
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      var el = document.getElementById('load-status');
+      if (el) el.innerHTML += '<div style="color:orange;margin:4px 0">PROMISE REJECTION: ' + (e.reason?.message || 'unknown') + '</div>';
+    });
+  </script>
+
+  <!-- Data (plain JS) -->
+  <script src="api.js?v=1"></script>
+  <script src="data.js?v=1"></script>
+  <script src="projects.js?v=1"></script>
+
+  <!-- Components (JSX, order matters) -->
+  <script type="text/babel" src="tweaks-panel.jsx?v=1"></script>
+  <script type="text/babel" src="icons.jsx?v=1"></script>
+  <script type="text/babel" src="overlays.jsx?v=1"></script>
+  <script type="text/babel" src="modals-extra.jsx?v=1"></script>
+  <script type="text/babel" src="auth-onboarding.jsx?v=1"></script>
+  <script type="text/babel" src="prod-additions.jsx?v=1"></script>
+  <script type="text/babel" src="final-polish.jsx?v=1"></script>
+  <script type="text/babel" src="dashboard.jsx?v=1"></script>
+  <script type="text/babel" src="advanced-features.jsx?v=1"></script>
+  <script type="text/babel" src="power-features.jsx?v=1"></script>
+  <script type="text/babel" src="pdm-cad.jsx?v=1"></script>
+  <script type="text/babel" src="bom-editor.jsx?v=1"></script>
+  <script type="text/babel" src="detail-drawer.jsx?v=1"></script>
+  <script type="text/babel" src="parts-screen.jsx?v=1"></script>
+  <script type="text/babel" src="secondary-screens.jsx?v=1"></script>
+  <script type="text/babel" src="integration-screens.jsx?v=2"></script>
+  <script type="text/babel" src="mobile-scanner.jsx?v=1"></script>
+  <script type="text/babel" src="enterprise-screens.jsx?v=1"></script>
+  <script type="text/babel" src="app.jsx?v=2"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(reg => reg.unregister());
+      });
+    }
+  </script>
+</body>
+</html>

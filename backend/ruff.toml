@@ -1,0 +1,17 @@
+target-version = "py311"
+line-length = 100
+
+[format]
+quote-style = "double"
+
+[lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
+ignore = ["E501", "B904", "N815", "UP045", "B008", "E402", "N803", "F403", "N802", "N806", "SIM102", "SIM105", "SIM115", "SIM117", "B017"]
+
+[lint.per-file-ignores]
+"tests/*" = ["SIM", "F401"]
+"app/tests/*" = ["SIM", "F401"]
+"**/__init__.py" = ["F401"]
+"seed_*.py" = ["F401"]
+"app/core/job_queue.py" = ["F401"]
+"app/core/saml_sso.py" = ["F401"]

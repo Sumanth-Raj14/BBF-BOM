@@ -1,0 +1,98 @@
+version: "3.9"
+
+services:
+  db:
+    # TODO: pin by digest in CI
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: bom_db
+      POSTGRES_USER: bom_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bom_password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - wal_archive:/var/lib/postgresql/wal_archive
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bom_user -d bom_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_password}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      POSTGRES_SERVER: db
+      POSTGRES_USER: bom_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bom_password}
+      POSTGRES_DB: bom_db
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      ALGORITHM: RS256
+      RSA_KEY_DIR: /rsa_keys
+      BACKUP_DIR: /backups
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    volumes:
+      - backend_backups:/backups
+      - rsa_keys:/rsa_keys
+      - wal_archive:/var/lib/postgresql/wal_archive
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      VITE_API_BASE: /api/v1
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+  pgbouncer:
+    # TODO: Pin to SHA256 digest
+    image: edoburu/pgbouncer:1.23-1
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: bom_user
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-bom_password}
+      DB_NAME: bom_db
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 200
+      DEFAULT_POOL_SIZE: 25
+    ports:
+      - "127.0.0.1:5433:5432"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redis_data:
+  backend_backups:
+  rsa_keys:
+  wal_archive:

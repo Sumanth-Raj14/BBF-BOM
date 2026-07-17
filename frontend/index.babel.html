@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Blackbox BOM</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+  <meta http-equiv="Pragma" content="no-cache"/>
+  <meta http-equiv="Expires" content="0"/>
+  <link rel="manifest" href="manifest.json"/>
+  <meta name="theme-color" content="#e85d1f"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="icon" href="icons/icon.svg" sizes="any" type="image/svg+xml"/>
+  <link rel="apple-touch-icon" href="icons/icon-192.svg"/>
+  <link rel="stylesheet" href="styles.css?v=11"/>
+  <link rel="preload" href="api.js?v=11" as="script">
+  <link rel="preload" href="icons.jsx?v=11" as="script">
+  <link rel="preload" href="app.jsx?v=11" as="script">
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+  <div id="root">
+    <div style="padding:40px;font-family:monospace;font-size:14px;">
+      <h2>Loading Blackbox BOM...</h2>
+      <p>If this stays visible, a script failed to load. Check browser console (F12).</p>
+      <div id="load-status"></div>
+    </div>
+  </div>
+
+  <script>
+    // ONLY unregister SW when query param ?dev=1 is present
+    // This allows the babel dev path to coexist with Vite production path
+    // that registers a service worker for offline support.
+    if (location.search.includes('dev=1')) {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(regs) {
+          regs.forEach(function(reg) { reg.unregister(); });
+        });
+        caches.keys().then(function(keys) {
+          keys.forEach(function(k) { caches.delete(k); });
+        });
+      }
+    }
+    // Polyfill flatMap for older Babel standalone (ES2019)
+    if (!Array.prototype.flatMap) {
+      Array.prototype.flatMap = function(fn) {
+        return [].concat.apply([], this.map(fn));
+      };
+    }
+  </script>
+
+  <!-- React 18 production (CDN) + Babel standalone -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="vendor/babel.min.js?v=11"></script>
+
+  <script>
+    window.addEventListener('error', function(e) {
+      var el = document.getElementById('load-status');
+      if (el) el.innerHTML += '<div style="color:red;margin:4px 0">ERROR: ' + (e.message || e.filename || 'unknown') + ' (line ' + (e.lineno || '?') + ')</div>';
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      var el = document.getElementById('load-status');
+      if (el) el.innerHTML += '<div style="color:orange;margin:4px 0">PROMISE REJECTION: ' + (e.reason?.message || 'unknown') + '</div>';
+    });
+  </script>
+
+  <!-- Data (plain JS) -->
+  <script src="api.js?v=10"></script>
+  <script src="data.js?v=10"></script>
+  <script src="projects.js?v=10"></script>
+  <script src="cloud-sync.js?v=10"></script>
+
+  <!-- Critical JSX (loaded synchronously, needed for initial render) -->
+  <script type="text/babel" src="icons.jsx?v=10"></script>
+  <script type="text/babel" src="overlays.jsx?v=10"></script>
+  <script type="text/babel" src="auth-onboarding.jsx?v=10"></script>
+  <script type="text/babel" src="enterprise-utils.jsx?v=10"></script>
+  <script type="text/babel" src="app.jsx?v=10"></script>
+
+  <script>
+  // Deferred JSX loader — loads non-critical components after first paint
+  (function() {
+    var deferred = [
+      "tweaks-panel.jsx?v=10",
+      "modals-extra.jsx?v=10",
+      "prod-additions.jsx?v=10",
+      "final-polish.jsx?v=10",
+      "dashboard.jsx?v=10",
+      "advanced-features.jsx?v=10",
+      "power-features.jsx?v=10",
+      "pdm-cad.jsx?v=10",
+      "bom-editor.jsx?v=10",
+      "detail-drawer.jsx?v=10",
+      "parts-screen.jsx?v=10",
+      "secondary-screens.jsx?v=10",
+      "integration-screens.jsx?v=10",
+      "mobile-scanner.jsx?v=10",
+      "enterprise-screens.jsx?v=10",
+      "enterprise-final.jsx?v=10"
+    ];
+    function loadNext(i) {
+      if (i >= deferred.length) return;
+      var s = document.createElement("script");
+      s.type = "text/babel";
+      s.src = deferred[i];
+      s.onload = function() { loadNext(i + 1); };
+      s.onerror = function() {
+        console.warn("Failed to load", deferred[i]);
+        loadNext(i + 1);
+      };
+      document.body.appendChild(s);
+    }
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function() {
+        setTimeout(function() { loadNext(0); }, 50);
+      });
+    } else {
+      setTimeout(function() { loadNext(0); }, 50);
+    }
+  })();
+  </script>
+</body>
+</html>

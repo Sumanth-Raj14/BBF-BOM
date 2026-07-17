@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"/>
+    <title>Blackbox BOM — 3D Viewer</title>
+    <meta name="description" content="3D model viewer for CAD files — STL, OBJ, GLTF, and FBX format support with measurement tools."/>
+    <meta property="og:title" content="Blackbox BOM — 3D Viewer"/>
+    <meta property="og:description" content="3D model viewer for CAD files — STL, OBJ, GLTF, and FBX format support with measurement tools."/>
+    <meta property="og:type" content="website"/>
+    <meta property="og:image" content="../icons/icon-512.svg"/>
+    <meta name="twitter:card" content="summary_large_image"/>
+    <meta name="twitter:title" content="Blackbox BOM 3D Viewer"/>
+    <meta name="twitter:description" content="3D model viewer for CAD files with measurement tools."/>
+    <link rel="icon" href="../icons/icon.svg" sizes="any" type="image/svg+xml"/>
+    <link rel="apple-touch-icon" href="../icons/icon-192.svg"/>
+    <meta name="theme-color" content="#e85d1f"/>
+    <meta name="mobile-web-app-capable" content="yes"/>
+    <meta name="apple-mobile-web-app-capable" content="yes"/>
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            color: #fff;
+            overflow: hidden;
+        }
+
+        #viewer-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+        }
+
+        #toolbar {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 8px;
+            padding: 10px;
+            z-index: 100;
+        }
+
+        .toolbar-btn {
+            background: #4a4a6a;
+            border: none;
+            color: #fff;
+            padding: 8px 12px;
+            margin: 4px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .toolbar-btn:hover {
+            background: #6a6a8a;
+        }
+
+        .toolbar-btn.active {
+            background: #007bff;
+        }
+
+        #info-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 8px;
+            padding: 15px;
+            width: 300px;
+            max-height: 80vh;
+            overflow-y: auto;
+            z-index: 100;
+        }
+
+        #info-panel h3 {
+            margin-bottom: 10px;
+            color: #007bff;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .info-label {
+            color: #888;
+        }
+
+        .info-value {
+            color: #fff;
+            font-weight: bold;
+        }
+
+        #upload-zone {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px dashed #4a4a6a;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            z-index: 50;
+            cursor: pointer;
+        }
+
+        #upload-zone:hover {
+            border-color: #007bff;
+        }
+
+        #upload-zone h2 {
+            margin-bottom: 10px;
+        }
+
+        #upload-zone p {
+            color: #888;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: none;
+            z-index: 200;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #007bff;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #measurements {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 8px;
+            padding: 10px;
+            z-index: 100;
+        }
+
+        #measurements h4 {
+            margin-bottom: 5px;
+        }
+
+        .measurement-item {
+            margin: 3px 0;
+            font-size: 12px;
+        }
+
+        #component-list {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 8px;
+            padding: 10px;
+            width: 250px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 100;
+        }
+
+        #component-list h4 {
+            margin-bottom: 5px;
+        }
+
+        .component-item {
+            padding: 5px;
+            margin: 2px 0;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .component-item:hover {
+            background: rgba(0, 123, 255, 0.3);
+        }
+
+        .component-item.selected {
+            background: rgba(0, 123, 255, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div id="viewer-container">
+        <div id="canvas-container"></div>
+
+        <div id="toolbar">
+            <button class="toolbar-btn active" onclick="setView('perspective')">Perspective</button>
+            <button class="toolbar-btn" onclick="setView('top')">Top</button>
+            <button class="toolbar-btn" onclick="setView('front')">Front</button>
+            <button class="toolbar-btn" onclick="setView('right')">Right</button>
+            <button class="toolbar-btn" onclick="setView('isometric')">Isometric</button>
+            <hr style="border-color: rgba(255,255,255,0.2); margin: 5px 0;">
+            <button class="toolbar-btn" onclick="toggleWireframe()">Wireframe</button>
+            <button class="toolbar-btn" onclick="toggleGrid()">Grid</button>
+            <button class="toolbar-btn" onclick="toggleAxes()">Axes</button>
+            <button class="toolbar-btn" onclick="resetCamera()">Reset</button>
+            <hr style="border-color: rgba(255,255,255,0.2); margin: 5px 0;">
+            <button class="toolbar-btn" onclick="measureDistance()">Measure</button>
+            <button class="toolbar-btn" onclick="screenshot()">Screenshot</button>
+            <button class="toolbar-btn" onclick="exportSTL()">Export STL</button>
+        </div>
+
+        <div id="info-panel">
+            <h3>Model Information</h3>
+            <div class="info-row">
+                <span class="info-label">File:</span>
+                <span class="info-value" id="info-filename">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Vertices:</span>
+                <span class="info-value" id="info-vertices">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Faces:</span>
+                <span class="info-value" id="info-faces">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Materials:</span>
+                <span class="info-value" id="info-materials">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Bounding Box:</span>
+                <span class="info-value" id="info-bbox">-</span>
+            </div>
+        </div>
+
+        <div id="upload-zone">
+            <h2>Drop 3D Model Here</h2>
+            <p>Supported formats: STL, OBJ, STEP, IGES, GLTF</p>
+            <p style="margin-top: 10px;">Or click to browse files</p>
+            <input type="file" id="file-input" accept=".stl,.obj,.step,.iges,.gltf,.glb" style="display: none;">
+        </div>
+
+        <div id="loading">
+            <div class="spinner"></div>
+            <p style="margin-top: 10px;">Loading model...</p>
+        </div>
+
+        <div id="measurements">
+            <h4>Measurements</h4>
+            <div class="measurement-item">Click two points to measure distance</div>
+            <div id="measurement-result" class="measurement-item" style="color: #007bff;"></div>
+        </div>
+
+        <div id="component-list">
+            <h4>Components</h4>
+            <div id="component-list-content"></div>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "/node_modules/three/build/three.module.js",
+            "three/addons/": "/node_modules/three/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+        import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+        // Global variables
+        let scene, camera, renderer, controls;
+        let currentModel = null;
+        let gridHelper, axesHelper;
+        let isWireframe = false;
+        let isMeasuring = false;
+        let measurePoints = [];
+        let measureLine = null;
+        let components = [];
+
+        // Initialize the viewer
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a2e);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+            camera.position.set(100, 100, 100);
+
+            // Renderer
+            const container = document.getElementById('canvas-container');
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = true;
+            controls.minDistance = 1;
+            controls.maxDistance = 10000;
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(100, 200, 100);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+
+            const pointLight = new THREE.PointLight(0xffffff, 0.5);
+            pointLight.position.set(-100, 100, -100);
+            scene.add(pointLight);
+
+            // Grid
+            gridHelper = new THREE.GridHelper(1000, 50, 0x444444, 0x222222);
+            scene.add(gridHelper);
+
+            // Axes
+            axesHelper = new THREE.AxesHelper(200);
+            scene.add(axesHelper);
+
+            // Event listeners
+            window.addEventListener('resize', onWindowResize);
+            setupDragAndDrop();
+            setupFileInput();
+
+            // Mouse click for measurement
+            renderer.domElement.addEventListener('click', (event) => {
+                if (!isMeasuring || !currentModel) return;
+
+                const rect = renderer.domElement.getBoundingClientRect();
+                mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObject(currentModel, true);
+
+                if (intersects.length > 0) {
+                    const point = intersects[0].point;
+                    measurePoints.push(point.clone());
+
+                    if (measurePoints.length === 2) {
+                        const distance = measurePoints[0].distanceTo(measurePoints[1]);
+                        document.getElementById('measurement-result').textContent =
+                            `Distance: ${distance.toFixed(3)} units`;
+
+                        const lineGeometry = new THREE.BufferGeometry().setFromPoints(measurePoints);
+                        const lineMaterial = new THREE.LineBasicMaterial({ color: 0x007bff });
+                        measureLine = new THREE.Line(lineGeometry, lineMaterial);
+                        scene.add(measureLine);
+
+                        measurePoints = [];
+                    }
+                }
+            });
+
+            animate();
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // View controls
+        window.setView = function(view) {
+            const distance = 200;
+
+            switch(view) {
+                case 'top':
+                    camera.position.set(0, distance, 0);
+                    break;
+                case 'front':
+                    camera.position.set(0, 0, distance);
+                    break;
+                case 'right':
+                    camera.position.set(distance, 0, 0);
+                    break;
+                case 'isometric':
+                    camera.position.set(distance, distance, distance);
+                    break;
+                case 'perspective':
+                default:
+                    camera.position.set(100, 100, 100);
+            }
+
+            camera.lookAt(0, 0, 0);
+            controls.update();
+
+            // Update active button
+            document.querySelectorAll('.toolbar-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+        };
+
+        window.toggleWireframe = function() {
+            isWireframe = !isWireframe;
+
+            if (currentModel) {
+                currentModel.traverse(child => {
+                    if (child.isMesh) {
+                        child.material.wireframe = isWireframe;
+                    }
+                });
+            }
+        };
+
+        window.toggleGrid = function() {
+            gridHelper.visible = !gridHelper.visible;
+        };
+
+        window.toggleAxes = function() {
+            axesHelper.visible = !axesHelper.visible;
+        };
+
+        window.resetCamera = function() {
+            camera.position.set(100, 100, 100);
+            camera.lookAt(0, 0, 0);
+            controls.reset();
+        };
+
+        // Measurement
+        window.measureDistance = function() {
+            isMeasuring = !isMeasuring;
+            measurePoints = [];
+
+            if (measureLine) {
+                scene.remove(measureLine);
+                measureLine = null;
+            }
+
+            document.getElementById('measurement-result').textContent =
+                isMeasuring ? 'Click on model to start measuring' : '';
+        };
+
+        // Screenshot
+        window.screenshot = function() {
+            renderer.render(scene, camera);
+            const dataURL = renderer.domElement.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.download = 'model-screenshot.png';
+            link.href = dataURL;
+            link.click();
+        };
+
+        // Export STL
+        window.exportSTL = function() {
+            if (!currentModel) return;
+
+            const stlExporter = new THREE.STLExporter();
+            const result = stlExporter.parse(currentModel);
+            const blob = new Blob([result], { type: 'text/plain' });
+            const link = document.createElement('a');
+            link.download = 'model.stl';
+            link.href = URL.createObjectURL(blob);
+            link.click();
+        };
+
+        // File loading
+        function setupDragAndDrop() {
+            const dropZone = document.getElementById('upload-zone');
+
+            dropZone.addEventListener('dragover', e => {
+                e.preventDefault();
+                dropZone.style.borderColor = '#007bff';
+            });
+
+            dropZone.addEventListener('dragleave', e => {
+                e.preventDefault();
+                dropZone.style.borderColor = '#4a4a6a';
+            });
+
+            dropZone.addEventListener('drop', e => {
+                e.preventDefault();
+                dropZone.style.borderColor = '#4a4a6a';
+
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    loadFile(files[0]);
+                }
+            });
+
+            dropZone.addEventListener('click', () => {
+                document.getElementById('file-input').click();
+            });
+        }
+
+        function setupFileInput() {
+            document.getElementById('file-input').addEventListener('change', e => {
+                if (e.target.files.length > 0) {
+                    loadFile(e.target.files[0]);
+                }
+            });
+        }
+
+        function loadFile(file) {
+            const reader = new FileReader();
+            const extension = file.name.split('.').pop().toLowerCase();
+
+            document.getElementById('upload-zone').style.display = 'none';
+            document.getElementById('loading').style.display = 'block';
+
+            reader.onload = function(e) {
+                const contents = e.target.result;
+
+                try {
+                    if (extension === 'stl') {
+                        loadSTL(contents, file.name);
+                    } else if (extension === 'obj') {
+                        loadOBJ(contents, file.name);
+                    } else if (extension === 'gltf' || extension === 'glb') {
+                        loadGLTF(file, file.name);
+                    } else {
+                        // Try to load as STL by default
+                        loadSTL(contents, file.name);
+                    }
+                } catch (error) {
+                    console.error('Error loading model:', error);
+                    alert('Error loading model: ' + error.message);
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('upload-zone').style.display = 'block';
+                }
+            };
+
+            if (extension === 'stl') {
+                reader.readAsArrayBuffer(file);
+            } else if (extension === 'obj') {
+                reader.readAsText(file);
+            } else {
+                reader.readAsArrayBuffer(file);
+            }
+        }
+
+        function loadSTL(contents, filename) {
+            const loader = new STLLoader();
+            const geometry = loader.parse(contents);
+
+            const material = new THREE.MeshPhongMaterial({
+                color: 0x6a6a8a,
+                specular: 0x111111,
+                shininess: 200
+            });
+
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+
+            // Center the model
+            geometry.computeBoundingBox();
+            const center = new THREE.Vector3();
+            geometry.boundingBox.getCenter(center);
+            geometry.translate(-center.x, -center.y, -center.z);
+
+            // Scale if too large or small
+            const size = new THREE.Vector3();
+            geometry.boundingBox.getSize(size);
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const scale = 100 / maxDim;
+            mesh.scale.set(scale, scale, scale);
+
+            if (currentModel) {
+                scene.remove(currentModel);
+            }
+
+            currentModel = mesh;
+            scene.add(currentModel);
+
+            updateModelInfo(filename, geometry);
+            updateComponentList(filename);
+
+            document.getElementById('loading').style.display = 'none';
+
+            // Reset camera
+            resetCamera();
+        }
+
+        function loadOBJ(contents, filename) {
+            const loader = new OBJLoader();
+            const object = loader.parse(contents);
+
+            // Center and scale
+            const box = new THREE.Box3().setFromObject(object);
+            const center = box.getCenter(new THREE.Vector3());
+            object.position.sub(center);
+
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const scale = 100 / maxDim;
+            object.scale.set(scale, scale, scale);
+
+            // Apply material to all meshes
+            object.traverse(child => {
+                if (child.isMesh) {
+                    child.material = new THREE.MeshPhongMaterial({
+                        color: 0x6a6a8a,
+                        specular: 0x111111,
+                        shininess: 200
+                    });
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+            });
+
+            if (currentModel) {
+                scene.remove(currentModel);
+            }
+
+            currentModel = object;
+            scene.add(currentModel);
+
+            let totalVertices = 0;
+            let totalFaces = 0;
+            object.traverse(child => {
+                if (child.isMesh) {
+                    totalVertices += child.geometry.attributes.position.count;
+                    if (child.geometry.index) {
+                        totalFaces += child.geometry.index.count / 3;
+                    } else {
+                        totalFaces += child.geometry.attributes.position.count / 3;
+                    }
+                }
+            });
+
+            updateModelInfo(filename, { vertices: totalVertices, faces: totalFaces });
+            updateComponentList(filename);
+
+            document.getElementById('loading').style.display = 'none';
+            resetCamera();
+        }
+
+        function loadGLTF(file, filename) {
+            const loader = new GLTFLoader();
+            const url = URL.createObjectURL(file);
+
+            loader.load(url, function(gltf) {
+                const object = gltf.scene;
+
+                // Center and scale
+                const box = new THREE.Box3().setFromObject(object);
+                const center = box.getCenter(new THREE.Vector3());
+                object.position.sub(center);
+
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const scale = 100 / maxDim;
+                object.scale.set(scale, scale, scale);
+
+                if (currentModel) {
+                    scene.remove(currentModel);
+                }
+
+                currentModel = object;
+                scene.add(currentModel);
+
+                let totalVertices = 0;
+                let totalFaces = 0;
+                object.traverse(child => {
+                    if (child.isMesh) {
+                        totalVertices += child.geometry.attributes.position.count;
+                        if (child.geometry.index) {
+                            totalFaces += child.geometry.index.count / 3;
+                        } else {
+                            totalFaces += child.geometry.attributes.position.count / 3;
+                        }
+                    }
+                });
+
+                updateModelInfo(filename, { vertices: totalVertices, faces: totalFaces });
+                updateComponentList(filename);
+
+                document.getElementById('loading').style.display = 'none';
+                resetCamera();
+
+                URL.revokeObjectURL(url);
+            }, undefined, function(error) {
+                console.error('Error loading GLTF:', error);
+                alert('Error loading GLTF model');
+                document.getElementById('loading').style.display = 'none';
+                URL.revokeObjectURL(url);
+            });
+        }
+
+        function updateModelInfo(filename, geometry) {
+            document.getElementById('info-filename').textContent = filename;
+
+            if (geometry.attributes) {
+                document.getElementById('info-vertices').textContent =
+                    geometry.attributes.position ? geometry.attributes.position.count : '-';
+                document.getElementById('info-faces').textContent =
+                    geometry.index ? geometry.index.count / 3 : '-';
+            } else {
+                document.getElementById('info-vertices').textContent = geometry.vertices || '-';
+                document.getElementById('info-faces').textContent = geometry.faces || '-';
+            }
+
+            document.getElementById('info-materials').textContent = '1';
+
+            if (currentModel) {
+                const box = new THREE.Box3().setFromObject(currentModel);
+                const size = box.getSize(new THREE.Vector3());
+                document.getElementById('info-bbox').textContent =
+                    `${size.x.toFixed(1)} x ${size.y.toFixed(1)} x ${size.z.toFixed(1)}`;
+            }
+        }
+
+        function updateComponentList(filename) {
+            const content = document.getElementById('component-list-content');
+            content.innerHTML = `<div class="component-item selected">${filename}</div>`;
+        }
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // Initialize
+        init();
+    </script>
+</body>
+</html>

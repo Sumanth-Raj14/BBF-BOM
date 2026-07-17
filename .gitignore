@@ -1,0 +1,82 @@
+# OS
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs & temp
+*.log
+nul
+BOM and PRD/frontend.log
+backend/server.log
+BOM and PRD/scraps/
+BOM and PRD/uploads/
+
+# Database
+backend/bom.db
+backend/test.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment
+.env
+.env.local
+.env.*
+!.env.example
+
+# Test outputs
+test.txt
+test_write.txt
+
+# Secret keys
+.secret_key
+rsa_keys/
+
+# Archives
+*.zip
+
+# Secrets & certificates (never commit)
+ssl/
+rsa_keys/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+.secret_key
+
+# Backups & runtime data
+backups/
+backend/backups/
+backend/uploads/
+uploads/
+
+# Caches & test artifacts
+.pytest_cache/
+.ruff_cache/
+.vite/
+playwright-report/
+test-results/
+coverage/
+htmlcov/
+.rtk/

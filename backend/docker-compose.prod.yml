@@ -1,0 +1,489 @@
+version: '3.8'
+
+services:
+  postgres:
+    # TODO: pin by digest in CI
+    image: postgres:16-alpine
+    container_name: bom_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-bom_db}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - wal_archive:/var/lib/postgresql/wal_archive
+    # ports: (not exposed — internal to Docker network only)
+    #  - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-bom_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - bom_net
+    command:
+      - "postgres"
+      - "-c"
+      - "config_file=/etc/postgresql/postgresql.conf"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  pgbackrest:
+    # TODO: Pin to SHA256 digest — run: docker pull pgbackrest/pgbackrest:2.53 && docker inspect pgbackrest/pgbackrest:2.53 --format '{{index .RepoDigests 0}}'
+    image: pgbackrest/pgbackrest:2.53
+    container_name: bom_pgbackrest
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      PGBACKREST_STANZA: bom
+      PGBACKREST_PG1_PATH: /var/lib/postgresql/data
+      PGBACKREST_REPO1_PATH: /var/lib/pgbackrest
+      PGBACKREST_REPO1_RETENTION_FULL: "2"
+      PGBACKREST_REPO1_RETENTION_DIFF: "7"
+      PGBACKREST_REPO1_CIPHER_TYPE: aes-256-cbc
+      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_CIPHER_PASS:?PGBACKREST_CIPHER_PASS required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data:ro
+      - pgbackrest_data:/var/lib/pgbackrest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - bom_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  backup-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    image: bom-api:latest
+    container_name: bom_backup_scheduler
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-bom_db}
+      - BACKUP_DIR=/app/backups
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - S3_SECRET_KEY=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY required}
+      - S3_BUCKET=${S3_BUCKET:-bom-backups}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY required}
+      - IS_PRODUCTION=true
+    command: >
+      sh -c "python /app/scripts/backup_cron.py --daemon"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - bom_net
+    volumes:
+      - backup_data:/app/backups
+      - upload_data:/app/uploads
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  redis:
+    image: redis:7-alpine
+    container_name: bom_redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD required}", "--appendonly", "yes"]
+    # ports: (not exposed — internal to Docker network only)
+    #  - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - bom_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  pgbouncer:
+    # TODO: Pin to SHA256 digest
+    image: bitnami/pgbouncer:1.23
+    container_name: bom_pgbouncer
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      PGBOUNCER_DATABASE: ${POSTGRES_DB:-bom_db}
+      PGBOUNCER_HOST: postgres
+      PGBOUNCER_PORT: "5432"
+      PGBOUNCER_USER: ${POSTGRES_USER}
+      PGBOUNCER_PASSWORD: ${POSTGRES_PASSWORD}
+      PGBOUNCER_AUTH_TYPE: scram-sha-256
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_DEFAULT_POOL_SIZE: "50"
+      PGBOUNCER_MAX_CLIENT_CONN: "500"
+      PGBOUNCER_QUERY_TIMEOUT: "30"
+      PGBOUNCER_IDLE_TRANSACTION_TIMEOUT: "300"
+    ports:
+      - "6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - bom_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  minio:
+    # TODO: Pin to SHA256 digest
+    image: minio/minio:RELEASE.2024-06-11T01-11-33Z
+    container_name: bom_minio
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY required}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY required}
+    # ports: (not exposed — internal to Docker network only)
+    #  - "9000:9000"
+    #  - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - bom_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    # TODO: Pin python:3.11-slim base image in Dockerfile.prod to a SHA256 digest
+    image: bom-api:latest
+    container_name: bom_api
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-bom_db}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
+      - ALGORITHM=RS256
+      - RSA_KEY_DIR=${RSA_KEY_DIR:-/rsa_keys}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      - BACKUP_DIR=/app/backups
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - S3_SECRET_KEY=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY required}
+      - S3_BUCKET=${S3_BUCKET:-bom-backups}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - DB_POOL_SIZE=${DB_POOL_SIZE:-20}
+      - DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-40}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY required}
+      - IS_PRODUCTION=true
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-https://app.bom.example.com}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import http.client; c=http.client.HTTPConnection('localhost:8000'); c.request('GET','/api/v1/health'); r=c.getresponse(); exit(0) if r.status==200 else exit(1)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    networks:
+      - bom_net
+    volumes:
+      - backup_data:/app/backups
+      - upload_data:/app/uploads
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    image: bom-api:latest
+    container_name: bom_celery
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: celery -A app.tasks worker -l info -c 4
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-bom_db}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - SECRET_KEY=${SECRET_KEY}
+      - BACKUP_DIR=/app/backups
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - S3_SECRET_KEY=${MINIO_SECRET_KEY}
+      - S3_BUCKET=${S3_BUCKET:-bom-backups}
+      - DB_POOL_SIZE=${DB_POOL_SIZE:-10}
+      - DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-20}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - IS_PRODUCTION=true
+      - SENTRY_DSN=${SENTRY_DSN:-}
+    depends_on:
+      - api
+      - redis
+    networks:
+      - bom_net
+    volumes:
+      - backup_data:/app/backups
+      - upload_data:/app/uploads
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  nginx:
+    image: nginx:stable-alpine
+    container_name: bom_nginx
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - NET_RAW
+      - NET_ADMIN
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./static:/usr/share/nginx/html:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - ./ssl/dhparam.pem:/etc/nginx/dhparam.pem:ro
+    depends_on:
+      - api
+    networks:
+      - bom_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 256M
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: bom_prometheus
+    restart: unless-stopped
+    user: "65534:65534"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks:
+      - bom_net
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD", "wget", "-q", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: bom_grafana
+    restart: unless-stopped
+    user: "472:472"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:?GRAFANA_ADMIN_USER required}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD required}
+      - GF_INSTALL_PLUGINS=
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - bom_net
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: bom_alertmanager
+    restart: unless-stopped
+    user: "65534:65534"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    ports:
+      - "127.0.0.1:9093:9093"
+    networks:
+      - bom_net
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: bom_loki
+    restart: unless-stopped
+    user: "10001:10001"
+    volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "127.0.0.1:3100:3100"
+    networks:
+      - bom_net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+volumes:
+  postgres_data:
+    driver: local
+  wal_archive:
+    driver: local
+  pgbackrest_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
+  backup_data:
+    driver: local
+  upload_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  loki_data:
+    driver: local
+  alertmanager_data:
+    driver: local
+
+networks:
+  bom_net:
+    driver: bridge

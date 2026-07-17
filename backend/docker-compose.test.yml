@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  postgres_test:
+    image: postgres:15
+    container_name: bom_postgres_test
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bom_user
+      POSTGRES_PASSWORD: bom_test_password
+      POSTGRES_DB: bom_test_db
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bom_user -d bom_test_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - bom_test_net
+
+  redis_test:
+    image: redis:7-alpine
+    container_name: bom_redis_test
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "no"]
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - bom_test_net
+
+volumes:
+  postgres_test_data:
+
+networks:
+  bom_test_net:
+    driver: bridge

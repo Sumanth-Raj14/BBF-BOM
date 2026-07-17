@@ -1,0 +1,136 @@
+# Blackbox BOM
+
+Enterprise Bill of Materials (BOM) and Product Lifecycle Management (PLM) platform. Competes with OpenBOM, Arena PLM, Teamcenter, and Windchill.
+
+## Overview
+
+Full-stack BOM/PLM application with multi-tenant architecture, real-time collaboration, WebSocket presence, enterprise backup/DR, and comprehensive API surface.
+
+- **Frontend**: React + Vite (JSX), code-split into 24 chunks
+- **Backend**: FastAPI (Python 3.11+), SQLAlchemy, PostgreSQL, Redis
+- **Infrastructure**: Docker Compose, Prometheus/Grafana, PgBouncer, MinIO, ngix
+
+## Quick Start
+
+### Prerequisites
+- Python 3.11+
+- Node.js 18+
+- PostgreSQL 16
+- Redis 7+
+
+### Backend
+```bash
+cd backend
+cp .env.example .env        # Configure your environment
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+### Frontend
+```bash
+cd "BOM and PRD"
+npm install
+npm run dev                 # Vite dev server on port 3001
+npm run build               # Production build to dist/
+```
+
+### Docker (Production)
+```bash
+cd backend
+docker compose -f docker-compose.prod.yml up -d
+```
+
+## Key Features
+
+- Multi-level BOM with revision control
+- Part management with category/UOM/custom fields
+- Vendor management with scorecards
+- Purchase order workflow (RFQ → Ordered → Received)
+- Engineering Change Order (ECO) with approval workflow
+- Kanban inventory management
+- Quality management (NCR, CAPA, FAI, Deviation)
+- Real-time collaboration (WebSocket presence, cursors, locking)
+- Multi-tenant with row-level isolation
+- SSO (Google, GitHub, Microsoft, SAML)
+- MFA/TOTP with encrypted secrets
+- RBAC with 5 default roles
+- Enterprise backup/DR (pg_dump, pg_basebackup, PITR, S3)
+- Webhook system with event-driven subscriptions
+- Prometheus metrics + Grafana dashboards
+- API key authentication
+- Full audit logging
+
+## Security
+
+This project has undergone comprehensive security auditing and remediation. Key security features:
+
+- JWT (RS256) with algorithm confusion protection
+- bcrypt password hashing
+- Input sanitization (XSS prevention)
+- CSRF double-submit cookie pattern
+- Rate limiting (Redis-backed with in-memory fallback)
+- IP-based throttling before account lockout
+- Tenant isolation at ORM level (row-level security)
+- Encrypted TOTP secrets (Fernet/AES)
+- Encrypted RSA private key
+- CORS with explicit allowed methods/headers
+- Security headers (CSP, HSTS, XFO)
+- Session timeout middleware
+- Webhook SSRF protection
+
+## Architecture
+
+```
+Client (React + Vite) → FastAPI → PostgreSQL + Redis
+                        ├── JWT Auth + MFA
+                        ├── RBAC + Tenant Isolation
+                        ├── Service Layer (business logic)
+                        ├── WebSocket (real-time)
+                        ├── Backup Engine (pg_dump/pg_basebackup)
+                        └── Monitoring (Prometheus)
+```
+
+## Documentation
+
+| File | Description |
+|------|-------------|
+| `ENTERPRISE_AUDIT_REPORT.md` | Full-spectrum enterprise audit with scores |
+| `DISASTER_RECOVERY_RUNBOOK.md` | DR procedures and runbook |
+| `BOM and PRD/RELEASE_NOTES.md` | Frontend release notes |
+| `BOM and PRD/CHANGELOG.md` | Frontend changelog |
+| `BOM and PRD/FEATURE_CATALOG.md` | Frontend feature catalog |
+| `BOM and PRD/SYSTEM_WORKFLOW.md` | Frontend system workflows |
+| `BOM and PRD/ARCHITECTURE.md` | Frontend architecture |
+| `BOM and PRD/OPEN_ITEMS.md` | Frontend open items and tech debt |
+| `BOM and PRD/TESTING_AND_VALIDATION.md` | Frontend testing guide |
+| `BOM and PRD/MODULE_REFERENCE.md` | Frontend module reference |
+| `backend/docs/RELEASE_NOTES.md` | Backend release notes |
+| `backend/docs/CHANGELOG.md` | Backend changelog |
+| `backend/docs/FEATURE_CATALOG.md` | Backend feature catalog |
+| `backend/docs/SYSTEM_WORKFLOW.md` | Backend system workflows |
+| `backend/docs/ARCHITECTURE.md` | Backend architecture |
+| `backend/docs/OPEN_ITEMS.md` | Backend open items |
+| `backend/docs/TESTING_AND_VALIDATION.md` | Backend testing guide |
+| `backend/docs/MODULE_REFERENCE.md` | Backend module reference |
+| `backend/docs/API_REFERENCE.md` | API reference |
+| `backend/docs/admin-guide.md` | Admin guide |
+
+## Testing
+
+### Backend
+```bash
+cd backend
+pytest app/tests/ -v                    # 238+ tests
+pytest tests/ -v                        # Outer test suite
+```
+
+### Frontend
+```bash
+cd "BOM and PRD"
+npx playwright test                     # E2E tests
+npx tsc --noEmit                        # TypeScript check
+```
+
+## License
+
+Proprietary — All rights reserved.

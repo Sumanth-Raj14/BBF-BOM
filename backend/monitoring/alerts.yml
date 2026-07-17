@@ -1,0 +1,111 @@
+groups:
+  - name: blackbox_bom_alerts
+    interval: 30s
+    rules:
+      - alert: HighApiErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API error rate exceeds 5%"
+          description: "API 5xx error rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+
+      - alert: HighLatencyP99
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P99 API latency exceeds 5s"
+          description: "P99 latency is {{ $value }}s over the last 5 minutes"
+
+      - alert: HighLatencyP95
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P95 API latency exceeds 2s"
+          description: "P95 latency is {{ $value }}s over the last 5 minutes"
+
+      - alert: DatabaseDown
+        expr: pg_up == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL is unreachable"
+          description: "Database connection check failed for 30+ seconds"
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis is unreachable"
+          description: "Redis connection check failed for 30+ seconds"
+
+      - alert: BackupStale
+        expr: time() - max(backup_last_success_timestamp) > 86400
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "No successful backup in 24+ hours"
+          description: "Last successful backup was {{ $value | humanizeDuration }} ago"
+
+      - alert: BackupFailed
+        expr: rate(backup_total{status="failed"}[1h]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backup failure detected"
+          description: "Backup has failed in the last hour"
+
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk space below 10%"
+          description: "Available disk space is {{ $value | humanizePercentage }}"
+
+      - alert: HighMemoryUsage
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memory usage exceeds 90%"
+          description: "Memory usage is {{ $value | humanizePercentage }}"
+
+      - alert: RateLimitThrottling
+        expr: rate(http_requests_total{status="429"}[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate-limit rejection rate"
+          description: "429 Too Many Requests rate is {{ $value | humanize }} per second"
+
+      - alert: ConnectionPoolExhaustion
+        expr: pgbouncer_pool_client_active_conns / pgbouncer_pool_max_client_conn > 0.85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PgBouncer connection pool near capacity"
+          description: "Connection pool is {{ $value | humanizePercentage }} utilized"
+
+      - alert: WebsiteDown
+        expr: probe_success{job="blackbox-bom"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Application is unreachable"
+          description: "Health check probe has failed for 1+ minute"
