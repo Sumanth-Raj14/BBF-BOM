@@ -1,3 +1,4 @@
+import decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +16,21 @@ from app.schemas.make_vs_buy import MakeVsBuyCreate, MakeVsBuyResponse, MakeVsBu
 router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
+
+
+def _dec(value) -> decimal.Decimal:
+    """Coerce a Numeric-column value (Decimal, float, int, or None) to Decimal.
+
+    Numeric(18,4) columns round-trip as Decimal, but incoming request payloads
+    are plain floats (Pydantic schema fields are typed float). Mixing the two
+    in arithmetic raises TypeError, so every money value is normalized to
+    Decimal before any add/multiply.
+    """
+    if value is None:
+        return decimal.Decimal("0")
+    if isinstance(value, decimal.Decimal):
+        return value
+    return decimal.Decimal(str(value))
 
 
 @router.get("/")
@@ -57,12 +73,12 @@ async def create_analysis(
     current_user: User = Depends(require_parts_write),
 ):
     make_total = (
-        payload.makeMaterialCost
-        + payload.makeLaborCost
-        + payload.makeOverheadCost
-        + payload.makeToolingCost
+        _dec(payload.makeMaterialCost)
+        + _dec(payload.makeLaborCost)
+        + _dec(payload.makeOverheadCost)
+        + _dec(payload.makeToolingCost)
     )
-    buy_total = payload.buyUnitPrice + payload.buyNreCost
+    buy_total = _dec(payload.buyUnitPrice) + _dec(payload.buyNreCost)
 
     obj = MakeVsBuyAnalysis(
         **payload.model_dump(exclude={"makeTotalCost", "buyTotalCost"}),
@@ -91,9 +107,12 @@ async def update_analysis(
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(obj, k, v)
     obj.makeTotalCost = (
-        obj.makeMaterialCost + obj.makeLaborCost + obj.makeOverheadCost + obj.makeToolingCost
+        _dec(obj.makeMaterialCost)
+        + _dec(obj.makeLaborCost)
+        + _dec(obj.makeOverheadCost)
+        + _dec(obj.makeToolingCost)
     )
-    obj.buyTotalCost = obj.buyUnitPrice + obj.buyNreCost
+    obj.buyTotalCost = _dec(obj.buyUnitPrice) + _dec(obj.buyNreCost)
     await db.commit()
     await db.refresh(obj)
     return obj

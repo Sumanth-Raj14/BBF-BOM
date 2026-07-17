@@ -4,10 +4,10 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
 )
@@ -37,7 +37,7 @@ class Contract(Base, TenantAwareMixin):
     # Terms
     paymentTerms = Column(String)  # Net 30, Net 60, etc.
     minimumOrderQty = Column(Integer)
-    maximumOrderValue = Column(Float)
+    maximumOrderValue = Column(Numeric(18, 4))
     currency = Column(String, default="USD")
 
     # Pricing tiers
@@ -116,7 +116,7 @@ class ContractPricingTier(Base, TenantAwareMixin):
     )
     min_qty = Column(Integer, nullable=True)
     max_qty = Column(Integer, nullable=True)
-    unit_price = Column(Float, nullable=False)
+    unit_price = Column(Numeric(18, 4), nullable=False)
     currency = Column(String(3), default="USD")
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -162,7 +162,7 @@ class PricingAgreement(Base, TenantAwareMixin):
     )
 
     # Price
-    agreedPrice = Column(Float, nullable=False)
+    agreedPrice = Column(Numeric(18, 4), nullable=False)
     currency = Column(String, default="USD")
     effectiveDate = Column(DateTime(timezone=True))
     expirationDate = Column(DateTime(timezone=True))
@@ -206,7 +206,7 @@ class PricingAgreementVolumeTier(Base, TenantAwareMixin):
     )
     min_qty = Column(Integer, nullable=True)
     max_qty = Column(Integer, nullable=True)
-    unit_price = Column(Float, nullable=False)
+    unit_price = Column(Numeric(18, 4), nullable=False)
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

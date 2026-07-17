@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -25,8 +25,8 @@ class BomItem(Base, TenantAwareMixin):
     )  # For sub-BOM hierarchy
 
     # Cost snapshot at time of BOM creation
-    unitCostSnapshot = Column(Float)
-    extendedCost = Column(Float)
+    unitCostSnapshot = Column(Numeric(18, 4))
+    extendedCost = Column(Numeric(18, 4))
 
     # Timestamps
     createdAt = Column(DateTime(timezone=True), server_default=func.now())

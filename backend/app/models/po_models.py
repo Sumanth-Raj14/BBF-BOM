@@ -2,7 +2,6 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
@@ -27,7 +26,7 @@ class POHeader(Base, TenantAwareMixin):
     poDate = Column(String)
     vendorName = Column(String, nullable=False)
     project = Column(String)
-    poTotal = Column(Float, default=0)
+    poTotal = Column(Numeric(18, 4), default=0)
     status = Column(String)
     notes = Column(Text)
     shipping_address = Column(Text)
@@ -73,10 +72,10 @@ class POLineItem(Base, TenantAwareMixin):
     itemDesc = Column(Text)
     partId = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), index=True)
     quantity = Column(Integer, default=1)
-    itemPrice = Column(Float, default=0)
-    amount = Column(Float, default=0)
-    gst = Column(Float, default=0)
-    total = Column(Float, default=0)
+    itemPrice = Column(Numeric(18, 4), default=0)
+    amount = Column(Numeric(18, 4), default=0)
+    gst = Column(Numeric(18, 4), default=0)
+    total = Column(Numeric(18, 4), default=0)
     eta = Column(String)
     createdAt = Column(DateTime(timezone=True), server_default=func.now())
     updatedAt = Column(DateTime(timezone=True), onupdate=func.now())

@@ -6,6 +6,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
 )
@@ -23,31 +24,31 @@ class ShouldCostModel(Base, TenantAwareMixin):
     partId = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Material cost breakdown
-    rawMaterialCost = Column(Float, default=0.0)
+    rawMaterialCost = Column(Numeric(18, 4), default=0.0)
     materialWastePct = Column(Float, default=5.0)  # percentage
-    materialTotal = Column(Float, default=0.0)
+    materialTotal = Column(Numeric(18, 4), default=0.0)
 
     # Labor cost breakdown
     laborHours = Column(Float, default=0.0)
-    laborRatePerHour = Column(Float, default=0.0)
-    laborTotal = Column(Float, default=0.0)
+    laborRatePerHour = Column(Numeric(18, 4), default=0.0)
+    laborTotal = Column(Numeric(18, 4), default=0.0)
 
     # Overhead
     overheadPct = Column(Float, default=30.0)  # percentage of labor
-    overheadTotal = Column(Float, default=0.0)
+    overheadTotal = Column(Numeric(18, 4), default=0.0)
 
     # Tooling / NRE
-    toolingCost = Column(Float, default=0.0)
+    toolingCost = Column(Numeric(18, 4), default=0.0)
     toolingAmortizedQty = Column(Integer, default=1000)
-    toolingPerUnit = Column(Float, default=0.0)
+    toolingPerUnit = Column(Numeric(18, 4), default=0.0)
 
     # Profit margin
     profitMarginPct = Column(Float, default=15.0)
-    profitAmount = Column(Float, default=0.0)
+    profitAmount = Column(Numeric(18, 4), default=0.0)
 
     # Final
-    shouldCostPerUnit = Column(Float, default=0.0)
-    actualVendorPrice = Column(Float, default=0.0)
+    shouldCostPerUnit = Column(Numeric(18, 4), default=0.0)
+    actualVendorPrice = Column(Numeric(18, 4), default=0.0)
     variancePct = Column(Float, default=0.0)
 
     # Metadata

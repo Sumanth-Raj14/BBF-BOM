@@ -14,6 +14,7 @@ from sqlalchemy import (
     Table,
     Text,
 )
+# Float import retained: Part.weight (grams) is a physical measurement, not money.
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -77,7 +78,7 @@ class Part(Base, TenantAwareMixin):
     primary_vendor_id = Column(Integer, ForeignKey("vendors.id", ondelete="CASCADE"), index=True)
 
     # Cost and timing
-    cost = Column(Float, default=0.0)
+    cost = Column(Numeric(18, 4), default=0.0)
     lead = Column(Integer, default=0)  # Lead time in days
     origin = Column(String)  # Country of origin
 
@@ -100,9 +101,9 @@ class Part(Base, TenantAwareMixin):
     # Tags and compliance use join tables: part_tags, part_compliance
 
     # Cost breakdown
-    freight = Column(Float, default=0.0)
-    tax = Column(Float, default=0.0)
-    landedCost = Column(Float, default=0.0)
+    freight = Column(Numeric(18, 4), default=0.0)
+    tax = Column(Numeric(18, 4), default=0.0)
+    landedCost = Column(Numeric(18, 4), default=0.0)
 
     # CAD reference
     cadUrl = Column(String)  # Path or URL to CAD file

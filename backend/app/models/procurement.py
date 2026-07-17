@@ -5,10 +5,10 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
 )
 from sqlalchemy.orm import relationship
@@ -50,10 +50,10 @@ class PurchaseOrder(Base, TenantAwareMixin):
     status = Column(String, default="Not Ordered")
 
     # Financials
-    unitCost = Column(Float)
-    totalCost = Column(Float)
-    taxCost = Column(Float)
-    freightCost = Column(Float)
+    unitCost = Column(Numeric(18, 4))
+    totalCost = Column(Numeric(18, 4))
+    taxCost = Column(Numeric(18, 4))
+    freightCost = Column(Numeric(18, 4))
 
     # Migration tracking
     migrated_to_po_headers = Column(Boolean, default=False)

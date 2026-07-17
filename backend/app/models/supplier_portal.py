@@ -3,10 +3,10 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
 )
 from sqlalchemy.sql import func
@@ -42,8 +42,8 @@ class SupplierPriceUpdate(Base, TenantAwareMixin):
         Integer, ForeignKey("supplier_users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     partId = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True)
-    oldPrice = Column(Float, default=0.0)
-    newPrice = Column(Float, default=0.0)
+    oldPrice = Column(Numeric(18, 4), default=0.0)
+    newPrice = Column(Numeric(18, 4), default=0.0)
     status = Column(String, default="pending")
     __table_args__ = (
         Index("idx_supplier_price_updates_tenant_status", "tenantId", "status"),
@@ -99,7 +99,7 @@ class RfqLineItem(Base, TenantAwareMixin):
         Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True
     )
     quantity = Column(Integer, nullable=False)
-    target_price = Column(Float)
+    target_price = Column(Numeric(18, 4))
     notes = Column(String)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -120,7 +120,7 @@ class RfqSupplierResponse(Base, TenantAwareMixin):
     line_item_id = Column(
         Integer, ForeignKey("rfq_line_items.id", ondelete="CASCADE"), nullable=False
     )
-    quoted_price = Column(Float, nullable=False)
+    quoted_price = Column(Numeric(18, 4), nullable=False)
     quoted_lead_time_days = Column(Integer)
     notes = Column(String)
     status = Column(String, default="submitted")
