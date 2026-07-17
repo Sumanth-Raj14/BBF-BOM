@@ -2,6 +2,7 @@ import PropTypes from "prop-types";
 import { storage } from "../utils/storage.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import { Button, Badge, StatusPill } from "../components/ui/index.js";
 // BOM editor — multi-level table with hierarchy, expand/collapse, inline edit,
 // bulk select, drag-reorder, sparkline cost trend, lead-time heatbar.
 function getRate() {
@@ -186,8 +187,23 @@ function EditableCell({
   return (
     <span
       className="editable"
+      tabIndex={onCommit ? 0 : undefined}
+      role={onCommit ? "button" : undefined}
       onDoubleClick={() => onCommit && setEditing(true)}
+      onKeyDown={(e) => {
+        if (!onCommit) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setEditing(true);
+        }
+      }}
       title={__t("bom.doubleClickToEdit") || "Double-click to edit"}
+      aria-label={
+        onCommit
+          ? __t("bom.doubleClickToEditAria") ||
+            "Double-click or press Enter to edit"
+          : undefined
+      }
     >
       {prefix}
       {value}
@@ -463,19 +479,25 @@ export function BomEditor({
           <div
             className="flex items-center gap-8 fs-11 font-mono"
             style={{
-              padding: "6px 12px",
+              padding: "var(--sp-2) var(--sp-3)",
               borderBottom: "1px solid var(--warn)",
               background: "color-mix(in oklch, var(--warn) 10%, var(--bg))",
             }}
           >
             <span
               className="bg-warn d-iblock"
-              style={{ width: 6, height: 6, borderRadius: 99 }}
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "var(--radius-pill)",
+              }}
+              aria-hidden="true"
             />
             <span>{__t("bom.unsavedChanges") || "Unsaved changes"}</span>
-            <button
-              className="btn small"
-              disabled={saving}
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={saving}
               onClick={async () => {
                 setSaving(true);
                 try {
@@ -522,36 +544,34 @@ export function BomEditor({
                 }
               }}
             >
-              {saving ? (
-                <>
-                  <span className="spinner" style={{ width: 10, height: 10 }} />{" "}
-                  {__t("bom.saving") || "Saving..."}
-                </>
-              ) : (
-                __t("bom.save") || "Save"
-              )}
-            </button>
-            <button
-              className="btn small"
+              {saving
+                ? __t("bom.saving") || "Saving..."
+                : __t("bom.save") || "Save"}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 setRows(JSON.parse(JSON.stringify(data.rows)));
                 markClean();
               }}
             >
               {__t("bom.discard") || "Discard"}
-            </button>
+            </Button>
           </div>
         )}
         <div className="bom-toolbar">
-          <button className="btn small" onClick={addItem}>
+          <Button variant="secondary" size="sm" onClick={addItem}>
             <Icon.Plus size={11} /> {__t("bom.addItem") || "Add Item"}
-          </button>
+          </Button>
           <span
             className="w-1 h-14"
-            style={{ background: "var(--line)", margin: "0 6px" }}
+            style={{ background: "var(--line)", margin: "0 var(--sp-2)" }}
+            aria-hidden="true"
           />
-          <button
-            className="btn small"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() =>
               ctx?.openModal?.("barcode-scan", {
                 onFound: (pn) => window.__setBomSearch?.(pn),
@@ -559,7 +579,7 @@ export function BomEditor({
             }
           >
             <Icon.Scan size={11} /> {__t("bom.scan") || "Scan"}
-          </button>
+          </Button>
           <div className="flex-1" />
           <span className="hint">
             {flat.length}{" "}
@@ -569,7 +589,10 @@ export function BomEditor({
           </span>
         </div>
         <div className="bom-scroll">
-          <table className="bom-table">
+          <table
+            className="bom-table"
+            aria-label={__t("bom.tableAriaLabel") || "Bill of materials"}
+          >
             <colgroup>
               <col className="col-drag" />
               <col className="col-check" />
@@ -601,6 +624,7 @@ export function BomEditor({
                     }
                     checked={allSelected}
                     onChange={toggleAll}
+                    aria-label={__t("bom.selectAllRows") || "Select all rows"}
                   />
                 </th>
                 <th>{__t("bom.colPartNo") || "Part No."}</th>
@@ -663,6 +687,10 @@ export function BomEditor({
                         (dragId === row.id ? "dragging " : "") +
                         (dropId === row.id ? "drop-target " : "")
                       }
+                      aria-selected={isSelected}
+                      aria-expanded={
+                        row.children ? expanded.has(row.id) : undefined
+                      }
                       draggable
                       onDragStart={() => handleDragStart(row.id)}
                       onDragOver={(e) => handleDragOver(e, row.id)}
@@ -691,6 +719,9 @@ export function BomEditor({
                           checked={isSelected}
                           onChange={() => toggleSelect(row.id)}
                           onClick={(e) => e.stopPropagation()}
+                          aria-label={
+                            (__t("bom.selectRow") || "Select") + " " + row.pn
+                          }
                         />
                       </td>
                       <td
@@ -716,6 +747,14 @@ export function BomEditor({
                                 "hier-expand " +
                                 (expanded.has(row.id) ? "expanded" : "")
                               }
+                              aria-expanded={expanded.has(row.id)}
+                              aria-label={
+                                (expanded.has(row.id)
+                                  ? __t("bom.collapseRow") || "Collapse"
+                                  : __t("bom.expandRow") || "Expand") +
+                                " " +
+                                row.pn
+                              }
                               onClick={(e) => {
                                 e.stopPropagation();
                                 toggleExpand(row.id);
@@ -736,9 +775,9 @@ export function BomEditor({
                               onCommit={(v) => inlineEdit(row.id, { name: v })}
                             />
                             {row.assembly && row.children && (
-                              <span className="badge">
+                              <Badge tone="neutral" pill className="badge">
                                 {row.children.length}
-                              </span>
+                              </Badge>
                             )}
                           </span>
                         </span>
@@ -773,20 +812,17 @@ export function BomEditor({
                       </td>
                       <td className="mono fg-3">{row.origin}</td>
                       <td>
-                        <span
-                          className={
-                            "status " + (STATUS_CLASS[row.status] || "")
-                          }
-                        >
-                          {row.status}
-                        </span>
+                        <StatusPill status={row.status} />
                       </td>
                       <td>
                         <Sparkline data={row.trend} />
                       </td>
                       <td>
                         <span className="inline-flex gap-2">
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            iconOnly
                             className="icon-btn w-22 h-22 op-06"
                             onClick={(e) => {
                               e.stopPropagation();
@@ -799,11 +835,14 @@ export function BomEditor({
                             aria-label={__t("bom.openDetail") || "Open detail"}
                           >
                             <Icon.Chevron size={11} />
-                          </button>
+                          </Button>
                           <DropdownButton
                             width={200}
                             trigger={
-                              <button
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                iconOnly
                                 className="icon-btn w-22 h-22"
                                 title={__t("bom.rowActions") || "Row actions"}
                                 aria-label={
@@ -811,7 +850,7 @@ export function BomEditor({
                                 }
                               >
                                 <Icon.Dots size={12} />
-                              </button>
+                              </Button>
                             }
                             items={[
                               {
@@ -966,7 +1005,9 @@ export function BomEditor({
             <span className="count">
               {selected.size} {__t("bom.selected") || "selected"}
             </span>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() =>
                 ctx?.openModal("bulk-edit", {
                   count: selected.size,
@@ -991,8 +1032,10 @@ export function BomEditor({
               }
             >
               <Icon.Edit size={12} /> {__t("bom.editFields") || "Edit fields"}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 const selectedRows = flat.filter(
                   (r) => selected.has(r.id) && !r.assembly,
@@ -1021,8 +1064,10 @@ export function BomEditor({
               }}
             >
               <Icon.Cart size={12} /> {__t("bom.addToPo") || "Add to PO"}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 const exportRows = flat.filter((r) => selected.has(r.id));
                 const csvRows = exportRows.map((r) => ({
@@ -1062,9 +1107,11 @@ export function BomEditor({
               }}
             >
               <Icon.Export size={12} /> {__t("common.export") || "Export"}
-            </button>
-            <span className="divider" />
-            <button
+            </Button>
+            <span className="divider" aria-hidden="true" />
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 const n = selected.size;
                 const remove = (rs) =>
@@ -1093,15 +1140,18 @@ export function BomEditor({
               }}
             >
               <Icon.Trash size={12} /> {__t("common.delete") || "Delete"}
-            </button>
-            <span className="divider" />
-            <button
+            </Button>
+            <span className="divider" aria-hidden="true" />
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
               onClick={clearSelection}
               title={__t("bom.clearSelection") || "Clear selection"}
               aria-label={__t("bom.clearSelection") || "Clear selection"}
             >
               <Icon.X size={12} />
-            </button>
+            </Button>
           </div>
         )}
       </div>
