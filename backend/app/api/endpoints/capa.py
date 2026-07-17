@@ -9,6 +9,7 @@ from app.core.deps import get_current_user
 from app.core.pagination import PageParams, get_page_params, paginate
 from app.core.rbac import require_parts_read, require_parts_write
 from app.db.session import get_db
+from app.integrations.events import emit_integration_event
 from app.models.capa import CAPA
 from app.models.user import User
 from app.schemas.capa import CAPACreate, CAPAResponse, CAPAUpdate
@@ -75,8 +76,14 @@ async def update_capa(
     obj = result.scalars().first()
     if not obj:
         raise HTTPException(status_code=404, detail="CAPA not found")
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    changed = payload.model_dump(exclude_unset=True)
+    for k, v in changed.items():
         setattr(obj, k, v)
+    if "status" in changed:
+        await emit_integration_event(
+            db, current_user.tenantId, "capa", obj.id, "status_change",
+            {"ref": obj.capaNumber, "status": obj.status},
+        )
     await db.commit()
     await db.refresh(obj)
     return obj
@@ -123,5 +130,9 @@ async def verify_capa(
     obj.verifiedDate = datetime.now(UTC)
     if result == "Effective":
         obj.status = "Closed"
+    await emit_integration_event(
+        db, current_user.tenantId, "capa", obj.id, "status_change",
+        {"ref": obj.capaNumber, "status": obj.status},
+    )
     await db.commit()
     return {"detail": f"CAPA verified: {result}"}

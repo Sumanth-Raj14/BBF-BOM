@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import cache_get, cache_set
 from app.core.idempotency import check_idempotency
 from app.core.tenant_context import get_tenant_id
+from app.integrations.events import emit_integration_event
 from app.models.audit_log import AuditLog
 from app.models.mbom import MbomHeader
 from app.models.part import Part
@@ -200,6 +201,10 @@ async def perform_work_order_action(
         wo.quantity_completed = wo.quantity_ordered
     if comments:
         wo.notes = (wo.notes or "") + f"\n[{datetime.now().isoformat()}] {comments}"
+    await emit_integration_event(
+        db, current_user.tenantId, "work_order", wo.id, "status_change",
+        {"ref": wo.wo_number, "status": wo.status},
+    )
     await db.commit()
     await _log_audit(
         db,

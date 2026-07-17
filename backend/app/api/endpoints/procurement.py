@@ -9,6 +9,7 @@ from app.core.deps import get_current_user
 from app.core.pagination import PageParams, get_page_params
 from app.core.rbac import require_procurement_write
 from app.db.session import get_db
+from app.integrations.events import emit_integration_event
 from app.models.user import User
 from app.services import procurement_service
 
@@ -147,7 +148,13 @@ async def advance_procurement_status(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_procurement_write),
 ):
-    return await procurement_service.advance_procurement_status(db, order_id, body.action)
+    result = await procurement_service.advance_procurement_status(db, order_id, body.action)
+    await emit_integration_event(
+        db, current_user.tenantId, "purchase_order", result["id"], "status_change",
+        {"ref": result.get("poNumber"), "status": result.get("status")},
+    )
+    await db.commit()
+    return result
 
 
 @router.delete("/{order_id}", status_code=204)
