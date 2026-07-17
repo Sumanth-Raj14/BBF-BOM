@@ -59,6 +59,7 @@ import {
   CustomAttributesScreen,
   APIKeysScreen,
   WorkQueueScreen,
+  IntegrationsScreen,
 } from "../components/LazyScreens.jsx";
 
 const ErrBD = (p) =>
@@ -560,6 +561,10 @@ function AppShell() {
             <Route
               path="/my-work"
               element={<GenericScreen Component={WorkQueueScreen} />}
+            />
+            <Route
+              path="/integrations"
+              element={<GenericScreen Component={IntegrationsScreen} />}
             />
             <Route path="*" element={<FourOhFour />} />
           </Routes>

@@ -201,6 +201,7 @@ api_router.include_router(
 # Teams + unified work queue (WS2)
 api_router.include_router(endpoints.teams.router, prefix="/teams", tags=["teams"])
 api_router.include_router(endpoints.work_queue.router, prefix="/work", tags=["work-queue"])
+api_router.include_router(endpoints.integrations.router, prefix="/integrations", tags=["integrations"])
 
 # Enterprise Features
 api_router.include_router(

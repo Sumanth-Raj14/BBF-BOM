@@ -15,6 +15,7 @@ from app.core.deps import get_current_user
 from app.core.pagination import PageParams, get_page_params, paginate
 from app.core.rbac import require_admin, require_engineering, require_viewer
 from app.db.session import get_db
+from app.integrations.events import emit_integration_event
 from app.models.eco import EcoApproval, EcoHeader, EcoNotification
 from app.models.user import User
 from app.services.eco_service import (
@@ -187,6 +188,10 @@ async def approve_eco(
     eco.status = "approved"
     eco.approved_by = approver_id
     eco.approved_at = datetime.now(UTC)
+    await emit_integration_event(
+        db, current_user.tenantId, "eco", eco.id, "status_change",
+        {"ref": eco.eco_number, "status": eco.status},
+    )
     await db.commit()
     return {
         "eco_id": eco_id,
@@ -213,6 +218,10 @@ async def implement_eco(
     eco.implemented_at = datetime.now(UTC)
     if notes:
         eco.description = (eco.description or "") + f"\n[IMPLEMENTED] {notes}"
+    await emit_integration_event(
+        db, current_user.tenantId, "eco", eco.id, "status_change",
+        {"ref": eco.eco_number, "status": eco.status},
+    )
     await db.commit()
     return {
         "eco_id": eco_id,

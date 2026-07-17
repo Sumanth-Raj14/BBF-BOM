@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import cache_get, cache_set
 from app.core.idempotency import check_idempotency
 from app.core.tenant_context import get_tenant_id
+from app.integrations.events import emit_integration_event
 from app.models.audit_log import AuditLog
 from app.models.eco import EcoApproval, EcoHeader, EcoItem, EcoItemAttributeChange, EcoNotification
 from app.models.user import User
@@ -200,6 +201,10 @@ async def perform_eco_action(
         eco.status = "closed"
     if comments:
         eco.description = (eco.description or "") + f"\n[{now.isoformat()}] {comments}"
+    await emit_integration_event(
+        db, current_user.tenantId, "eco", eco.id, "status_change",
+        {"ref": eco.eco_number, "status": eco.status},
+    )
     await db.commit()
     await _log_audit(db, current_user, f"ECO_{action.upper()}", eco_id, {"status": eco.status})
     await db.commit()

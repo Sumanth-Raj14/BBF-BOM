@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import cache_get, cache_set
 from app.core.idempotency import check_idempotency
 from app.core.tenant_context import get_tenant_id
+from app.integrations.events import emit_integration_event
 from app.models.audit_log import AuditLog
 from app.models.quality import InspectionPlan, InspectionRecord, NcrReport
 from app.models.user import User
@@ -163,6 +164,10 @@ async def perform_ncr_action(
         ncr.verified_at = now
     elif action == "reject":
         ncr.status = "rejected"
+    await emit_integration_event(
+        db, current_user.tenantId, "ncr", ncr.id, "status_change",
+        {"ref": ncr.ncr_number, "status": ncr.status},
+    )
     await db.commit()
     await _log_audit(db, current_user, f"NCR_{action.upper()}", ncr_id, {"status": ncr.status})
     await db.commit()

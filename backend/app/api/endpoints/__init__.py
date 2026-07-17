@@ -27,6 +27,7 @@ from app.api.endpoints import (
     erp_connectors,
     export_report,
     fai,
+    integrations,
     inventory_api,
     kanban,
     make_vs_buy,

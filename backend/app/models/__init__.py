@@ -53,6 +53,11 @@ from app.models.inventory import (
     InventoryTransaction,
     Warehouse,
 )
+from app.models.integration import (
+    IntegrationConnection,
+    IntegrationExternalLink,
+    IntegrationOutbox,
+)
 from app.models.kanban import KanbanTrigger
 from app.models.labor import LaborRate, TimesheetEntry
 from app.models.make_vs_buy import MakeVsBuyAnalysis

@@ -34,6 +34,26 @@ from app.monitoring.sentry import init_sentry
 logger = logging.getLogger(__name__)
 
 _backup_task = None
+_integration_drain_task = None
+_INTEGRATION_DRAIN_INTERVAL_SECONDS = 15
+
+
+async def _run_integration_drainer(interval: int = _INTEGRATION_DRAIN_INTERVAL_SECONDS):
+    """Periodically drain the integration outbox with its OWN DB session.
+
+    Mirrors _run_backup_scheduler: scheduled via asyncio.create_task on startup and
+    cancelled on shutdown. Uses an owned async session (not a request dependency).
+    """
+    from app.integrations.worker import drain_integration_outbox_once
+
+    while True:
+        try:
+            result = await drain_integration_outbox_once()
+            if result and any(result.values()):
+                logger.info("Integration outbox drained: %s", result)
+        except Exception as e:
+            logger.error("Integration outbox drain failed: %s", e)
+        await asyncio.sleep(interval)
 
 
 async def _run_backup_scheduler():
@@ -133,8 +153,10 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Backup system OK (%d existing backups)", backup_count)
 
-    global _backup_task
+    global _backup_task, _integration_drain_task
     _backup_task = asyncio.create_task(_run_backup_scheduler())
+    _integration_drain_task = asyncio.create_task(_run_integration_drainer())
+    logger.info("Integration outbox drainer scheduled (every %ds)", _INTEGRATION_DRAIN_INTERVAL_SECONDS)
 
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -154,6 +176,8 @@ async def lifespan(app: FastAPI):
     await stop_queue_worker()
     if _backup_task:
         _backup_task.cancel()
+    if _integration_drain_task:
+        _integration_drain_task.cancel()
     try:
         from app.db.session import get_engine
 
