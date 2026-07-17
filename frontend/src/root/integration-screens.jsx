@@ -2,6 +2,19 @@ import { storage } from "../utils/storage.js";
 import { ANIM } from "../utils/design-tokens.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import {
+  Button,
+  Field,
+  Input,
+  Select,
+  Card,
+  DataTable,
+  Badge,
+  StatusPill,
+  Tabs,
+  EmptyState,
+  ScreenHeader,
+} from "../components/ui/index.js";
 // Phase 4-6 Integration Screens: Webhooks, Bulk Import, ERP Connectors,
 // Supplier Portal, AI Features, Monitoring Dashboard
 // ============ ERP CONNECTORS ============
@@ -119,244 +132,249 @@ function ERPConnectorsScreen() {
   const deleteConnector = (id) => {
     setConfirmDeleteId(id);
   };
+  const erpColumns = [
+    {
+      key: "name",
+      header: __t("integrations.erp.table.name") || "Name",
+      render: (c) => <span className="fw-600 fs-12">{c.name}</span>,
+    },
+    {
+      key: "type",
+      header: __t("integrations.erp.table.type") || "Type",
+      render: (c) => <Badge tone="neutral">{String(c.type).toUpperCase()}</Badge>,
+    },
+    {
+      key: "baseUrl",
+      header: __t("integrations.erp.table.url") || "URL",
+      render: (c) => <span className="mono fs-10">{c.baseUrl}</span>,
+    },
+    {
+      key: "status",
+      header: __t("integrations.erp.table.status") || "Status",
+      render: (c) => (
+        <StatusPill
+          tone={c.active ? "success" : "danger"}
+          label={
+            c.active
+              ? __t("integrations.erp.connected") || "Connected"
+              : __t("integrations.erp.disabled") || "Disabled"
+          }
+        />
+      ),
+    },
+    {
+      key: "lastSyncAt",
+      header: __t("integrations.erp.table.lastSync") || "Last Sync",
+      render: (c) => (
+        <span className="fs-10 fg-3">
+          {c.lastSyncAt || __t("integrations.erp.never") || "Never"}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: __t("integrations.erp.table.actions") || "Actions",
+      render: (c) => (
+        <div className="flex gap-4">
+          <Button
+            size="sm"
+            disabled={actionIds.has("test-" + c.id)}
+            loading={actionIds.has("test-" + c.id)}
+            onClick={() => testConnection(c.id)}
+          >
+            <Icon.Link size={10} /> {__t("integrations.erp.test") || "Test"}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={actionIds.has("sync-" + c.id)}
+            loading={actionIds.has("sync-" + c.id)}
+            onClick={() => syncNow(c.id)}
+          >
+            <Icon.Refresh size={10} /> {__t("integrations.erp.sync") || "Sync"}
+          </Button>
+          <Button size="sm" onClick={() => loadLogs(c.id)}>
+            <Icon.Doc size={10} /> {__t("integrations.erp.logs") || "Logs"}
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            disabled={actionIds.has("del-" + c.id)}
+            loading={actionIds.has("del-" + c.id)}
+            iconOnly
+            aria-label={__t("common.delete") || "Delete"}
+            onClick={() => deleteConnector(c.id)}
+          >
+            <Icon.Trash size={10} />
+          </Button>
+        </div>
+      ),
+    },
+  ];
+  const erpLogColumns = [
+    {
+      key: "direction",
+      header: __t("integrations.erp.logsTable.direction") || "Direction",
+      render: (l) => <Badge>{l.direction}</Badge>,
+    },
+    {
+      key: "entityType",
+      header: __t("integrations.erp.logsTable.entity") || "Entity",
+      render: (l) => <span className="fs-11">{l.entityType}</span>,
+    },
+    {
+      key: "recordsCount",
+      header: __t("integrations.erp.logsTable.records") || "Records",
+      align: "num",
+      render: (l) => <span className="mono fs-11">{l.recordsCount}</span>,
+    },
+    {
+      key: "status",
+      header: __t("integrations.erp.logsTable.status") || "Status",
+      render: (l) => (
+        <StatusPill tone={l.status === "success" ? "success" : "danger"} label={l.status} />
+      ),
+    },
+    {
+      key: "createdAt",
+      header: __t("integrations.erp.logsTable.time") || "Time",
+      render: (l) => <span className="fs-10 fg-3">{l.createdAt}</span>,
+    },
+  ];
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("integrations.erp.title") || "ERP Connectors"}</h1>
-          <div className="sub">
-            {__t("integrations.erp.subtitle") ||
-              "Sync data with SAP, NetSuite, Oracle, ClickUp, Zoho Cliq, and other systems"}
-          </div>
-        </div>
-        <button
-          className="btn primary"
-          disabled={creating}
-          onClick={() => setShowCreate(!showCreate)}
-        >
-          {creating ? (
-            <>
-              <span className="spinner" style={{ width: 10, height: 10 }} />{" "}
-              {__t("integrations.erp.creating") || "Creating…"}
-            </>
-          ) : (
-            <>
-              <Icon.Plus size={12} />{" "}
-              {__t("integrations.erp.newConnector") || "New Connector"}
-            </>
-          )}
-        </button>
-      </div>
+      <ScreenHeader
+        title={__t("integrations.erp.title") || "ERP Connectors"}
+        description={
+          __t("integrations.erp.subtitle") ||
+          "Sync data with SAP, NetSuite, Oracle, ClickUp, Zoho Cliq, and other systems"
+        }
+        actions={
+          <Button
+            variant="primary"
+            disabled={creating}
+            loading={creating}
+            onClick={() => setShowCreate(!showCreate)}
+          >
+            <Icon.Plus size={12} />{" "}
+            {creating
+              ? __t("integrations.erp.creating") || "Creating…"
+              : __t("integrations.erp.newConnector") || "New Connector"}
+          </Button>
+        }
+      />
       {showCreate && (
-        <div className="card mb-12 p-16">
+        <Card className="mb-12">
           <div
             className="d-grid gap-8"
             style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}
           >
-            <input
-              id="erp-name"
-              name="connectorName"
-              className="twk-field"
-              placeholder={
+            <Field
+              label={
                 __t("integrations.erp.connectorNamePlaceholder") ||
                 "Connector name"
               }
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-            <select
-              id="erp-type"
-              name="connectorType"
-              className="twk-field"
-              value={form.type}
-              onChange={(e) => setForm({ ...form, type: e.target.value })}
+              htmlFor="erp-name"
             >
-              <option value="sap">SAP</option>
-              <option value="netsuite">NetSuite</option>
-              <option value="oracle">Oracle</option>
-              <option value="clickup">ClickUp</option>
-              <option value="cliq">Zoho Cliq</option>
-              <option value="custom">
-                {__t("integrations.erp.customRest") || "Custom REST"}
-              </option>
-            </select>
-            <input
-              id="erp-base-url"
-              name="baseUrl"
-              className="twk-field"
-              placeholder={
-                __t("integrations.erp.baseUrlPlaceholder") || "Base URL"
-              }
-              value={form.baseUrl}
-              onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
-            />
-            <input
-              id="erp-api-key"
-              name="apiKey"
-              className="twk-field"
-              placeholder={
-                __t("integrations.erp.apiKeyPlaceholder") || "API Key"
-              }
-              value={form.apiKey}
-              onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
-            />
+              <Input
+                id="erp-name"
+                name="connectorName"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
+            </Field>
+            <Field label={__t("integrations.erp.table.type") || "Type"} htmlFor="erp-type">
+              <Select
+                id="erp-type"
+                name="connectorType"
+                value={form.type}
+                onChange={(e) => setForm({ ...form, type: e.target.value })}
+              >
+                <option value="sap">SAP</option>
+                <option value="netsuite">NetSuite</option>
+                <option value="oracle">Oracle</option>
+                <option value="clickup">ClickUp</option>
+                <option value="cliq">Zoho Cliq</option>
+                <option value="custom">
+                  {__t("integrations.erp.customRest") || "Custom REST"}
+                </option>
+              </Select>
+            </Field>
+            <Field
+              label={__t("integrations.erp.baseUrlPlaceholder") || "Base URL"}
+              htmlFor="erp-base-url"
+            >
+              <Input
+                id="erp-base-url"
+                name="baseUrl"
+                value={form.baseUrl}
+                onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
+              />
+            </Field>
+            <Field
+              label={__t("integrations.erp.apiKeyPlaceholder") || "API Key"}
+              htmlFor="erp-api-key"
+            >
+              <Input
+                id="erp-api-key"
+                name="apiKey"
+                type="password"
+                value={form.apiKey}
+                onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+              />
+            </Field>
           </div>
           <div className="flex gap-8 mt-8">
-            <button
-              className="btn primary"
+            <Button
+              variant="primary"
               disabled={creating}
+              loading={creating}
               onClick={createConnector}
             >
-              {creating ? (
-                <>
-                  <span className="spinner" style={{ width: 10, height: 10 }} />{" "}
-                  {__t("integrations.erp.creating") || "Creating…"}
-                </>
-              ) : (
-                <>
-                  <Icon.Check size={12} /> {__t("common.create") || "Create"}
-                </>
-              )}
-            </button>
-            <button className="btn" onClick={() => setShowCreate(false)}>
+              <Icon.Check size={12} /> {__t("common.create") || "Create"}
+            </Button>
+            <Button onClick={() => setShowCreate(false)}>
               {__t("common.cancel") || "Cancel"}
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
-      <div className="card">
+      <Card bodyClassName="p-0">
         {loading ? (
           SkeletonTable({ rows: 4, cols: 6 })
-        ) : connectors.length === 0 ? (
-          <div className="text-center fg-3 fs-12 p-40">
-            {__t("integrations.erp.empty") ||
-              "No ERP connectors configured. Create one to start syncing."}
-          </div>
         ) : (
-          <table className="bom-table">
-            <thead>
-              <tr>
-                <th>{__t("integrations.erp.table.name") || "Name"}</th>
-                <th>{__t("integrations.erp.table.type") || "Type"}</th>
-                <th>{__t("integrations.erp.table.url") || "URL"}</th>
-                <th>{__t("integrations.erp.table.status") || "Status"}</th>
-                <th>{__t("integrations.erp.table.lastSync") || "Last Sync"}</th>
-                <th>{__t("integrations.erp.table.actions") || "Actions"}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {connectors.map((c) => (
-                <tr key={c.id}>
-                  <td className="fw-600 fs-12">{c.name}</td>
-                  <td>
-                    <span className="tag-pill fs-9 uppercase">{c.type}</span>
-                  </td>
-                  <td className="mono fs-10">{c.baseUrl}</td>
-                  <td>
-                    <span
-                      className={
-                        "status " + (c.active ? "released" : "deprecated")
-                      }
-                    >
-                      {c.active
-                        ? __t("integrations.erp.connected") || "Connected"
-                        : __t("integrations.erp.disabled") || "Disabled"}
-                    </span>
-                  </td>
-                  <td className="fs-10 fg-3">
-                    {c.lastSyncAt || __t("integrations.erp.never") || "Never"}
-                  </td>
-                  <td>
-                    <div className="flex gap-4">
-                      <button
-                        className="btn small"
-                        disabled={actionIds.has("test-" + c.id)}
-                        onClick={() => testConnection(c.id)}
-                      >
-                        <Icon.Link size={10} />{" "}
-                        {actionIds.has("test-" + c.id)
-                          ? "…"
-                          : __t("integrations.erp.test") || "Test"}
-                      </button>
-                      <button
-                        className="btn small primary"
-                        disabled={actionIds.has("sync-" + c.id)}
-                        onClick={() => syncNow(c.id)}
-                      >
-                        <Icon.Refresh size={10} />{" "}
-                        {actionIds.has("sync-" + c.id)
-                          ? "…"
-                          : __t("integrations.erp.sync") || "Sync"}
-                      </button>
-                      <button
-                        className="btn small"
-                        onClick={() => loadLogs(c.id)}
-                      >
-                        <Icon.Doc size={10} />{" "}
-                        {__t("integrations.erp.logs") || "Logs"}
-                      </button>
-                      <button
-                        className="btn small fg-danger"
-                        disabled={actionIds.has("del-" + c.id)}
-                        onClick={() => deleteConnector(c.id)}
-                      >
-                        {actionIds.has("del-" + c.id) ? (
-                          "…"
-                        ) : (
-                          <Icon.Trash size={10} />
-                        )}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            dense
+            ariaLabel={__t("integrations.erp.title") || "ERP Connectors"}
+            columns={erpColumns}
+            rows={connectors}
+            getRowKey={(c) => c.id}
+            empty={
+              <EmptyState
+                title={__t("integrations.erp.empty") || "No ERP connectors configured"}
+                message={
+                  __t("integrations.erp.emptyMsg") ||
+                  "Create one to start syncing."
+                }
+              />
+            }
+          />
         )}
-      </div>
+      </Card>
       {selectedConnector && logs.length > 0 && (
-        <div className="card mt-12">
-          <div className="fw-600 fs-11 uppercase letter-sp-6 fg-3 px-16 py-10">
-            {__t("integrations.erp.syncLogs") || "Sync Logs"}
-          </div>
-          <table className="bom-table">
-            <thead>
-              <tr>
-                <th>
-                  {__t("integrations.erp.logsTable.direction") || "Direction"}
-                </th>
-                <th>{__t("integrations.erp.logsTable.entity") || "Entity"}</th>
-                <th>
-                  {__t("integrations.erp.logsTable.records") || "Records"}
-                </th>
-                <th>{__t("integrations.erp.logsTable.status") || "Status"}</th>
-                <th>{__t("integrations.erp.logsTable.time") || "Time"}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.map((l) => (
-                <tr key={l.id}>
-                  <td>
-                    <span className="tag-pill fs-9">{l.direction}</span>
-                  </td>
-                  <td className="fs-11">{l.entityType}</td>
-                  <td className="mono fs-11">{l.recordsCount}</td>
-                  <td>
-                    <span
-                      className={
-                        "status " +
-                        (l.status === "success" ? "released" : "deprecated")
-                      }
-                    >
-                      {l.status}
-                    </span>
-                  </td>
-                  <td className="fs-10 fg-3">{l.createdAt}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Card
+          className="mt-12"
+          bodyClassName="p-0"
+          title={__t("integrations.erp.syncLogs") || "Sync Logs"}
+        >
+          <DataTable
+            dense
+            ariaLabel={__t("integrations.erp.syncLogs") || "Sync Logs"}
+            columns={erpLogColumns}
+            rows={logs}
+            getRowKey={(l) => l.id}
+          />
+        </Card>
       )}
       {confirmDeleteId !== null && (
         <window.ConfirmModal
@@ -509,207 +527,235 @@ function WebhooksScreen() {
   const deleteWebhook = (id) => {
     setConfirmDeleteId(id);
   };
+  const subscriptionColumns = [
+    {
+      key: "url",
+      header: __t("integrations.webhooks.table.url") || "URL",
+      render: (s) => (
+        <span
+          className="mono fs-10 overflow-h"
+          style={{ display: "inline-block", maxWidth: 260, textOverflow: "ellipsis" }}
+        >
+          {s.url}
+        </span>
+      ),
+    },
+    {
+      key: "events",
+      header: __t("integrations.webhooks.table.events") || "Events",
+      render: (s) => <span className="fs-10">{s.events}</span>,
+    },
+    {
+      key: "status",
+      header: __t("integrations.webhooks.table.status") || "Status",
+      render: (s) => (
+        <StatusPill
+          tone={s.active ? "success" : "danger"}
+          label={
+            s.active
+              ? __t("integrations.webhooks.active") || "Active"
+              : __t("integrations.webhooks.inactive") || "Inactive"
+          }
+        />
+      ),
+    },
+    {
+      key: "createdAt",
+      header: __t("integrations.webhooks.table.created") || "Created",
+      render: (s) => <span className="fs-10 fg-3">{s.createdAt}</span>,
+    },
+    {
+      key: "actions",
+      header: __t("integrations.webhooks.table.actions") || "Actions",
+      render: (s) => (
+        <div className="flex gap-4">
+          <Button size="sm" onClick={() => testWebhook(s.id)}>
+            <Icon.Send size={10} /> {__t("integrations.webhooks.test") || "Test"}
+          </Button>
+          <Button size="sm" onClick={() => toggleWebhook(s.id, s.active)}>
+            {s.active
+              ? __t("integrations.webhooks.pause") || "Pause"
+              : __t("integrations.webhooks.activate") || "Activate"}
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            iconOnly
+            aria-label={__t("common.delete") || "Delete"}
+            onClick={() => deleteWebhook(s.id)}
+          >
+            <Icon.Trash size={10} />
+          </Button>
+        </div>
+      ),
+    },
+  ];
+  const deliveryColumns = [
+    {
+      key: "event",
+      header: __t("integrations.webhooks.deliveryTable.event") || "Event",
+      render: (d) => <span className="fs-11">{d.event}</span>,
+    },
+    {
+      key: "status",
+      header: __t("integrations.webhooks.deliveryTable.status") || "Status",
+      render: (d) => (
+        <StatusPill
+          tone={
+            d.status === "delivered"
+              ? "success"
+              : d.status === "failed"
+                ? "danger"
+                : "warning"
+          }
+          label={d.status}
+        />
+      ),
+    },
+    {
+      key: "statusCode",
+      header: __t("integrations.webhooks.deliveryTable.code") || "Code",
+      align: "num",
+      render: (d) => <span className="mono fs-11">{d.statusCode || "—"}</span>,
+    },
+    {
+      key: "retryCount",
+      header: __t("integrations.webhooks.deliveryTable.retries") || "Retries",
+      align: "num",
+      render: (d) => <span className="mono fs-11">{d.retryCount || 0}</span>,
+    },
+    {
+      key: "createdAt",
+      header: __t("integrations.webhooks.deliveryTable.time") || "Time",
+      render: (d) => <span className="fs-10 fg-3">{d.createdAt || "—"}</span>,
+    },
+    {
+      key: "retryAction",
+      header: "",
+      render: (d) =>
+        d.status === "failed" ? (
+          <Button size="sm" onClick={() => retryDelivery(d.id)}>
+            <Icon.Refresh size={10} /> {__t("integrations.webhooks.retry") || "Retry"}
+          </Button>
+        ) : null,
+    },
+  ];
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("integrations.webhooks.title") || "Webhooks"}</h1>
-          <div className="sub">
-            {__t("integrations.webhooks.subtitle") ||
-              "Manage outgoing webhook subscriptions for real-time event notifications"}
-          </div>
-        </div>
-        <div className="flex gap-8">
-          <button
-            className={"btn" + (activeTab === "subscriptions" ? " primary" : "")}
-            onClick={() => setActiveTab("subscriptions")}
-          >
-            Subscriptions ({subscriptions.length})
-          </button>
-          <button
-            className={"btn" + (activeTab === "deliveries" ? " primary" : "")}
-            onClick={() => setActiveTab("deliveries")}
-          >
-            Delivery Log ({deliveries.length})
-          </button>
-          <button
-            className="btn primary"
-            onClick={() => setShowCreate(!showCreate)}
-          >
+      <ScreenHeader
+        title={__t("integrations.webhooks.title") || "Webhooks"}
+        description={
+          __t("integrations.webhooks.subtitle") ||
+          "Manage outgoing webhook subscriptions for real-time event notifications"
+        }
+        actions={
+          <Button variant="primary" onClick={() => setShowCreate(!showCreate)}>
             <Icon.Plus size={12} />{" "}
             {__t("integrations.webhooks.newWebhook") || "New Webhook"}
-          </button>
-        </div>
-      </div>
+          </Button>
+        }
+      />
+      <Tabs
+        className="mb-12"
+        ariaLabel={__t("integrations.webhooks.title") || "Webhooks"}
+        value={activeTab}
+        onChange={setActiveTab}
+        items={[
+          {
+            value: "subscriptions",
+            label: __t("integrations.webhooks.tabSubscriptions") || "Subscriptions",
+            count: subscriptions.length,
+          },
+          {
+            value: "deliveries",
+            label: __t("integrations.webhooks.tabDeliveries") || "Delivery Log",
+            count: deliveries.length,
+          },
+        ]}
+      />
       {showCreate && (
-        <div className="card mb-12 p-16">
+        <Card className="mb-12">
           <div className="d-grid gap-8 grid-cols-2">
-            <input
-              className="twk-field"
-              placeholder={
-                __t("integrations.webhooks.urlPlaceholder") || "Webhook URL"
-              }
-              value={newUrl}
-              onChange={(e) => setNewUrl(e.target.value)}
-            />
-            <input
-              className="twk-field"
-              placeholder={
-                __t("integrations.webhooks.eventsPlaceholder") ||
+            <Field
+              label={__t("integrations.webhooks.urlPlaceholder") || "Webhook URL"}
+              htmlFor="webhook-url"
+            >
+              <Input
+                id="webhook-url"
+                value={newUrl}
+                onChange={(e) => setNewUrl(e.target.value)}
+              />
+            </Field>
+            <Field
+              label={
+                __t("integrations.webhooks.eventsLabel") ||
                 "Events (e.g. bom.created,part.updated)"
               }
-              value={newEvents}
-              onChange={(e) => setNewEvents(e.target.value)}
-            />
+              htmlFor="webhook-events"
+            >
+              <Input
+                id="webhook-events"
+                value={newEvents}
+                onChange={(e) => setNewEvents(e.target.value)}
+              />
+            </Field>
           </div>
           <div className="flex gap-8 mt-8">
-            <button
-              className="btn primary small"
+            <Button
+              variant="primary"
+              size="sm"
               disabled={creating || !newUrl}
+              loading={creating}
               onClick={createWebhook}
             >
-              {creating
-                ? __t("integrations.webhooks.creating") || "Creating..."
-                : __t("common.create") || "Create"}
-            </button>
-            <button className="btn small" onClick={() => setShowCreate(false)}>
+              {__t("common.create") || "Create"}
+            </Button>
+            <Button size="sm" onClick={() => setShowCreate(false)}>
               {__t("common.cancel") || "Cancel"}
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
       {activeTab === "subscriptions" ? (
-        <div className="card">
+        <Card bodyClassName="p-0">
           {loading ? (
             SkeletonTable({ rows: 3, cols: 5 })
-          ) : subscriptions.length === 0 ? (
-            <div className="text-center fg-3 fs-12 p-40">
-              {__t("integrations.webhooks.empty") || "No webhooks configured."}
-            </div>
           ) : (
-            <table className="bom-table">
-              <thead>
-                <tr>
-                  <th>{__t("integrations.webhooks.table.url") || "URL"}</th>
-                  <th>
-                    {__t("integrations.webhooks.table.events") || "Events"}
-                  </th>
-                  <th>
-                    {__t("integrations.webhooks.table.status") || "Status"}
-                  </th>
-                  <th>
-                    {__t("integrations.webhooks.table.created") || "Created"}
-                  </th>
-                  <th>
-                    {__t("integrations.webhooks.table.actions") || "Actions"}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {subscriptions.map((s) => (
-                  <tr key={s.id}>
-                    <td
-                      className="mono fs-10 overflow-h"
-                      style={{ maxWidth: 260, textOverflow: "ellipsis" }}
-                    >
-                      {s.url}
-                    </td>
-                    <td className="fs-10">{s.events}</td>
-                    <td>
-                      <span
-                        className={
-                          "status " + (s.active ? "released" : "deprecated")
-                        }
-                      >
-                        {s.active
-                          ? __t("integrations.webhooks.active") || "Active"
-                          : __t("integrations.webhooks.inactive") || "Inactive"}
-                      </span>
-                    </td>
-                    <td className="fs-10 fg-3">{s.createdAt}</td>
-                    <td>
-                      <div className="flex gap-4">
-                        <button
-                          className="btn small"
-                          onClick={() => testWebhook(s.id)}
-                        >
-                          <Icon.Send size={10} /> Test
-                        </button>
-                        <button
-                          className="btn small"
-                          onClick={() => toggleWebhook(s.id, s.active)}
-                        >
-                          {s.active ? "Pause" : "Activate"}
-                        </button>
-                        <button
-                          className="btn small fg-danger"
-                          onClick={() => deleteWebhook(s.id)}
-                        >
-                          <Icon.Trash size={10} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable
+              dense
+              ariaLabel={__t("integrations.webhooks.tabSubscriptions") || "Subscriptions"}
+              columns={subscriptionColumns}
+              rows={subscriptions}
+              getRowKey={(s) => s.id}
+              empty={
+                <EmptyState
+                  title={
+                    __t("integrations.webhooks.empty") || "No webhooks configured"
+                  }
+                />
+              }
+            />
           )}
-        </div>
+        </Card>
       ) : (
-        <div className="card">
+        <Card bodyClassName="p-0">
           {deliveriesLoading ? (
             SkeletonTable({ rows: 5, cols: 6 })
-          ) : deliveries.length === 0 ? (
-            <div className="text-center fg-3 fs-12 p-40">No deliveries yet.</div>
           ) : (
-            <table className="bom-table">
-              <thead>
-                <tr>
-                  <th>Event</th>
-                  <th>Status</th>
-                  <th>Code</th>
-                  <th>Retries</th>
-                  <th>Time</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {deliveries.map((d) => (
-                  <tr key={d.id}>
-                    <td className="fs-11">{d.event}</td>
-                    <td>
-                      <span
-                        className={
-                          "status " +
-                          (d.status === "delivered"
-                            ? "released"
-                            : d.status === "failed"
-                              ? "deprecated"
-                              : "review")
-                        }
-                      >
-                        {d.status}
-                      </span>
-                    </td>
-                    <td className="mono fs-11">{d.statusCode || "—"}</td>
-                    <td className="mono fs-11">{d.retryCount || 0}</td>
-                    <td className="fs-10 fg-3">{d.createdAt || "—"}</td>
-                    <td>
-                      {d.status === "failed" && (
-                        <button
-                          className="btn small"
-                          onClick={() => retryDelivery(d.id)}
-                        >
-                          <Icon.Refresh size={10} /> Retry
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable
+              dense
+              ariaLabel={__t("integrations.webhooks.tabDeliveries") || "Delivery Log"}
+              columns={deliveryColumns}
+              rows={deliveries}
+              getRowKey={(d) => d.id}
+              empty={
+                <EmptyState
+                  title={__t("integrations.webhooks.noDeliveries") || "No deliveries yet"}
+                />
+              }
+            />
           )}
-        </div>
+        </Card>
       )}
       {confirmDeleteId !== null && (
         <window.ConfirmModal
@@ -794,21 +840,74 @@ function BulkImportScreen() {
       setUploading(false);
     }
   };
+  const jobColumns = [
+    {
+      key: "filename",
+      header: __t("integrations.bulkImport.table.file") || "File",
+      render: (j) => <span className="fs-11">{j.filename}</span>,
+    },
+    {
+      key: "totalRows",
+      header: __t("integrations.bulkImport.table.rows") || "Rows",
+      align: "num",
+      render: (j) => <span className="mono fs-11">{j.totalRows}</span>,
+    },
+    {
+      key: "processedRows",
+      header: __t("integrations.bulkImport.table.processed") || "Processed",
+      align: "num",
+      render: (j) => <span className="mono fs-11">{j.processedRows}</span>,
+    },
+    {
+      key: "errorRows",
+      header: __t("integrations.bulkImport.table.errors") || "Errors",
+      align: "num",
+      render: (j) => (
+        <span
+          className="mono fs-11"
+          style={{ color: j.errorRows > 0 ? "var(--danger)" : "inherit" }}
+        >
+          {j.errorRows}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: __t("integrations.bulkImport.table.status") || "Status",
+      render: (j) => (
+        <StatusPill
+          tone={
+            j.errorRows > 0
+              ? "warning"
+              : j.status === "completed"
+                ? "success"
+                : "danger"
+          }
+          label={j.status}
+        />
+      ),
+    },
+    {
+      key: "createdAt",
+      header: __t("integrations.bulkImport.table.date") || "Date",
+      render: (j) => <span className="fs-10 fg-3">{j.createdAt}</span>,
+    },
+  ];
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("integrations.bulkImport.title") || "Bulk Import"}</h1>
-          <div className="sub">
-            {__t("integrations.bulkImport.subtitle") ||
-              "Import parts, BOMs, and vendor data from CSV or Excel files"}
-          </div>
-        </div>
-      </div>
-      <div className="card mb-12 p-16">
+      <ScreenHeader
+        title={__t("integrations.bulkImport.title") || "Bulk Import"}
+        description={
+          __t("integrations.bulkImport.subtitle") ||
+          "Import parts, BOMs, and vendor data from CSV or Excel files"
+        }
+      />
+      <Card className="mb-12">
         <div className="flex gap-16 items-center">
           <div className="flex-1">
             <div
+              role="button"
+              tabIndex={0}
               style={{
                 border: "2px dashed var(--line)",
                 borderRadius: "var(--r-2)",
@@ -817,6 +916,12 @@ function BulkImportScreen() {
                 cursor: "pointer",
               }}
               onClick={() => document.getElementById("import-file").click()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  document.getElementById("import-file").click();
+                }
+              }}
             >
               <Icon.Upload
                 size={24}
@@ -825,11 +930,17 @@ function BulkImportScreen() {
               <div className="fs-12 fw-500">
                 {selectedFile
                   ? selectedFile.name
-                  : "Click to select CSV or XLSX file"}
+                  : __t("integrations.bulkImport.selectFile") ||
+                    "Click to select CSV or XLSX file"}
               </div>
               <div className="fs-10 fg-3 mt-4">
-                Supports: Parts, BOMs, Vendors, Purchase Orders
+                {__t("integrations.bulkImport.supports") ||
+                  "Supports: Parts, BOMs, Vendors, Purchase Orders"}
               </div>
+              <label className="sr-only" htmlFor="import-file">
+                {__t("integrations.bulkImport.selectFile") ||
+                  "Click to select CSV or XLSX file"}
+              </label>
               <input
                 id="import-file"
                 type="file"
@@ -839,91 +950,36 @@ function BulkImportScreen() {
               />
             </div>
           </div>
-          <button
-            className="btn primary"
+          <Button
+            variant="primary"
             disabled={!selectedFile || uploading}
+            loading={uploading}
             onClick={handleUpload}
           >
-            {uploading ? (
-              <>
-                <span
-                  className="spinner"
-                  style={{ width: 12, height: 12 }}
-                />{" "}
-                {__t("integrations.bulkImport.uploading") || "Importing..."}
-              </>
-            ) : (
-              <>
-                <Icon.Import size={12} />{" "}
-                {__t("integrations.bulkImport.uploadAndImport") ||
-                  "Start Import"}
-              </>
-            )}
-          </button>
+            <Icon.Import size={12} />{" "}
+            {uploading
+              ? __t("integrations.bulkImport.uploading") || "Importing..."
+              : __t("integrations.bulkImport.uploadAndImport") || "Start Import"}
+          </Button>
         </div>
-      </div>
-      <div className="card">
-        <div className="fw-600 fs-11 uppercase letter-sp-6 fg-3 px-16 py-10">
-          {__t("integrations.bulkImport.importHistory") || "Import History"}
-        </div>
-        {jobs.length === 0 ? (
-          <div className="text-center fg-3 fs-12 p-40">
-            {__t("integrations.bulkImport.empty") || "No imports yet."}
-          </div>
-        ) : (
-          <table className="bom-table">
-            <thead>
-              <tr>
-                <th>{__t("integrations.bulkImport.table.file") || "File"}</th>
-                <th>{__t("integrations.bulkImport.table.rows") || "Rows"}</th>
-                <th>
-                  {__t("integrations.bulkImport.table.processed") ||
-                    "Processed"}
-                </th>
-                <th>
-                  {__t("integrations.bulkImport.table.errors") || "Errors"}
-                </th>
-                <th>
-                  {__t("integrations.bulkImport.table.status") || "Status"}
-                </th>
-                <th>{__t("integrations.bulkImport.table.date") || "Date"}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map((j) => (
-                <tr key={j.id}>
-                  <td className="fs-11">{j.filename}</td>
-                  <td className="mono fs-11">{j.totalRows}</td>
-                  <td className="mono fs-11">{j.processedRows}</td>
-                  <td
-                    className="mono fs-11"
-                    style={{
-                      color: j.errorRows > 0 ? "var(--danger)" : "inherit",
-                    }}
-                  >
-                    {j.errorRows}
-                  </td>
-                  <td>
-                    <span
-                      className={
-                        "status " +
-                        (j.errorRows > 0
-                          ? "warning"
-                          : j.status === "completed"
-                            ? "released"
-                            : "deprecated")
-                      }
-                    >
-                      {j.status}
-                    </span>
-                  </td>
-                  <td className="fs-10 fg-3">{j.createdAt}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      </Card>
+      <Card
+        bodyClassName="p-0"
+        title={__t("integrations.bulkImport.importHistory") || "Import History"}
+      >
+        <DataTable
+          dense
+          ariaLabel={__t("integrations.bulkImport.importHistory") || "Import History"}
+          columns={jobColumns}
+          rows={jobs}
+          getRowKey={(j) => j.id}
+          empty={
+            <EmptyState
+              title={__t("integrations.bulkImport.empty") || "No imports yet"}
+            />
+          }
+        />
+      </Card>
     </div>
   );
 }
@@ -1008,91 +1064,91 @@ function SupplierPortalScreen() {
   };
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>
-            {__t("integrations.supplierPortal.title") || "Supplier Portal"}
-          </h1>
-          <div className="sub">
-            {__t("integrations.supplierPortal.subtitle") ||
-              "Manage vendor access and price update submissions"}
-          </div>
-        </div>
-        <button
-          className="btn primary"
-          disabled={creatingUser}
-          onClick={() => setShowCreateUser(!showCreateUser)}
-        >
-          {creatingUser ? (
-            <>
-              <span className="spinner" style={{ width: 10, height: 10 }} />{" "}
-              {__t("integrations.supplierPortal.creating") || "Creating…"}
-            </>
-          ) : (
-            <>
-              <Icon.Plus size={12} />{" "}
-              {__t("integrations.supplierPortal.addUser") ||
-                "Add Supplier User"}
-            </>
-          )}
-        </button>
-      </div>
+      <ScreenHeader
+        title={__t("integrations.supplierPortal.title") || "Supplier Portal"}
+        description={
+          __t("integrations.supplierPortal.subtitle") ||
+          "Manage vendor access and price update submissions"
+        }
+        actions={
+          <Button
+            variant="primary"
+            disabled={creatingUser}
+            loading={creatingUser}
+            onClick={() => setShowCreateUser(!showCreateUser)}
+          >
+            <Icon.Plus size={12} />{" "}
+            {creatingUser
+              ? __t("integrations.supplierPortal.creating") || "Creating…"
+              : __t("integrations.supplierPortal.addUser") || "Add Supplier User"}
+          </Button>
+        }
+      />
       {showCreateUser && (
-        <div className="card mb-12 p-16">
+        <Card className="mb-12">
           <div className="flex gap-8" style={{ flexWrap: "wrap" }}>
-            <input
-              id="sp-user-email"
-              name="userEmail"
-              className="twk-field"
-              placeholder={
-                __t("integrations.supplierPortal.emailPlaceholder") || "Email"
-              }
-              value={newUser.email}
-              onChange={(e) =>
-                setNewUser({ ...newUser, email: e.target.value })
-              }
-            />
-            <input
-              id="sp-user-name"
-              name="userName"
-              className="twk-field"
-              placeholder={
-                __t("integrations.supplierPortal.namePlaceholder") || "Name"
-              }
-              value={newUser.name}
-              onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-            />
-            <input
-              id="sp-user-vendor"
-              name="vendorId"
-              className="twk-field"
-              type="number"
-              placeholder={
+            <Field
+              label={__t("integrations.supplierPortal.emailPlaceholder") || "Email"}
+              htmlFor="sp-user-email"
+            >
+              <Input
+                id="sp-user-email"
+                name="userEmail"
+                type="email"
+                value={newUser.email}
+                onChange={(e) =>
+                  setNewUser({ ...newUser, email: e.target.value })
+                }
+              />
+            </Field>
+            <Field
+              label={__t("integrations.supplierPortal.namePlaceholder") || "Name"}
+              htmlFor="sp-user-name"
+            >
+              <Input
+                id="sp-user-name"
+                name="userName"
+                value={newUser.name}
+                onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+              />
+            </Field>
+            <Field
+              label={
                 __t("integrations.supplierPortal.vendorIdPlaceholder") ||
                 "Vendor ID (number)"
               }
-              value={newUser.vendorId}
-              onChange={(e) =>
-                setNewUser({ ...newUser, vendorId: e.target.value })
+              htmlFor="sp-user-vendor"
+            >
+              <Input
+                id="sp-user-vendor"
+                name="vendorId"
+                type="number"
+                value={newUser.vendorId}
+                onChange={(e) =>
+                  setNewUser({ ...newUser, vendorId: e.target.value })
+                }
+              />
+            </Field>
+            <Field
+              label={
+                __t("integrations.supplierPortal.passwordPlaceholder") || "Password"
               }
-            />
-            <input
-              id="sp-user-pass"
-              name="password"
-              className="twk-field"
-              type="password"
-              placeholder={
-                __t("integrations.supplierPortal.passwordPlaceholder") ||
-                "Password"
-              }
-              value={newUser.password}
-              onChange={(e) =>
-                setNewUser({ ...newUser, password: e.target.value })
-              }
-            />
-            <button
-              className="btn primary"
+              htmlFor="sp-user-pass"
+            >
+              <Input
+                id="sp-user-pass"
+                name="password"
+                type="password"
+                value={newUser.password}
+                onChange={(e) =>
+                  setNewUser({ ...newUser, password: e.target.value })
+                }
+              />
+            </Field>
+            <Button
+              variant="primary"
               disabled={creatingUser || !newUser.email || !newUser.name}
+              loading={creatingUser}
               onClick={async () => {
                 setCreatingUser(true);
                 try {
@@ -1155,34 +1211,29 @@ function SupplierPortalScreen() {
                 }
               }}
             >
-              {creatingUser ? (
-                <>
-                  <span className="spinner" style={{ width: 10, height: 10 }} />{" "}
-                  {__t("integrations.supplierPortal.creating") || "Creating…"}
-                </>
-              ) : (
-                <>
-                  <Icon.Check size={12} /> {__t("common.create") || "Create"}
-                </>
-              )}
-            </button>
+              <Icon.Check size={12} /> {__t("common.create") || "Create"}
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
       <div className="d-grid gap-12" style={{ gridTemplateColumns: "1fr 2fr" }}>
-        <div className="card">
-          <div className="fw-600 fs-11 uppercase letter-sp-6 fg-3 px-16 py-10">
-            {__t("integrations.supplierPortal.supplierUsers", {
+        <Card
+          bodyClassName="p-0"
+          title={
+            __t("integrations.supplierPortal.supplierUsers", {
               count: users.length,
-            }) || "Supplier Users (" + users.length + ")"}
-          </div>
+            }) || "Supplier Users (" + users.length + ")"
+          }
+        >
           {loading ? (
             SkeletonCards({ count: 3 })
           ) : users.length === 0 ? (
-            <div className="text-center fg-3 fs-11 p-16">
-              {__t("integrations.supplierPortal.noUsers") ||
-                "No supplier users yet"}
-            </div>
+            <EmptyState
+              title={
+                __t("integrations.supplierPortal.noUsers") ||
+                "No supplier users yet"
+              }
+            />
           ) : (
             <div className="px-16 pb-12">
               {users.map((u) => (
@@ -1194,29 +1245,27 @@ function SupplierPortalScreen() {
                     <div className="fs-12 fw-500">{u.name}</div>
                     <div className="fs-10 fg-3">{u.email}</div>
                   </div>
-                  <span
-                    className={(
-                      "status " +
-                      (u.active ? "released" : "deprecated") +
-                      " fs-9"
-                    ).trim()}
-                  >
-                    {u.active
-                      ? __t("integrations.supplierPortal.active") || "Active"
-                      : __t("integrations.supplierPortal.inactive") ||
-                        "Inactive"}
-                  </span>
+                  <StatusPill
+                    tone={u.active ? "success" : "danger"}
+                    label={
+                      u.active
+                        ? __t("integrations.supplierPortal.active") || "Active"
+                        : __t("integrations.supplierPortal.inactive") || "Inactive"
+                    }
+                  />
                 </div>
               ))}
             </div>
           )}
-        </div>
-        <div className="card">
-          <div className="fw-600 fs-11 uppercase letter-sp-6 fg-3 px-16 py-10">
-            {__t("integrations.supplierPortal.priceUpdates", {
+        </Card>
+        <Card
+          bodyClassName="p-0"
+          title={
+            __t("integrations.supplierPortal.priceUpdates", {
               count: priceUpdates.length,
-            }) || "Price Update Submissions (" + priceUpdates.length + ")"}
-          </div>
+            }) || "Price Update Submissions (" + priceUpdates.length + ")"
+          }
+        >
           <table className="bom-table">
             <thead>
               <tr>
@@ -1262,43 +1311,41 @@ function SupplierPortalScreen() {
                     <td className="mono fs-11">{INR(p.oldPrice, 2)}</td>
                     <td className="mono fs-11">{INR(p.newPrice, 2)}</td>
                     <td>
-                      <span
-                        className={
-                          "status " +
-                          (p.status === "approved"
-                            ? "released"
+                      <StatusPill
+                        tone={
+                          p.status === "approved"
+                            ? "success"
                             : p.status === "rejected"
-                              ? "deprecated"
-                              : "review")
+                              ? "danger"
+                              : "warning"
                         }
-                      >
-                        {p.status}
-                      </span>
+                        label={p.status}
+                      />
                     </td>
                     <td className="fs-10 fg-3">{p.createdAt || "\u2014"}</td>
                     <td>
                       {p.status === "pending" && (
                         <div className="flex gap-4">
-                          <button
-                            className="btn small primary"
+                          <Button
+                            variant="primary"
+                            size="sm"
                             disabled={actionIds.has("approve-" + p.id)}
+                            loading={actionIds.has("approve-" + p.id)}
                             onClick={() => approve(p.id)}
                           >
                             <Icon.Check size={10} />{" "}
-                            {actionIds.has("approve-" + p.id)
-                              ? "…"
-                              : __t("common.approve") || "Approve"}
-                          </button>
-                          <button
-                            className="btn small fg-danger"
+                            {__t("common.approve") || "Approve"}
+                          </Button>
+                          <Button
+                            variant="danger"
+                            size="sm"
                             disabled={actionIds.has("reject-" + p.id)}
+                            loading={actionIds.has("reject-" + p.id)}
                             onClick={() => reject(p.id)}
                           >
                             <Icon.X size={10} />{" "}
-                            {actionIds.has("reject-" + p.id)
-                              ? "…"
-                              : __t("common.reject") || "Reject"}
-                          </button>
+                            {__t("common.reject") || "Reject"}
+                          </Button>
                         </div>
                       )}
                     </td>
@@ -1307,7 +1354,7 @@ function SupplierPortalScreen() {
               )}
             </tbody>
           </table>
-        </div>
+        </Card>
       </div>
     </div>
   );
@@ -1428,55 +1475,36 @@ function AIFeaturesScreen() {
   };
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("integrations.ai.title") || "AI & Automation"}</h1>
-          <div className="sub">
-            {__t("integrations.ai.subtitle") ||
-              "Demand forecasting, part interchangeability, poka-yoke validation, and approval automation"}
-          </div>
-        </div>
-      </div>
-      <div className="flex gap-4 mb-12">
-        {[
-          ["forecast", __t("integrations.ai.tabForecast") || "Demand Forecast"],
-          [
-            "interchange",
-            __t("integrations.ai.tabInterchange") || "Interchangeability",
-          ],
-          [
-            "validation",
-            __t("integrations.ai.tabValidation") || "Validation Rules",
-          ],
-          [
-            "automation",
-            __t("integrations.ai.tabAutomation") || "Approval Automation",
-          ],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            className={"btn" + (tab === key ? " primary" : "")}
-            onClick={() => setTab(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <ScreenHeader
+        title={__t("integrations.ai.title") || "AI & Automation"}
+        description={
+          __t("integrations.ai.subtitle") ||
+          "Demand forecasting, part interchangeability, poka-yoke validation, and approval automation"
+        }
+      />
+      <Tabs
+        className="mb-12"
+        ariaLabel={__t("integrations.ai.title") || "AI & Automation"}
+        value={tab}
+        onChange={setTab}
+        items={[
+          { value: "forecast", label: __t("integrations.ai.tabForecast") || "Demand Forecast" },
+          { value: "interchange", label: __t("integrations.ai.tabInterchange") || "Interchangeability" },
+          { value: "validation", label: __t("integrations.ai.tabValidation") || "Validation Rules" },
+          { value: "automation", label: __t("integrations.ai.tabAutomation") || "Approval Automation" },
+        ]}
+      />
       {tab === "forecast" && (
-        <div className="card">
+        <Card>
           <div className="flex justify-between items-center px-16 py-10">
             <span className="fw-600 fs-11 uppercase letter-sp-6 fg-3">
               {__t("integrations.ai.forecastSection") || "Demand Forecasts"}
             </span>
-            <button
-              className="btn primary"
-              onClick={generateForecast}
-              disabled={loading}
-            >
+            <Button variant="primary" onClick={generateForecast} disabled={loading} loading={loading}>
               <Icon.Sparkles size={12} />{" "}
               {__t("integrations.ai.generateForecast") ||
                 "Generate from PO History"}
-            </button>
+            </Button>
           </div>
           {loading ? (
             SkeletonTable({ rows: 5, cols: 5 })
@@ -1514,18 +1542,16 @@ function AIFeaturesScreen() {
                     <td className="mono fs-11">{f.forecastDate}</td>
                     <td className="mono fs-11">{f.predictedQuantity}</td>
                     <td>
-                      <span
-                        className={
-                          "status " +
-                          (f.confidence >= 0.8
-                            ? "released"
+                      <StatusPill
+                        tone={
+                          f.confidence >= 0.8
+                            ? "success"
                             : f.confidence >= 0.5
-                              ? "review"
-                              : "deprecated")
+                              ? "warning"
+                              : "danger"
                         }
-                      >
-                        {Math.round((f.confidence || 0) * 100)}%
-                      </span>
+                        label={Math.round((f.confidence || 0) * 100) + "%"}
+                      />
                     </td>
                     <td className="fs-10 fg-3">{f.model || "po-history"}</td>
                   </tr>
@@ -1533,23 +1559,19 @@ function AIFeaturesScreen() {
               </tbody>
             </table>
           )}
-        </div>
+        </Card>
       )}
       {tab === "interchange" && (
-        <div className="card">
+        <Card>
           <div className="flex justify-between items-center px-16 py-10">
             <span className="fw-600 fs-11 uppercase letter-sp-6 fg-3">
               {__t("integrations.ai.interchangeSection") ||
                 "Interchangeability Suggestions"}
             </span>
-            <button
-              className="btn primary"
-              onClick={analyzeInterchangeability}
-              disabled={loading}
-            >
+            <Button variant="primary" onClick={analyzeInterchangeability} disabled={loading} loading={loading}>
               <Icon.Sparkles size={12} />{" "}
               {__t("integrations.ai.analyzeParts") || "Analyze Parts"}
-            </button>
+            </Button>
           </div>
           {loading ? (
             SkeletonTable({ rows: 4, cols: 5 })
@@ -1613,37 +1635,29 @@ function AIFeaturesScreen() {
                     </td>
                     <td className="fs-10 fg-3">{s.reason}</td>
                     <td>
-                      <span
-                        className={
-                          "status " +
-                          (s.status === "approved" ? "released" : "review")
-                        }
-                      >
-                        {s.status || "pending"}
-                      </span>
+                      <StatusPill
+                        tone={s.status === "approved" ? "success" : "warning"}
+                        label={s.status || "pending"}
+                      />
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-        </div>
+        </Card>
       )}
       {tab === "validation" && (
-        <div className="card">
+        <Card>
           <div className="flex justify-between items-center px-16 py-10">
             <span className="fw-600 fs-11 uppercase letter-sp-6 fg-3">
               {__t("integrations.ai.validationSection") ||
                 "Poka-yoke Validation Results"}
             </span>
-            <button
-              className="btn primary"
-              onClick={runValidation}
-              disabled={loading}
-            >
+            <Button variant="primary" onClick={runValidation} disabled={loading} loading={loading}>
               <Icon.Sparkles size={12} />{" "}
               {__t("integrations.ai.runValidation") || "Run Validation"}
-            </button>
+            </Button>
           </div>
           {loading ? (
             SkeletonTable({ rows: 5, cols: 5 })
@@ -1681,45 +1695,38 @@ function AIFeaturesScreen() {
                     <td className="fs-11">{v.partId}</td>
                     <td className="fs-11">{v.ruleName}</td>
                     <td>
-                      <span
-                        className={
-                          "status " + (v.passed ? "released" : "deprecated")
+                      <StatusPill
+                        tone={v.passed ? "success" : "danger"}
+                        label={
+                          v.passed
+                            ? __t("integrations.ai.pass") || "PASS"
+                            : __t("integrations.ai.fail") || "FAIL"
                         }
-                      >
-                        {v.passed
-                          ? __t("integrations.ai.pass") || "PASS"
-                          : __t("integrations.ai.fail") || "FAIL"}
-                      </span>
+                      />
                     </td>
                     <td className="fs-10 fg-3">{v.message}</td>
                     <td>
-                      <span
-                        className={("tag-pill" + " fs-9").trim()}
-                        style={{
-                          color:
-                            v.severity === "critical"
-                              ? "var(--danger)"
-                              : v.severity === "warning"
-                                ? "var(--warn)"
-                                : undefined,
-                        }}
+                      <Badge
+                        tone={
+                          v.severity === "critical"
+                            ? "danger"
+                            : v.severity === "warning"
+                              ? "warning"
+                              : "neutral"
+                        }
                       >
                         {v.severity}
-                      </span>
+                      </Badge>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-        </div>
+        </Card>
       )}
       {tab === "automation" && (
-        <div className="card">
-          <div className="fw-600 fs-11 uppercase letter-sp-6 fg-3 px-16 py-10">
-            {__t("integrations.ai.automationSection") ||
-              "Approval Automation Rules"}
-          </div>
+        <Card title={__t("integrations.ai.automationSection") || "Approval Automation Rules"}>
           {loading ? (
             SkeletonCards({ count: 4 })
           ) : rules.length === 0 ? (
@@ -1742,22 +1749,19 @@ function AIFeaturesScreen() {
                         "No conditions"}
                     </div>
                   </div>
-                  <span
-                    className={(
-                      "status " +
-                      (r.active ? "released" : "deprecated") +
-                      " fs-9"
-                    ).trim()}
-                  >
-                    {r.active
-                      ? __t("integrations.ai.active") || "Active"
-                      : __t("integrations.ai.disabled") || "Disabled"}
-                  </span>
+                  <StatusPill
+                    tone={r.active ? "success" : "danger"}
+                    label={
+                      r.active
+                        ? __t("integrations.ai.active") || "Active"
+                        : __t("integrations.ai.disabled") || "Disabled"
+                    }
+                  />
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </Card>
       )}
     </div>
   );
@@ -1791,39 +1795,38 @@ function MonitoringScreen() {
   }, []);
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("integrations.monitoring.title") || "System Monitoring"}</h1>
-          <div className="sub">
-            {__t("integrations.monitoring.subtitle") ||
-              "Application health, metrics, and performance"}
-          </div>
-        </div>
-        <button
-          className="btn"
-          onClick={() => {
-            setLoading(true);
-            Promise.all([
-              monitoringAPI?.metrics(),
-              monitoringAPI?.healthDetailed(),
-            ])
-              .then(([m, h]) => {
-                setMetrics(m);
-                setHealth(h);
-                setLoading(false);
-              })
-              .catch(() => {
-                console.error("Monitoring refresh failed");
-                setMetrics(null);
-                setHealth(null);
-                setLoading(false);
-              });
-          }}
-        >
-          <Icon.Refresh size={12} />{" "}
-          {__t("integrations.monitoring.refresh") || "Refresh"}
-        </button>
-      </div>
+      <ScreenHeader
+        title={__t("integrations.monitoring.title") || "System Monitoring"}
+        description={
+          __t("integrations.monitoring.subtitle") ||
+          "Application health, metrics, and performance"
+        }
+        actions={
+          <Button
+            onClick={() => {
+              setLoading(true);
+              Promise.all([
+                monitoringAPI?.metrics(),
+                monitoringAPI?.healthDetailed(),
+              ])
+                .then(([m, h]) => {
+                  setMetrics(m);
+                  setHealth(h);
+                  setLoading(false);
+                })
+                .catch(() => {
+                  console.error("Monitoring refresh failed");
+                  setMetrics(null);
+                  setHealth(null);
+                  setLoading(false);
+                });
+            }}
+          >
+            <Icon.Refresh size={12} />{" "}
+            {__t("integrations.monitoring.refresh") || "Refresh"}
+          </Button>
+        }
+      />
       {health && (
         <div
           className="kpi-grid mb-12"
@@ -1833,16 +1836,11 @@ function MonitoringScreen() {
             <div className="l">
               {__t("integrations.monitoring.apiStatus") || "API Status"}
             </div>
-            <div
-              className="v"
-              style={{
-                color:
-                  health.status === "healthy"
-                    ? "var(--green, #10b981)"
-                    : "var(--danger)",
-              }}
-            >
-              {health.status}
+            <div className="v">
+              <StatusPill
+                tone={health.status === "healthy" ? "success" : "danger"}
+                label={health.status}
+              />
             </div>
           </div>
           <div className="kpi">
@@ -1859,32 +1857,27 @@ function MonitoringScreen() {
           </div>
           <div className="kpi">
             <div className="l">{__t("integrations.monitoring.db") || "DB"}</div>
-            <div
-              className="v"
-              style={{
-                color:
-                  health.database?.status === "connected"
-                    ? "var(--green, #10b981)"
-                    : "var(--danger)",
-              }}
-            >
-              {health.database?.status || "\u2014"}
+            <div className="v">
+              <StatusPill
+                tone={health.database?.status === "connected" ? "success" : "danger"}
+                label={health.database?.status || "\u2014"}
+              />
             </div>
           </div>
         </div>
       )}
       {metrics && (
-        <div className="card">
-          <div className="fw-600 fs-11 uppercase letter-sp-6 fg-3 px-16 py-10">
-            {__t("integrations.monitoring.metrics") || "Prometheus Metrics"}
-          </div>
+        <Card
+          bodyClassName="p-0"
+          title={__t("integrations.monitoring.metrics") || "Prometheus Metrics"}
+        >
           <pre
             className="fs-10 font-mono overflow-x-a bg-sunk rounded-r2"
             style={{ padding: 16, maxHeight: 400, margin: "0 16px 16px" }}
           >
             {metrics}
           </pre>
-        </div>
+        </Card>
       )}
     </div>
   );
@@ -1999,42 +1992,39 @@ function OrderTrackingScreen() {
   if (selectedTracking && detailData) {
     return (
       <div className="screen-wrap">
-        <div className="screen-header">
-          <div className="flex items-center gap-12">
-            <button
-              className="btn"
-              onClick={() => {
-                setSelectedTracking(null);
-                setDetailData(null);
-              }}
-            >
-              <Icon.ChevronLeft size={14} /> {__t("common.back") || "Back"}
-            </button>
-            <div>
-              <h1>
-                {detailData.po?.poNumber ||
-                  __t("orderTracking.title") ||
-                  "Order Tracking"}
-              </h1>
-              <div className="sub">
-                {detailData.po?.vendorName} \u00B7{" "}
-                {detailData.po?.project || ""}
-              </div>
-            </div>
-          </div>
-          <div className="flex gap-8">
-            {detailData.currentStage !== "completed" &&
-              detailData.currentStage !== "delivered" && (
-                <button
-                  className="btn primary"
-                  onClick={() => advanceStage(detailData.id)}
-                >
-                  <Icon.ChevronRight size={12} />{" "}
-                  {__t("orderTracking.advanceStage") || "Advance Stage"}
-                </button>
-              )}
-          </div>
-        </div>
+        <ScreenHeader
+          title={
+            <span className="flex items-center gap-12">
+              <Button
+                size="sm"
+                onClick={() => {
+                  setSelectedTracking(null);
+                  setDetailData(null);
+                }}
+              >
+                <Icon.ChevronLeft size={14} /> {__t("common.back") || "Back"}
+              </Button>
+              {detailData.po?.poNumber ||
+                __t("orderTracking.title") ||
+                "Order Tracking"}
+            </span>
+          }
+          description={
+            <span>
+              {detailData.po?.vendorName} \u00B7{" "}
+              {detailData.po?.project || ""}
+            </span>
+          }
+          actions={
+            detailData.currentStage !== "completed" &&
+            detailData.currentStage !== "delivered" && (
+              <Button variant="primary" onClick={() => advanceStage(detailData.id)}>
+                <Icon.ChevronRight size={12} />{" "}
+                {__t("orderTracking.advanceStage") || "Advance Stage"}
+              </Button>
+            )
+          }
+        />
         {/* Status Banner */}
         <div
           style={{
@@ -2167,16 +2157,22 @@ function OrderTrackingScreen() {
           className="d-grid gap-12"
           style={{ gridTemplateColumns: "2fr 1fr" }}
         >
-          <div className="card">
-            <div className="fw-600 fs-11 uppercase letter-sp-6 fg-3 px-16 py-10">
-              {__t("orderTracking.shipmentUpdates") || "Shipment Updates"} (
-              {(detailData.shipmentUpdates || []).length})
-            </div>
+          <Card
+            bodyClassName="p-0"
+            title={
+              (__t("orderTracking.shipmentUpdates") || "Shipment Updates") +
+              " (" +
+              (detailData.shipmentUpdates || []).length +
+              ")"
+            }
+          >
             {(detailData.shipmentUpdates || []).length === 0 ? (
-              <div className="text-center fg-3 fs-11" style={{ padding: 24 }}>
-                {__t("orderTracking.noShipmentUpdates") ||
-                  "No shipment updates yet"}
-              </div>
+              <EmptyState
+                title={
+                  __t("orderTracking.noShipmentUpdates") ||
+                  "No shipment updates yet"
+                }
+              />
             ) : (
               <div className="px-16 pb-12">
                 {detailData.shipmentUpdates.map((u, i) => (
@@ -2194,7 +2190,7 @@ function OrderTrackingScreen() {
                     <div
                       className="w-8 h-8 br-50p mt-4 flex-shrink-0"
                       style={{
-                        background: i === 0 ? "#e85d1f" : "var(--line)",
+                        background: i === 0 ? "var(--accent)" : "var(--line)",
                       }}
                     />
                     <div className="flex-1">
@@ -2215,13 +2211,13 @@ function OrderTrackingScreen() {
                 ))}
               </div>
             )}
-          </div>
+          </Card>
           {/* Order Details Sidebar */}
           <div>
-            <div className="card mb-12 p-16">
-              <div className="fs-10 uppercase letter-sp-6 fg-3 mb-8">
-                {__t("orderTracking.orderDetails") || "Order Details"}
-              </div>
+            <Card
+              className="mb-12"
+              title={__t("orderTracking.orderDetails") || "Order Details"}
+            >
               <div className="d-grid gap-8">
                 <div>
                   <div className="fs-9 fg-4 fs-13 fw-700 fg-accent">
@@ -2258,7 +2254,7 @@ function OrderTrackingScreen() {
                   </div>
                 )}
               </div>
-            </div>
+            </Card>
           </div>
         </div>
       </div>
@@ -2267,51 +2263,56 @@ function OrderTrackingScreen() {
   // List view
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("orderTracking.title") || "Order Tracking"}</h1>
-          <div className="sub">
-            {loading
-              ? __t("common.loading") || "Loading..."
-              : __t("orderTracking.ordersCount", {
-                  count: filtered.length,
-                  overdue: stats?.overdue || 0,
-                }) ||
-                `${filtered.length} orders being tracked \u00B7 ${stats?.overdue || 0} overdue`}
-          </div>
-        </div>
-        <div className="flex gap-8">
-          <div className="search w-220 h-32">
-            <Icon.Search size={12} />
-            <input
-              id="ordertrack-search"
-              name="orderSearch"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={
-                __t("orderTracking.searchPlaceholder") ||
-                "Search by PO, vendor, tracking..."
-              }
-            />
-          </div>
-          <select
-            id="ordertrack-stage"
-            name="stageFilter"
-            className="twk-field w-160 h-32 fs-11"
-            value={stageFilter}
-            onChange={(e) => setStageFilter(e.target.value)}
-          >
-            <option value="all">
-              {__t("orderTracking.allStages") || "All Stages"}
-            </option>
-            {Object.entries(STAGE_LABELS).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
+      <ScreenHeader
+        title={__t("orderTracking.title") || "Order Tracking"}
+        description={
+          loading
+            ? __t("common.loading") || "Loading..."
+            : __t("orderTracking.ordersCount", {
+                count: filtered.length,
+                overdue: stats?.overdue || 0,
+              }) ||
+              `${filtered.length} orders being tracked \u00B7 ${stats?.overdue || 0} overdue`
+        }
+        actions={
+          <div className="flex gap-8">
+            <div className="search w-220 h-32">
+              <Icon.Search size={12} />
+              <input
+                id="ordertrack-search"
+                name="orderSearch"
+                aria-label={
+                  __t("orderTracking.searchPlaceholder") ||
+                  "Search by PO, vendor, tracking..."
+                }
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={
+                  __t("orderTracking.searchPlaceholder") ||
+                  "Search by PO, vendor, tracking..."
+                }
+              />
+            </div>
+            <Select
+              id="ordertrack-stage"
+              name="stageFilter"
+              aria-label={__t("orderTracking.allStages") || "All Stages"}
+              className="w-160 h-32 fs-11"
+              value={stageFilter}
+              onChange={(e) => setStageFilter(e.target.value)}
+            >
+              <option value="all">
+                {__t("orderTracking.allStages") || "All Stages"}
               </option>
-            ))}
-          </select>
-        </div>
-      </div>
+              {Object.entries(STAGE_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </Select>
+          </div>
+        }
+      />
       {/* Stage Summary Cards */}
       {stats && (
         <div
@@ -2327,9 +2328,18 @@ function OrderTrackingScreen() {
           ].map((stage) => (
             <div
               key={stage}
+              role="button"
+              tabIndex={0}
+              aria-label={STAGE_LABELS[stage]}
               className="kpi c-pointer"
               style={{ borderLeft: "3px solid " + STAGE_COLORS[stage] }}
               onClick={() => setStageFilter(stage)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setStageFilter(stage);
+                }
+              }}
             >
               <div className="l">{STAGE_LABELS[stage]}</div>
               <div className="v" style={{ color: STAGE_COLORS[stage] }}>
@@ -2347,11 +2357,10 @@ function OrderTrackingScreen() {
         {loading ? (
           SkeletonCards({ count: 6 })
         ) : filtered.length === 0 ? (
-          <div
-            className="text-center fg-3 fs-12 p-40"
-            style={{ gridColumn: "1/-1" }}
-          >
-            {__t("orderTracking.noMatch") || "No orders match your filters"}
+          <div style={{ gridColumn: "1/-1" }}>
+            <EmptyState
+              title={__t("orderTracking.noMatch") || "No orders match your filters"}
+            />
           </div>
         ) : (
           filtered.map((t) => {
@@ -2364,7 +2373,16 @@ function OrderTrackingScreen() {
             return (
               <div
                 key={t.id}
+                role="button"
+                tabIndex={0}
+                aria-label={t.po?.poNumber || "PO-" + t.poHeaderId}
                 onClick={() => loadDetail(t.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    loadDetail(t.id);
+                  }
+                }}
                 className="bg-elev"
                 onMouseEnter={(e) => {
                   e.currentTarget.style.borderColor = "var(--accent)";
