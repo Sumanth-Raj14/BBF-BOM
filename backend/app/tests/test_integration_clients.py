@@ -43,3 +43,23 @@ async def test_clickup_update_task_puts_to_task():
     assert res["id"] == "abc123"
     assert seen["method"] == "PUT"
     assert seen["url"].endswith("/api/v2/task/abc123")
+
+
+from app.integrations.cliq_client import CliqClient
+
+
+@pytest.mark.asyncio
+async def test_cliq_posts_text_to_webhook():
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        seen["json"] = json.loads(request.content)
+        return httpx.Response(200, json={"ok": True})
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = CliqClient("https://cliq.zoho.com/api/v2/channelsbyname/eng/message?zapikey=XYZ", http=http)
+    ok = await client.post_message("WO-1 assigned to Team A")
+    assert ok is True
+    assert "cliq.zoho.com" in seen["url"]
+    assert seen["json"]["text"] == "WO-1 assigned to Team A"
