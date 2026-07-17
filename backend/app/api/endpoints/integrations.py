@@ -79,10 +79,13 @@ async def disconnect(provider: str, db: AsyncSession = Depends(get_db), user: Us
 async def send_test(provider: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_superuser)):
     if provider not in _PROVIDERS:
         raise HTTPException(422, "unknown provider")
+    # entity_id=0 + action="test" is a sentinel: the worker skips external-link creation
+    # so a "Send test" never leaves a spurious integration_external_links row behind.
     n = await emit_integration_event(db, user.tenantId, "work_order", 0, "test",
                                      {"ref": "TEST", "title": "Connection test", "status": "open"})
     await db.commit()
-    result = await deliver_pending(db, limit=5)
+    # Scope delivery to this tenant so a test never drains other tenants' pending rows.
+    result = await deliver_pending(db, limit=5, tenant_id=user.tenantId)
     return {"enqueued": n, "delivery": result}
 
 

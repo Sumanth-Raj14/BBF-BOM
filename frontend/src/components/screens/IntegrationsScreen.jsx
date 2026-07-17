@@ -76,7 +76,8 @@ export default function IntegrationsScreen() {
               </span>
             </div>
             <div className="flex gap-8" style={{ marginTop: 10, flexWrap: "wrap" }}>
-              <input className="input" placeholder={p.credLabel + (c.has_credentials ? " (set — leave blank to keep)" : "")}
+              <input className="input" type="password" autoComplete="new-password"
+                     placeholder={p.credLabel + (c.has_credentials ? " (set — leave blank to keep)" : "")}
                      style={{ flex: 2, minWidth: 220 }}
                      onChange={(e) => setDraft((s) => ({ ...s, [p.id]: { ...d, token: e.target.value } }))} />
               <input className="input" placeholder={p.cfgLabel}

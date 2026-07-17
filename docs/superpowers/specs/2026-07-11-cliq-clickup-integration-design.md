@@ -143,7 +143,7 @@ entity type can be toggled off per tenant in config.
 **How to run the live round-trip once credentials are available:**
 1. Obtain a ClickUp personal API token (with access to the target List) and a Zoho Cliq incoming webhook URL.
 2. Sign in as a tenant admin and open the **Integrations** screen.
-3. Add a ClickUp connection: paste the API token, pick/enter the target List ID, save. Add a Cliq connection: paste the webhook URL, save. Both connections start `is_enabled = true`.
+3. Add a ClickUp connection: paste the API token, pick/enter the target Space ID, save. Add a Cliq connection: paste the webhook URL, save. Both connections start `is_enabled = true`.
 4. Click **Send test** on each connection and confirm: a test task appears in the configured ClickUp List, and a test message appears in the configured Cliq channel/webhook. If either fails, check `status` / `last_error` on the connection row (never logs the raw secret).
 5. Assign a work order (or update a CAPA/ECO/ECR/NCR/PO/Approval) to trigger `emit_integration_event`.
 6. Let the background worker drain the outbox (or invoke `deliver_pending` directly in a shell), then confirm: a ClickUp task now exists for that entity with the expected title/assignee, and a Cliq message was posted describing the change.

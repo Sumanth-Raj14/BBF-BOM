@@ -81,7 +81,7 @@ async def update_capa(
         setattr(obj, k, v)
     if "status" in changed:
         await emit_integration_event(
-            db, current_user.tenantId, "capa", obj.id, "status_change",
+            db, current_user.tenantId, "capa_legacy", obj.id, "status_change",
             {"ref": obj.capaNumber, "status": obj.status},
         )
     await db.commit()
@@ -131,7 +131,7 @@ async def verify_capa(
     if result == "Effective":
         obj.status = "Closed"
     await emit_integration_event(
-        db, current_user.tenantId, "capa", obj.id, "status_change",
+        db, current_user.tenantId, "capa_legacy", obj.id, "status_change",
         {"ref": obj.capaNumber, "status": obj.status},
     )
     await db.commit()
