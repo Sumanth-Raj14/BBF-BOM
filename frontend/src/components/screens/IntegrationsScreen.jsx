@@ -2,6 +2,16 @@ import React from "react";
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
 import { apiRequest } from "../../../api.js";
+import {
+  ScreenHeader,
+  Card,
+  Field,
+  Input,
+  Button,
+  StatusPill,
+  DataTable,
+  EmptyState,
+} from "../ui";
 
 const PROVIDERS = [
   { id: "clickup", name: "ClickUp", credLabel: "API token", cfgLabel: "Space ID", cfgKey: "space_id" },
@@ -55,61 +65,130 @@ export default function IntegrationsScreen() {
     }
   };
 
+  const deliveryColumns = [
+    { key: "provider", header: "Provider" },
+    {
+      key: "entity",
+      header: "Entity",
+      render: (r) => `${r.entity_type}#${r.entity_id}`,
+    },
+    { key: "action", header: "Action" },
+    {
+      key: "status",
+      header: "Status",
+      render: (r) => <StatusPill status={r.status} />,
+    },
+    {
+      key: "error",
+      header: "Error",
+      render: (r) =>
+        r.last_error ? (
+          <span style={{ color: "var(--danger)" }}>{r.last_error}</span>
+        ) : (
+          ""
+        ),
+    },
+  ];
+
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("integrations.title") || "Integrations"}</h1>
-          <div className="sub">Connect ClickUp + Zoho Cliq to mirror work and post notifications.</div>
-        </div>
+      <ScreenHeader
+        title={__t("integrations.title") || "Integrations"}
+        description="Connect ClickUp + Zoho Cliq to mirror work and post notifications."
+      />
+
+      <div className="flex flex-col gap-16">
+        {PROVIDERS.map((p) => {
+          const c = conns[p.id] || {};
+          const d = draft[p.id] || {};
+          const connected = !!c.is_enabled;
+          const hasError = c.status === "error";
+          return (
+            <Card
+              key={p.id}
+              title={p.name}
+              actions={
+                <StatusPill
+                  tone={connected ? (hasError ? "danger" : "success") : "neutral"}
+                  label={
+                    connected
+                      ? hasError
+                        ? "Connected · error"
+                        : "Connected"
+                      : "Not connected"
+                  }
+                />
+              }
+            >
+              <div
+                className="flex gap-8"
+                style={{ flexWrap: "wrap", alignItems: "flex-end" }}
+              >
+                <div style={{ flex: 2, minWidth: 220 }}>
+                  <Field label={p.credLabel} htmlFor={`${p.id}-token`}>
+                    <Input
+                      id={`${p.id}-token`}
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder={
+                        c.has_credentials ? "Set — leave blank to keep" : ""
+                      }
+                      onChange={(e) =>
+                        setDraft((s) => ({
+                          ...s,
+                          [p.id]: { ...d, token: e.target.value },
+                        }))
+                      }
+                    />
+                  </Field>
+                </div>
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <Field label={p.cfgLabel} htmlFor={`${p.id}-cfg`}>
+                    <Input
+                      id={`${p.id}-cfg`}
+                      defaultValue={(c.config || {})[p.cfgKey] || ""}
+                      onChange={(e) =>
+                        setDraft((s) => ({
+                          ...s,
+                          [p.id]: { ...d, cfg: e.target.value },
+                        }))
+                      }
+                    />
+                  </Field>
+                </div>
+                <div className="flex gap-8" style={{ marginBottom: 2 }}>
+                  <Button variant="primary" size="md" onClick={() => save(p)}>
+                    Save
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="md"
+                    onClick={() => test(p)}
+                    disabled={!c.is_enabled}
+                  >
+                    Send test
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          );
+        })}
       </div>
 
-      {PROVIDERS.map((p) => {
-        const c = conns[p.id] || {};
-        const d = draft[p.id] || {};
-        return (
-          <div key={p.id} className="card" style={{ padding: 16, marginBottom: 16, border: "1px solid var(--line)", borderRadius: 8 }}>
-            <div className="flex gap-8" style={{ justifyContent: "space-between", alignItems: "center" }}>
-              <strong>{p.name}</strong>
-              <span style={{ fontSize: 11, color: c.is_enabled ? "var(--ok)" : "var(--fg-3)" }}>
-                {c.is_enabled ? "Connected" : "Not connected"}{c.status === "error" ? " · error" : ""}
-              </span>
-            </div>
-            <div className="flex gap-8" style={{ marginTop: 10, flexWrap: "wrap" }}>
-              <input className="input" type="password" autoComplete="new-password"
-                     placeholder={p.credLabel + (c.has_credentials ? " (set — leave blank to keep)" : "")}
-                     style={{ flex: 2, minWidth: 220 }}
-                     onChange={(e) => setDraft((s) => ({ ...s, [p.id]: { ...d, token: e.target.value } }))} />
-              <input className="input" placeholder={p.cfgLabel}
-                     defaultValue={(c.config || {})[p.cfgKey] || ""} style={{ flex: 1, minWidth: 140 }}
-                     onChange={(e) => setDraft((s) => ({ ...s, [p.id]: { ...d, cfg: e.target.value } }))} />
-              <button className="btn primary" onClick={() => save(p)}>Save</button>
-              <button className="btn" onClick={() => test(p)} disabled={!c.is_enabled}>Send test</button>
-            </div>
-          </div>
-        );
-      })}
-
-      <h3 style={{ marginTop: 8 }}>Recent deliveries</h3>
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-          <thead><tr style={{ textAlign: "left", color: "var(--fg-3)" }}>
-            <th style={{ padding: 6 }}>Provider</th><th style={{ padding: 6 }}>Entity</th>
-            <th style={{ padding: 6 }}>Action</th><th style={{ padding: 6 }}>Status</th><th style={{ padding: 6 }}>Error</th>
-          </tr></thead>
-          <tbody>
-            {deliveries.map((r) => (
-              <tr key={r.id} style={{ borderTop: "1px solid var(--line)" }}>
-                <td style={{ padding: 6 }}>{r.provider}</td>
-                <td style={{ padding: 6 }}>{r.entity_type}#{r.entity_id}</td>
-                <td style={{ padding: 6 }}>{r.action}</td>
-                <td style={{ padding: 6 }}>{r.status}</td>
-                <td style={{ padding: 6, color: "var(--danger)" }}>{r.last_error || ""}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <h3 style={{ marginTop: "var(--sp-5, 24px)" }}>Recent deliveries</h3>
+      <DataTable
+        dense
+        ariaLabel="Recent integration deliveries"
+        columns={deliveryColumns}
+        rows={deliveries}
+        getRowKey={(r) => r.id}
+        empty={
+          <EmptyState
+            title="No deliveries yet"
+            message="Deliveries appear here once an integration mirrors an update or sends a notification."
+          />
+        }
+      />
     </div>
   );
 }
