@@ -1,6 +1,16 @@
 import PropTypes from "prop-types";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import {
+  Button,
+  Card,
+  Badge,
+  StatusPill,
+  Menu,
+  Field,
+  Input,
+  ScreenHeader,
+} from "../components/ui";
 export const WORKSPACE_BUDGET = {
   annual: 10000000,
   spent: 4200000,
@@ -108,42 +118,48 @@ function DashboardScreen() {
   const tiles = tilesByRole[role] || tilesByRole.Admin;
   return (
     <div className="screen-wrap" data-screen-label="Dashboard">
-      <div className="screen-header" style={{ padding: "8px 16px", borderBottom: "1px solid var(--border-line)", background: "var(--bg-app)" }}>
-        <div className="flex items-center gap-12">
-          <span className="font-bold fs-14" style={{ color: "var(--fg)" }}>{__t("nav.dashboard") || "Dashboard"}</span>
-          <span className="fs-12 fg-3">{role} view · FY 2026 · {__t("dashboard.updatedJustNow") || "Updated just now"}</span>
-        </div>
-        <div className="flex-1" />
-        <div className="flex gap-8">
-          <DropdownButton
-            width={200}
-            trigger={
-              <button className="btn small">
-                {period} <Icon.ChevronDown size={10} />
-              </button>
-            }
-            items={Object.keys(PERIODS).map((k) => ({
-              icon:
-                period === k ? (
-                  <Icon.Check size={11} />
-                ) : (
-                  <span className="w-11" />
-                ),
-              label: PERIODS[k].label,
-              onClick: () => setPeriod(k),
-            }))}
-          />
-          <button className="btn small" onClick={() => window.__nav?.("analytics")}>
-            <Icon.Chart size={11} />{" "}
-            {__t("dashboard.deepAnalytics") || "Deep analytics"}
-          </button>
-        </div>
-      </div>
+      <ScreenHeader
+        title={__t("nav.dashboard") || "Dashboard"}
+        description={
+          role +
+          " " +
+          (__t("dashboard.view") || "view") +
+          " · FY 2026 · " +
+          (__t("dashboard.updatedJustNow") || "Updated just now")
+        }
+        actions={
+          <>
+            <Menu
+              ariaLabel={__t("dashboard.selectPeriod") || "Select period"}
+              trigger={
+                <Button variant="secondary" size="sm">
+                  {period} <Icon.ChevronDown size={10} />
+                </Button>
+              }
+              items={Object.keys(PERIODS).map((k) => ({
+                icon:
+                  period === k ? (
+                    <Icon.Check size={11} />
+                  ) : (
+                    <span className="w-11" />
+                  ),
+                label: PERIODS[k].label,
+                onSelect: () => setPeriod(k),
+              }))}
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => window.__nav?.("analytics")}
+            >
+              <Icon.Chart size={11} />{" "}
+              {__t("dashboard.deepAnalytics") || "Deep analytics"}
+            </Button>
+          </>
+        }
+      />
       {/* Workspace Budget — always at top, shared across all projects */}
-      <div
-        className="bg-canvas border-line rounded-r3 mb-14 pos-relative overflow-h"
-        style={{ padding: 18 }}
-      >
+      <Card className="mb-14">
         <div className="flex justify-between items-start mb-14">
           <div className="flex-1">
             <div className="flex items-center gap-8 mb-4">
@@ -152,14 +168,16 @@ function DashboardScreen() {
                 {scale.label}
               </span>
               {!editingBudget && (
-                <button
-                  className="icon-btn w-20 h-20"
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  iconOnly
                   onClick={startBudgetEdit}
                   title={__t("dashboard.editBudget") || "Edit budget"}
                   aria-label={__t("dashboard.editBudget") || "Edit budget"}
                 >
                   <Icon.Edit size={10} />
-                </button>
+                </Button>
               )}
             </div>
             {editingBudget ? (
@@ -167,15 +185,16 @@ function DashboardScreen() {
                 className="flex items-center gap-10"
                 style={{ flexWrap: "wrap" }}
               >
-                <div>
-                  <label className="label-uc">
-                    {__t("dashboard.annualBudget") || "Annual budget (USD)"}
-                  </label>
-                  <input
+                <Field
+                  htmlFor="budget-annual"
+                  label={__t("dashboard.annualBudget") || "Annual budget (USD)"}
+                >
+                  <Input
                     id="budget-annual"
                     name="annualBudget"
                     type="number"
-                    className="input mono w-160 h-28 fs-12"
+                    mono
+                    className="w-160 h-28 fs-12"
                     value={budgetEdits.annual}
                     onChange={(e) =>
                       setBudgetEdits({
@@ -184,15 +203,15 @@ function DashboardScreen() {
                       })
                     }
                   />
-                </div>
+                </Field>
                 {Object.entries(budgetEdits.byProject).map(([k, v]) => (
-                  <div key={k}>
-                    <label className="label-uc">{k}</label>
-                    <input
+                  <Field key={k} htmlFor={"budget-" + k} label={k}>
+                    <Input
                       id={"budget-" + k}
                       name={"projectBudget_" + k}
                       type="number"
-                      className="input mono w-120 h-28 fs-11"
+                      mono
+                      className="w-120 h-28 fs-11"
                       value={v.budget}
                       onChange={(e) =>
                         setBudgetEdits({
@@ -204,18 +223,19 @@ function DashboardScreen() {
                         })
                       }
                     />
-                  </div>
+                  </Field>
                 ))}
                 <div className="flex gap-4 self-end">
-                  <button
-                    className="btn small"
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => setEditingBudget(false)}
                   >
                     {__t("app.cancel") || "Cancel"}
-                  </button>
-                  <button className="btn small primary" onClick={saveBudget}>
+                  </Button>
+                  <Button variant="primary" size="sm" onClick={saveBudget}>
                     <Icon.Check size={10} /> {__t("common.save") || "Save"}
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : (
@@ -229,25 +249,18 @@ function DashboardScreen() {
                 <span className="font-mono fs-12 fg-3">
                   of {INR(wb.annual, 0)}
                 </span>
-                <span
-                  className="font-mono fs-10 fw-600"
-                  style={{
-                    padding: "2px 6px",
-                    borderRadius: 4,
-                    background: overBudget
-                      ? "color-mix(in oklch, var(--danger) 22%, var(--bg))"
+                <Badge
+                  tone={
+                    overBudget
+                      ? "danger"
                       : pctCommitted > 80
-                        ? "color-mix(in oklch, var(--warn) 22%, var(--bg))"
-                        : "color-mix(in oklch, var(--ok) 10%, var(--bg))",
-                    color: overBudget
-                      ? "var(--danger)"
-                      : pctCommitted > 80
-                        ? "var(--warn)"
-                        : "var(--ok)",
-                  }}
+                        ? "warning"
+                        : "success"
+                  }
+                  pill
                 >
                   {pctCommitted.toFixed(1)}% allocated
-                </span>
+                </Badge>
               </div>
             )}
           </div>
@@ -258,7 +271,10 @@ function DashboardScreen() {
               </div>
               <div
                 className="font-mono fs-22 fw-700"
-                style={{ color: remaining < 0 ? "var(--danger)" : "var(--ok)" }}
+                style={{
+                  color:
+                    remaining < 0 ? "var(--danger-text)" : "var(--ok-text)",
+                }}
               >
                 {INR(remaining, 0)}
               </div>
@@ -273,7 +289,7 @@ function DashboardScreen() {
         <div className="h-16 bg-sunk br-4 overflow-h flex mb-8">
           <div
             className="bg-accent flex items-center pl-8 font-mono fs-10 fw-700"
-            style={{ width: pctSpent + "%", color: "white" }}
+            style={{ width: pctSpent + "%", color: "var(--accent-fg)" }}
           >
             {pctSpent > 8
               ? (__t("dashboard.spentLabel") || "SPENT") +
@@ -327,18 +343,36 @@ function DashboardScreen() {
           >
             {Object.entries(wb.byProject).map(([k, p]) => {
               const used = ((p.spent + p.committed) / p.budget) * 100;
-              const c =
+              const cFill =
                 used > 100
                   ? "var(--danger)"
                   : used > 80
                     ? "var(--warn)"
                     : "var(--ok)";
+              const cText =
+                used > 100
+                  ? "var(--danger-text)"
+                  : used > 80
+                    ? "var(--warn-text)"
+                    : "var(--ok-text)";
               return (
                 <div
                   key={k}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={
+                    (__t("dashboard.openProject") || "Open project") + " " + k
+                  }
                   onClick={() => {
                     ctx?.switchProject?.(k);
                     window.__nav?.("bom");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      ctx?.switchProject?.(k);
+                      window.__nav?.("bom");
+                    }
                   }}
                   className="bg-elev border-line rounded-r2 c-pointer"
                   style={{ padding: 10, transition: "border-color 0.1s" }}
@@ -348,12 +382,18 @@ function DashboardScreen() {
                   onMouseLeave={(e) =>
                     (e.currentTarget.style.borderColor = "var(--line)")
                   }
+                  onFocus={(e) =>
+                    (e.currentTarget.style.borderColor = "var(--accent)")
+                  }
+                  onBlur={(e) =>
+                    (e.currentTarget.style.borderColor = "var(--line)")
+                  }
                 >
                   <div className="flex justify-between items-baseline mb-4">
                     <span className="font-mono fs-11 fw-700">{k}</span>
                     <span
                       className="font-mono fs-10 fw-600"
-                      style={{ color: c }}
+                      style={{ color: cText }}
                     >
                       {used.toFixed(0)}%
                     </span>
@@ -363,7 +403,7 @@ function DashboardScreen() {
                       className="h-100p"
                       style={{
                         width: Math.min(100, used) + "%",
-                        backgroundColor: c,
+                        backgroundColor: cFill,
                       }}
                     />
                   </div>
@@ -375,7 +415,7 @@ function DashboardScreen() {
             })}
           </div>
         </div>
-      </div>
+      </Card>
       {/* Role-specific tile grid */}
       <div
         className="d-grid gap-12"
@@ -395,24 +435,18 @@ function DashboardScreen() {
 }
 function Tile({ title, action, onAction, children }) {
   return (
-    <div className="bg-canvas border-line" style={{ padding: 12, display: "flex", flexDirection: "column" }}>
-      <div className="flex justify-between items-center mb-8" style={{ borderBottom: "1px solid var(--border-line)", paddingBottom: 4 }}>
-        <span className="font-mono fs-11 uppercase fg-1 fw-600">
-          {title}
-        </span>
-        {action && (
-          <button
-            onClick={onAction}
-            className="bg-transparent b-0 fg-accent fs-10 font-mono c-pointer"
-          >
-            {action} →
-          </button>
-        )}
-      </div>
-      <div className="flex-1 overflow-y auto">
-        {children}
-      </div>
-    </div>
+    <Card
+      title={title}
+      actions={
+        action ? (
+          <Button variant="ghost" size="sm" onClick={onAction}>
+            {action}
+          </Button>
+        ) : null
+      }
+    >
+      {children}
+    </Card>
   );
 }
 Tile.propTypes = {
@@ -436,35 +470,19 @@ function RiskTile() {
       {items.map((it) => (
         <div
           key={it.pn}
-          className="d-grid gap-8 items-center"
+          className="flex justify-between items-center gap-8"
           style={{
-            gridTemplateColumns: "auto 1fr auto",
             padding: "6px 0",
             borderBottom: "1px solid var(--line-soft)",
           }}
         >
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: 99,
-              background: it.sev === "high" ? "var(--danger)" : "var(--warn)",
-            }}
-          />
           <div>
             <div className="font-mono fs-11 fw-600">{it.pn}</div>
             <div className="fs-10 fg-3">{it.reason}</div>
           </div>
-          <span
-            className="font-mono fs-9 br-2"
-            style={{
-              padding: "2px 6px",
-              background: it.sev === "high" ? "var(--danger)" : "var(--warn)",
-              color: "white",
-            }}
-          >
+          <Badge tone={it.sev === "high" ? "danger" : "warning"}>
             {it.sev.toUpperCase()}
-          </span>
+          </Badge>
         </div>
       ))}
     </Tile>
@@ -583,11 +601,7 @@ function MyBOMsTile() {
               {__t("dashboard.ago") || "ago"}
             </div>
           </div>
-          <span
-            className={"status " + (b.status === "Draft" ? "draft" : "review")}
-          >
-            {b.status}
-          </span>
+          <StatusPill status={b.status} />
         </div>
       ))}
     </Tile>
