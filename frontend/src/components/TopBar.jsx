@@ -5,44 +5,54 @@ import SyncStatus from "./SyncStatus.jsx";
 
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
-import { storage } from "../utils/storage.js";
-import { DropdownButton, Popover, Presence, api } from "../globals";
+import { DropdownButton, Popover, Presence } from "../globals";
+
+const DENSITIES = [
+  { v: "dense", label: "Compact density" },
+  { v: "normal", label: "Normal density" },
+  { v: "comfortable", label: "Comfortable density" },
+];
+
 export default function TopBar() {
   const ctx = React.useContext(AppContext);
   const {
     apiConnected,
     apiLoading,
-    t,
-    setTweak,
     setModal,
     setRoute,
     route,
     project,
     activeProjectKey,
     switchProject,
-    authed,
-    userRole,
     unreadCount,
     bellRef,
-    avatarRef,
     bellOpen,
     setBellOpen,
-    avaOpen,
-    setAvaOpen,
     notifications,
     setNotifications,
     setShowAI,
     setSearch,
-    setShowTour,
-    setUserRole,
-    setShowMobileScan,
-    setAuthed,
-    setOnboardingDone,
+    t,
+    setTweak,
+    mobileNavOpen,
+    setMobileNavOpen,
   } = ctx;
 
   return (
     <>
       <header className="topbar">
+        <button
+          type="button"
+          id="nav-toggle-btn"
+          className="icon-btn nav-toggle"
+          aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
+          title={mobileNavOpen ? "Close navigation" : "Open navigation"}
+          aria-expanded={mobileNavOpen}
+          aria-controls="primary-nav"
+          onClick={() => setMobileNavOpen((o) => !o)}
+        >
+          {mobileNavOpen ? <Icon.Close size={16} /> : <Icon.Menu size={16} />}
+        </button>
         <div className="brand">
           <img
             src="/bbf-logo.svg"
@@ -212,8 +222,32 @@ export default function TopBar() {
           <span className="kbd">{__t("app.searchKbd")}</span>
         </button>
 
+        <div
+          className="density-seg"
+          role="group"
+          aria-label="Row density"
+          title="Row density"
+        >
+          {DENSITIES.map((d) => (
+            <button
+              key={d.v}
+              type="button"
+              className={"density-opt" + (t.density === d.v ? " active" : "")}
+              aria-pressed={t.density === d.v}
+              aria-label={d.label}
+              title={d.label}
+              onClick={() => setTweak("density", d.v)}
+            >
+              <span className={"density-glyph d-" + d.v} aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+            </button>
+          ))}
+        </div>
+
         <button
-          ref={bellRef}
           className="icon-btn"
           title={__t("app.aiCopilot")}
           aria-label={__t("app.aiCopilot")}
@@ -233,31 +267,14 @@ export default function TopBar() {
             <span className="pos-absolute">{unreadCount}</span>
           )}
         </button>
-        <span className="inline-flex items-center gap-4 pos-relative">
-          <button
-            ref={avatarRef}
-            onClick={() => setAvaOpen((o) => !o)}
-            className="avatar b-0 c-pointer"
-          >
-            {authed?.init ||
-              authed?.name
-                ?.split(" ")
-                .map((s) => s[0])
-                .join("") ||
-              "?"}
-          </button>
-          <span className="pos-absolute">
-            {userRole === "Admin"
-              ? "ADMIN"
-              : userRole === "Engineering"
-                ? "ENG"
-                : userRole === "Procurement"
-                  ? "PROC"
-                  : userRole === "Finance"
-                    ? "FIN"
-                    : "VIEW"}
-          </span>
-        </span>
+        <button
+          className="icon-btn"
+          title={__t("userMenu.workspaceSettings")}
+          aria-label={__t("userMenu.workspaceSettings")}
+          onClick={() => setModal("settings")}
+        >
+          <Icon.Settings size={14} />
+        </button>
       </header>
 
       <Popover
@@ -321,139 +338,6 @@ export default function TopBar() {
             }}
           >
             {__t("app.notifViewAllActivity")}
-          </button>
-        </div>
-      </Popover>
-
-      <Popover
-        open={avaOpen}
-        onClose={() => setAvaOpen(false)}
-        anchorRef={avatarRef}
-        width={240}
-      >
-        <div className="user-menu">
-          <div className="header">
-            <span className="avatar w-32 h-32 fs-12">
-              {authed?.init ||
-                authed?.name
-                  ?.split(" ")
-                  .map((s) => s[0])
-                  .join("") ||
-                "?"}
-            </span>
-            <div>
-              <div className="name">{authed?.name || "Elena Chen"}</div>
-              <div className="role">{userRole || __t("navGroup.engineering")}</div>
-            </div>
-          </div>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("profile"); }}>
-            <span className="ic"><Icon.Parts size={12} /></span>
-            <span className="lbl">{__t("userMenu.profile")}</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("settings"); }}>
-            <span className="ic"><Icon.Settings size={12} /></span>
-            <span className="lbl">{__t("userMenu.workspaceSettings")}</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setTweak("theme", t.theme === "dark" ? "light" : "dark"); }}>
-            <span className="ic">{t.theme === "dark" ? <Icon.Sun size={12} /> : <Icon.Moon size={12} />}</span>
-            <span className="lbl">{t.theme === "dark" ? "Switch to light" : "Switch to dark"}</span>
-          </button>
-
-          <div className="popover-divider" />
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("api-keys"); }}>
-            <span className="ic"><Icon.Link size={12} /></span>
-            <span className="lbl">{__t("userMenu.apiKeys")}</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("audit-log"); }}>
-            <span className="ic"><Icon.Activity size={12} /></span>
-            <span className="lbl">Audit log</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("share-link"); }}>
-            <span className="ic"><Icon.Link size={12} /></span>
-            <span className="lbl">Share BOM</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("webhooks"); }}>
-            <span className="ic"><Icon.Link size={12} /></span>
-            <span className="lbl">Webhooks</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("scheduled-reports"); }}>
-            <span className="ic"><Icon.Doc size={12} /></span>
-            <span className="lbl">Scheduled reports</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("email-parse"); }}>
-            <span className="ic"><Icon.Sparkles size={12} /></span>
-            <span className="lbl">Email auto-parse</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("landed-cost"); }}>
-            <span className="ic">$</span>
-            <span className="lbl">Landed cost calculator</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("margin"); }}>
-            <span className="ic">%</span>
-            <span className="lbl">Margin calculator</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("cost-sim"); }}>
-            <span className="ic"><Icon.Sparkles size={12} /></span>
-            <span className="lbl">Cost what-if simulator</span>
-          </button>
-
-          <div className="popover-divider" />
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("notif-prefs"); }}>
-            <span className="ic"><Icon.Bell size={12} /></span>
-            <span className="lbl">Notification preferences</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("roadmap"); }}>
-            <span className="ic"><Icon.Sparkles size={12} /></span>
-            <span className="lbl">Product roadmap</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setShowTour(true); }}>
-            <span className="ic"><Icon.Sparkles size={12} /></span>
-            <span className="lbl">Take product tour</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); if (window.__toggleOffline) window.__toggleOffline(); else toast("Offline simulation unavailable"); }}>
-            <span className="ic">{"⌥"}</span>
-            <span className="lbl">Simulate offline</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("pricing"); }}>
-            <span className="ic">$</span>
-            <span className="lbl">Plans &amp; pricing</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("help"); }}>
-            <span className="ic">?</span>
-            <span className="lbl">Help &amp; shortcuts</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setShowMobileScan(true); }}>
-            <span className="ic"><Icon.Scan size={12} /></span>
-            <span className="lbl">Open mobile scan view</span>
-          </button>
-
-          <div className="popover-divider" />
-          <div className="popover-section-label">Switch role (demo)</div>
-          {["Admin", "Engineering", "Procurement", "Finance", "Viewer"].map((r) => (
-            <button
-              key={r}
-              className="popover-item"
-              onClick={() => { setAvaOpen(false); storage.role.set(r); setUserRole(r); toast("Now viewing as " + r); }}
-            >
-              <span className="ic">{userRole === r ? <Icon.Check size={11} /> : <span style={{ width: 11 }} />}</span>
-              <span className="lbl">{r}</span>
-            </button>
-          ))}
-
-          <div className="popover-divider" />
-          <button
-            className="popover-item danger"
-            onClick={async () => {
-              setAvaOpen(false);
-              try { await api.auth.logout(); } catch { /* best-effort */ }
-              storage.auth.remove();
-              setAuthed(null);
-              setOnboardingDone(false);
-              toast("Signed out", { kind: "warn" });
-            }}
-          >
-            <span className="ic">{"⏏"}</span>
-            <span className="lbl">Sign out</span>
           </button>
         </div>
       </Popover>

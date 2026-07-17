@@ -43,7 +43,8 @@ async function compress(buf, accept) {
   return { data: buf, encoding: null };
 }
 
-const CSP = "default-src 'self' http: https: data: blob:; script-src 'self' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: http: https:; connect-src 'self' http://localhost:8001 http://127.0.0.1:8001 https://open.er-api.com; worker-src 'self' blob:; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'";
+// Fonts are self-hosted (Geist/Geist Mono, UI decision #2) — no CDN font-src/style-src exceptions needed.
+const CSP = "default-src 'self' http: https: data: blob:; script-src 'self' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: http: https:; connect-src 'self' http://localhost:8001 http://127.0.0.1:8001 https://open.er-api.com; worker-src 'self' blob:; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'";
 
 function writeHeaders(res, filePath, maxAge) {
   res.setHeader('X-Content-Type-Options', 'nosniff');

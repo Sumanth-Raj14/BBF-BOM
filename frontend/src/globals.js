@@ -91,12 +91,11 @@ export {
 
 export {
   VirtualList, LazyLoad, ContextMenu, Tooltip,
-  setTheme, toggleTheme,
   prefetch, memo, securityAudit, validate, notify, exportData, bulkOps, searchEngine,
 } from './root/enterprise-final.jsx';
 
 export {
-  UNDO, recordUndo, runUndo, applyAccessibilityTheme,
+  UNDO, recordUndo, runUndo,
   CommandPalette, WorkOrdersScreen, NCRScreen, LandedCostModal, MarginModal,
   ShareLinkModal, WebhooksModal, ScheduledReportsModal, EmailParseModal, Presence,
 } from './root/power-features.jsx';

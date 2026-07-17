@@ -9,6 +9,7 @@ import {
   INITIAL_NOTIFICATIONS,
 } from "../utils/constants.js";
 import { convertApiPartsToTree } from "../utils/bom.js";
+import { accentTokensFor } from "../utils/accent.js";
 
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
@@ -201,17 +202,35 @@ function AppCtxProvider({ children }) {
     toast(__t("app.crumbSwitchProject") + ": " + key, { kind: "success" });
   }, []);
 
+  // LOCKED DECISIONS UI #6: data grids (Parts, BOM) default to DENSE, the rest
+  // of the shell stays at the user's density (default 'normal'). When the tweak
+  // sits at its 'normal' default we bump grids to 'dense'; an explicit user
+  // choice (dense/comfortable) flows through to the grids unchanged.
+  const gridDensity = t.density === "normal" ? "dense" : t.density;
+
   const unreadCount = notifications.filter((n) => !n.read).length;
   const bellRef = React.useRef(null);
   const avatarRef = React.useRef(null);
   const [bellOpen, setBellOpen] = React.useState(false);
   const [avaOpen, setAvaOpen] = React.useState(false);
+  // Off-canvas nav drawer (mobile/tablet ≤900px). The rail is always mounted;
+  // this only governs the slide-in overlay + scrim below the breakpoint.
+  const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
 
   React.useEffect(() => {
-    document.documentElement.setAttribute("data-theme", t.theme);
+    // Dark mode was removed (a real AA dark theme is a later build); the app is
+    // light-only. Density + accent remain user-adjustable via Tweaks.
     document.documentElement.setAttribute("data-density", t.density);
-    document.documentElement.style.setProperty("--accent", t.accent);
-  }, [t.theme, t.density, t.accent]);
+    // Accent-preset AA rethread: a chosen preset must move the *whole* accent
+    // family together (interactive/hover/strong/strong-hover/text/focus/subtle),
+    // not just the single legacy --accent alias — otherwise components reading
+    // --accent-strong/--accent-text/--focus directly stay desynced on the
+    // default orange while --accent-driven chrome follows the new pick.
+    const tokens = accentTokensFor(t.accent);
+    for (const [prop, value] of Object.entries(tokens)) {
+      document.documentElement.style.setProperty(prop, value);
+    }
+  }, [t.density, t.accent]);
 
   React.useEffect(() => {
     if (apiParts && apiParts.length > 0) {
@@ -281,6 +300,11 @@ function AppCtxProvider({ children }) {
     if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [route]);
 
+  // Auto-close the mobile nav drawer after any navigation.
+  React.useEffect(() => {
+    setMobileNavOpen(false);
+  }, [route]);
+
   const openModal = React.useCallback((name, ctx = null) => {
     setModalContext(ctx);
     setModal(name);
@@ -324,6 +348,7 @@ function AppCtxProvider({ children }) {
     route,
     setRoute,
     t,
+    gridDensity,
     setTweak,
     selectedRow,
     setSelectedRow,
@@ -359,6 +384,8 @@ function AppCtxProvider({ children }) {
     setBellOpen,
     avaOpen,
     setAvaOpen,
+    mobileNavOpen,
+    setMobileNavOpen,
     bellRef,
     avatarRef,
     unreadCount,

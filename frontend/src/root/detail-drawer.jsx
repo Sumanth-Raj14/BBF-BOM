@@ -63,7 +63,7 @@ function Drawer({ row, onClose, data, openModal, overlay }) {
                           ? "oklch(0.6 0.10 30)"
                           : row.category === "Cable"
                             ? "oklch(0.55 0.06 280)"
-                            : "var(--accent)",
+                            : "var(--accent-strong)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",

@@ -147,7 +147,7 @@ function TenantsAdminScreen() {
     free: "var(--fg-4)",
     starter: "var(--info)",
     professional: "var(--warn)",
-    enterprise: "var(--accent)",
+    enterprise: "var(--accent-text)",
   };
   const statusColor = {
     active: "var(--ok)",

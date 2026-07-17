@@ -58,6 +58,10 @@ import "./root/app.jsx";
 // Register new professional loading/error/empty state components
 import "./components/register-components.js";
 
+// Shared UI primitives layer (token-only .ui-* components + ui.css).
+// Exposes window.UI for legacy window.* screens during migration.
+import "./components/ui/index.js";
+
 // Global error handler
 window.addEventListener("error", (e) => {
   if (window.toast && !e.defaultPrevented) {

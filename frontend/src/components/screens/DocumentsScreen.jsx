@@ -159,7 +159,7 @@ export default function DocumentsScreen({ data, openModal, perms }) {
           <button
             className="btn"
             onClick={() => setShowTree(!showTree)}
-            style={{ color: showTree ? "var(--accent)" : "var(--fg-3)" }}
+            style={{ color: showTree ? "var(--accent-text)" : "var(--fg-3)" }}
           >
             <Icon.Folder size={12} /> {__t("documents.folders") || "Folders"}
           </button>

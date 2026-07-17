@@ -3,6 +3,26 @@
    BBF Brand Guidelines Applied
    ============================================ */
 
+/* ============================================
+   Self-hosted typefaces — Geist + Geist Mono
+   Variable woff2 (weight 100–900), font-display:swap.
+   NO external/CDN font requests.
+   ============================================ */
+@font-face {
+  font-family: "Geist";
+  src: url("./src/assets/fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("./src/assets/fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* BBF Semantic Color Palette */
   --bbf-olive: #B5BC38;
@@ -15,18 +35,18 @@
   --bg-app: #F0F0F0;
   --bg-surface: var(--bbf-white);
   --bg-subtle: #F9F9F9;
-  --bg-hover: rgba(181, 188, 56, 0.08);
-  --bg-selected: rgba(181, 188, 56, 0.15);
+  --bg-hover: rgba(0, 0, 0, 0.035);
+  --bg-selected: rgba(232, 93, 31, 0.12);
 
   /* Borders */
   --border-strong: #CCCCCC;
   --border-subtle: #E5E5E5;
-  --border-focus: var(--bbf-olive);
+  --border-focus: var(--focus);
 
   /* Typography Colors */
   --text-primary: var(--bbf-black);
   --text-secondary: var(--bbf-dark-grey);
-  --text-muted: #888888;
+  --text-muted: #6A6A6A; /* AA on white: 5.4:1 (was #888888 = 3.5:1) */
   --text-inverse: var(--bbf-white);
 
   /* Status Colors */
@@ -35,33 +55,108 @@
   --status-danger: #D32F2F;
   --status-info: #0288D1;
 
-  /* Typography Scale */
-  --font-sans: "Montserrat", -apple-system, sans-serif;
-  --font-brand: "Montserrat", -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  /* Font families — self-hosted Geist */
+  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-brand: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+
+  /* Font weights */
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* Type scale (px) — 300 = 14px base */
+  --fs-50: 11px;
+  --fs-100: 12px;
+  --fs-200: 13px;
+  --fs-300: 14px;
+  --fs-400: 16px;
+  --fs-500: 18px;
+  --fs-600: 22px;
+  --fs-700: 28px;
+  --fs-800: 34px;
+
+  /* Line heights */
+  --lh-tight: 1.2;
+  --lh-snug: 1.35;
+  --lh-normal: 1.5;
+  --lh-relaxed: 1.65;
+
+  /* Letter spacing */
+  --ls-tighter: -0.02em;
+  --ls-tight: -0.01em;
+  --ls-normal: 0;
+  --ls-wide: 0.02em;
+  --ls-wider: 0.06em; /* uppercase eyebrows / kbd */
+
+  /* Named type roles (size / line-height) */
+  --type-display: var(--fs-800)/var(--lh-tight);
+  --type-h1: var(--fs-700)/var(--lh-tight);
+  --type-h2: var(--fs-600)/var(--lh-snug);
+  --type-h3: var(--fs-500)/var(--lh-snug);
+  --type-h4: var(--fs-400)/var(--lh-snug);
+  --type-body: var(--fs-300)/var(--lh-normal);
+  --type-small: var(--fs-200)/var(--lh-normal);
+  --type-caption: var(--fs-100)/var(--lh-normal);
   
+  /* ── Two-tone accent ──────────────────────────────
+     Olive = BBF brand / decorative ONLY (fails AA for text).
+     Orange = interactive / focus / text. All interactive
+     values below meet WCAG AA on white. */
+  --accent-olive: #B5BC38;                 /* brand mark, decorative bars — non-text */
+  --accent-interactive: #E85D1F;           /* focus ring, active border, selection — 3.49:1 non-text */
+  --accent-hover: #D2521A;                 /* hover on interactive */
+  --accent-strong: #B8480F;                /* AA fill for primary buttons: white text = 5.3:1 */
+  --accent-strong-hover: #9F3D0C;          /* darker hover for filled primary: white = 6.9:1 */
+  --accent-text: #B8480F;                  /* accent-colored text / links on light: 5.3:1 */
+  --accent-subtle: rgba(232, 93, 31, 0.12);/* tinted selected/hover surface */
+  --focus: #E85D1F;                        /* focus-ring color (3.49:1 vs white > 3:1) */
+
+  /* Status text variants — AA ≥4.5:1 on white (solids defined above) */
+  --status-success-text: #1E6023;
+  --status-warning-text: #A85400;
+  --status-danger-text: #C62828;
+  --status-info-text: #0369A1;
+
   /* Status Colors (short aliases used throughout) */
   --ok: #2E7D32;
   --warn: #ED6C02;
   --danger: #D32F2F;
   --info: #0288D1;
+  --ok-text: #1E6023;
+  --warn-text: #A85400;
+  --danger-text: #C62828;
+  --info-text: #0369A1;
 
   /* Spacing System (Strict Scale) */
+  --sp-0: 0px;
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
   --sp-4: 16px;
   --sp-5: 24px;
   --sp-6: 32px;
+  --sp-7: 40px;
   --sp-8: 48px;
+  --sp-9: 64px;
 
-  /* Radius System */
-  --r-input: 2px;
-  --r-2: 4px;
-  --r-btn: 4px;
-  --r-3: 6px;
+  /* Radius System — numeric scale (canonical) */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-pill: 999px;
+  /* Legacy radius aliases (mapped to the numeric scale) */
+  --r-input: var(--radius-xs);
+  --r-1: var(--radius-xs);
+  --r-2: var(--radius-sm);
+  --r-btn: var(--radius-sm);
+  --r-3: var(--radius-md);
+  --r-4: var(--radius-md);
   --r-panel: 0px; /* Industrial zero-radius panels */
-  --r-modal: 6px;
+  --r-modal: var(--radius-md);
   
   /* Canvas */
   --bg-canvas: var(--bg-app);
@@ -89,35 +184,77 @@
   --fg-2: var(--text-secondary);
   --fg-3: var(--text-muted);
   --fg-4: #AAAAAA;
-  --accent: var(--bbf-olive);
-  --accent-soft: var(--bg-selected);
-  --accent-fg: var(--text-inverse);
+  --accent: var(--accent-interactive);
+  --accent-soft: var(--accent-subtle);
+  --accent-fg: #FFFFFF;
   
   /* Layout */
-  --nav-width: 48px;
-  --topbar-height: 40px;
-  
-  /* Elevations */
+  --nav-width: 240px;          /* labeled rail (expanded) */
+  --nav-width-collapsed: 56px; /* icon-only rail */
+  --topbar-height: 44px;
+  --content-max: 1400px;       /* centered reading/card/form frame (UI decision #7) */
+
+  /* Elevation scale */
+  --shadow-xs: 0 1px 1px rgba(0,0,0,0.04);
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
   --shadow-md: 0 4px 6px rgba(0,0,0,0.05), 0 1px 3px rgba(0,0,0,0.03);
   --shadow-lg: 0 10px 15px rgba(0,0,0,0.05), 0 4px 6px rgba(0,0,0,0.03);
-  
-  --transition-fast: 0.1s ease;
-  
-  /* Enterprise Density */
-  --row-h: 30px;
-  --row-pad-y: 4px;
+  --shadow-xl: 0 20px 32px rgba(0,0,0,0.10), 0 8px 12px rgba(0,0,0,0.05);
+  --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--focus);
+
+  /* Motion */
+  --dur-fast: 100ms;
+  --dur-base: 160ms;
+  --dur-slow: 240ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.3, 0.7, 0.4, 1);
+  --transition-fast: var(--dur-fast) var(--ease-standard); /* legacy alias */
+
+  /* Z-index scale */
+  --z-base: 0;
+  --z-sticky: 100;
+  --z-nav: 200;
+  --z-drawer: 800;
+  --z-dropdown: 1000;
+  --z-overlay: 1100;
+  --z-modal: 1200;
+  --z-popover: 1300;
+  --z-toast: 1400;
+  --z-tooltip: 1500;
+
+  /* ── Density (3-step) — default: normal ──────────────
+     A shell attribute [data-density] swaps row height,
+     vertical padding, control height, and grid font-size.
+     Data grids (Parts, BOM) opt into dense by default. */
+  --row-h: 34px;
+  --row-pad-y: 7px;
+  --control-h: 30px;
+  --grid-fs: var(--fs-200);   /* 13px */
+  --cell-pad-x: var(--sp-3);  /* 12px */
 }
 
-/* Dark mode removed per BBF Branding Guidelines */
+/* Dark mode removed (a real AA dark theme is a later build). */
 
 [data-density="dense"] {
-  --row-h: 30px;
-  --row-pad-y: 5px;
+  --row-h: 28px;
+  --row-pad-y: 4px;
+  --control-h: 26px;
+  --grid-fs: var(--fs-100);   /* 12px */
+  --cell-pad-x: var(--sp-2);  /* 8px */
+}
+[data-density="normal"] {
+  --row-h: 34px;
+  --row-pad-y: 7px;
+  --control-h: 30px;
+  --grid-fs: var(--fs-200);   /* 13px */
+  --cell-pad-x: var(--sp-3);  /* 12px */
 }
 [data-density="comfortable"] {
   --row-h: 42px;
   --row-pad-y: 10px;
+  --control-h: 36px;
+  --grid-fs: var(--fs-300);   /* 14px */
+  --cell-pad-x: var(--sp-4);  /* 16px */
 }
 
 * { box-sizing: border-box; }
@@ -127,12 +264,14 @@ html, body {
   padding: 0;
   height: 100%;
   background: var(--bg);
-  color: var(--bbf-dark-grey);
+  color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.5;
-  font-feature-settings: "ss01", "cv11";
+  font-size: var(--fs-300);
+  line-height: var(--lh-normal);
+  letter-spacing: var(--ls-normal);
+  font-feature-settings: "kern" 1, "liga" 1;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
@@ -143,7 +282,32 @@ html, body {
 button { font-family: inherit; cursor: pointer; }
 input, select, textarea { font-family: inherit; color: inherit; }
 
+/* Base typography defaults for bare elements — bound to the type scale.
+   Class-based component rules retain precedence over these. */
+p { margin: 0 0 var(--sp-3); }
+small { font-size: var(--fs-200); }
+code, kbd, samp, pre { font-family: var(--font-mono); font-size: 0.9em; }
+b, strong { font-weight: var(--fw-semibold); }
+a { color: var(--accent-text); text-decoration: none; }
+a:hover { text-decoration: underline; }
 ::selection { background: var(--accent); color: var(--accent-fg); }
+
+/* AA focus baseline — visible, ≥3:1 focus indicator, keyboard-only.
+   Component rules may tighten offset/color but must remain visible. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) { outline: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* ============================================
    BBF Brand Utility Classes
@@ -204,11 +368,11 @@ input, select, textarea { font-family: inherit; color: inherit; }
 }
 
 .bbf-btn-primary {
-  background: var(--bbf-olive);
-  color: var(--bbf-white);
+  background: var(--accent-strong);
+  color: var(--accent-fg);
   font-family: var(--font-brand);
   font-weight: 600;
-  border: 1px solid rgba(0,0,0,0.1);
+  border: 1px solid transparent;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.15), var(--shadow-sm);
   padding: 8px 16px;
   border-radius: var(--r-2);
@@ -217,7 +381,7 @@ input, select, textarea { font-family: inherit; color: inherit; }
 }
 
 .bbf-btn-primary:hover {
-  background: var(--bbf-orange);
+  background: var(--accent-strong-hover);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.15), var(--shadow-sm);
 }
 .bbf-btn-primary:active {
@@ -242,9 +406,14 @@ input, select, textarea { font-family: inherit; color: inherit; }
 /* ============================================
    App Shell
    ============================================ */
+:root[data-nav-collapsed="true"] {
+  --nav-width: var(--nav-width-collapsed);
+}
+
 .app {
   display: grid;
   grid-template-columns: var(--nav-width) minmax(0, 1fr);
+  transition: grid-template-columns var(--dur-base) var(--ease-standard);
   grid-template-rows: var(--topbar-height) minmax(0, 1fr);
   height: 100dvh;
   width: 100vw;
@@ -266,12 +435,11 @@ input, select, textarea { font-family: inherit; color: inherit; }
   height: var(--topbar-height);
 }
 .brand {
-  width: var(--nav-width);
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-right: 1px solid var(--border-subtle);
+  padding: 0 var(--sp-3);
   background: transparent;
 }
 
@@ -403,114 +571,282 @@ input, select, textarea { font-family: inherit; color: inherit; }
   justify-content: center;
 }
 
-/* Side nav — BBF Branded */
+/* Density segmented control (top bar) */
+.density-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-btn);
+  background: var(--bg-subtle);
+}
+.density-opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  border: none;
+  border-radius: calc(var(--r-btn) - 2px);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard),
+              color var(--dur-fast) var(--ease-standard);
+}
+.density-opt:hover { color: var(--text-primary); }
+.density-opt:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.density-opt.active {
+  background: var(--bg-surface);
+  color: var(--accent-text);
+  box-shadow: var(--shadow-xs);
+}
+.density-glyph {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  width: 12px;
+}
+.density-glyph i {
+  display: block;
+  height: 1.5px;
+  background: currentColor;
+  border-radius: 1px;
+}
+.density-glyph.d-dense { gap: 2px; }
+.density-glyph.d-normal { gap: 3px; }
+.density-glyph.d-comfortable { gap: 4px; }
+
+/* ── Primary navigation rail (labeled, collapsible) ── */
 .navrail {
+  grid-column: 1;
+  grid-row: 2;
   background: var(--bg-surface);
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding: var(--sp-2) 0;
-  gap: var(--sp-1);
+  min-height: 0;
+  overflow: hidden;
+}
+.navrail-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  position: relative;
+  overflow-x: hidden;
+  padding: var(--sp-2) var(--sp-2) var(--sp-3);
+  display: flex;
+  flex-direction: column;
+}
+
+.nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .nav-item {
-  width: 36px; height: 36px;
-  border-radius: var(--r-btn);
+  width: 100%;
+  height: 32px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-  background: transparent;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-2);
   border: none;
+  border-radius: var(--r-btn);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-brand);
+  font-size: var(--fs-200);
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
   position: relative;
   cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition: background var(--dur-fast) var(--ease-standard),
+              color var(--dur-fast) var(--ease-standard);
 }
-.nav-item:hover { 
-  color: var(--text-primary); 
-  background: var(--bg-subtle); 
+.nav-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-subtle);
 }
-.nav-item:focus-visible { outline: 1px solid var(--border-focus); outline-offset: -1px; }
+.nav-item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  z-index: 1;
+}
 .nav-item.active {
-  color: var(--accent);
-  background: var(--bg-hover);
+  color: var(--accent-text);
+  background: var(--accent-subtle);
+  font-weight: 600;
 }
 .nav-item.active::before {
   content: "";
   position: absolute;
-  left: -6px;
-  top: 8px; bottom: 8px;
+  left: 0;
+  top: 6px; bottom: 6px;
   width: 3px;
-  background: var(--accent);
-  border-radius: 0 2px 2px 0;
+  background: var(--accent-interactive);
+  border-radius: 0 3px 3px 0;
 }
-
-.nav-icon-wrap {
-  display: flex;
+.nav-item-icon {
+  flex: 0 0 auto;
+  width: 22px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  color: currentColor;
+}
+.nav-item-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.nav-group-label {
-  width: 36px; height: 16px;
+/* Section headers (visible text) */
+.nav-section { margin-top: var(--sp-3); }
+.nav-section-label {
   display: flex;
   align-items: center;
-  justify-content: center;
-  position: relative;
-  cursor: default;
-  margin: 2px 0;
+  gap: var(--sp-2);
+  height: 22px;
+  padding: 0 var(--sp-2) 2px;
 }
-.nav-group-label:hover::after {
-  content: attr(title);
-  position: absolute;
-  left: 100%;
-  margin-left: 10px;
-  padding: 4px 10px;
-  background: var(--bbf-olive);
-  color: var(--bbf-white);
-  font-size: 9px;
+.nav-section-text {
   font-family: var(--font-brand);
+  font-size: 10px;
   font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  border-radius: var(--r-2);
+  color: var(--text-muted);
   white-space: nowrap;
-  pointer-events: none;
-  z-index: 100;
 }
-.nav-group-bar {
-  display: block;
-  width: 14px; height: 1px;
-  background: var(--bbf-olive);
-  opacity: 0.25;
-  border-radius: 1px;
+.nav-section-rule {
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--border-subtle);
 }
 
-.nav-tip {
-  position: absolute;
-  left: 100%;
-  margin-left: 10px;
-  padding: 5px 10px;
-  background: var(--bbf-black);
-  color: var(--bbf-white);
-  font-size: 11px;
-  font-family: var(--font-brand);
-  font-weight: 500;
-  border-radius: var(--r-2);
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s;
-  z-index: 100;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+/* Footer: account surface + collapse toggle */
+.navrail-footer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border-subtle);
+  padding: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
 }
-.nav-item:hover .nav-tip { opacity: 1; }
+.nav-account {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-btn);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+.nav-account:hover { background: var(--bg-subtle); }
+.nav-account:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.nav-account-avatar { flex: 0 0 auto; }
+.nav-account-meta {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.nav-account-name {
+  font-family: var(--font-brand);
+  font-size: var(--fs-200);
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-account-role {
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-account-caret { flex: 0 0 auto; color: var(--text-muted); }
+
+.nav-collapse-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  height: 30px;
+  padding: 0 var(--sp-2);
+  border: none;
+  border-radius: var(--r-btn);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-brand);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard),
+              color var(--dur-fast) var(--ease-standard);
+}
+.nav-collapse-btn:hover { background: var(--bg-subtle); color: var(--text-primary); }
+.nav-collapse-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* ── Collapsed (icon-only) state ── */
+.navrail[data-collapsed="true"] .nav-item-label,
+.navrail[data-collapsed="true"] .nav-section-text,
+.navrail[data-collapsed="true"] .nav-section-rule,
+.navrail[data-collapsed="true"] .nav-account-meta,
+.navrail[data-collapsed="true"] .nav-account-caret,
+.navrail[data-collapsed="true"] .nav-collapse-btn .nav-item-label {
+  display: none;
+}
+.navrail[data-collapsed="true"] .nav-item,
+.navrail[data-collapsed="true"] .nav-account,
+.navrail[data-collapsed="true"] .nav-collapse-btn,
+.navrail[data-collapsed="true"] .nav-section-label {
+  justify-content: center;
+  gap: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+.navrail[data-collapsed="true"] .nav-section-label {
+  height: 14px;
+}
+.navrail[data-collapsed="true"] .nav-section-label::after {
+  content: "";
+  width: 22px;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+/* ── Mobile drawer chrome (activated ≤900px; inert on desktop) ── */
+.nav-toggle { display: none; }        /* hamburger — shown only ≤900px */
+.nav-scrim { display: none; }         /* backdrop  — shown only ≤900px + open */
+@keyframes nav-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 
 /* Main — BBF Accent Bar */
 .main {
+  /* Explicit placement (not auto-placement) so .main always keeps the fluid
+     column, even below 900px where .navrail switches to position:fixed and
+     is removed from grid flow — without this, .main would auto-place into
+     the (now 0-width) column 1 and the whole content area would go blank. */
+  grid-column: 2 / -1;
+  grid-row: 2;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -566,7 +902,7 @@ input, select, textarea { font-family: inherit; color: inherit; }
   padding: 2px 6px;
   border-radius: 3px;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   border: 1px solid var(--accent);
 }
 
@@ -598,14 +934,14 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .btn:focus-visible { outline: 1px solid var(--border-focus); outline-offset: -1px; }
 
 .btn.primary {
-  background: var(--accent);
-  color: var(--text-inverse);
+  background: var(--accent-strong);
+  color: var(--accent-fg);
   border: 1px solid transparent;
   font-weight: 600;
   box-shadow: var(--shadow-sm);
 }
 .btn.primary:hover {
-  background: var(--bbf-orange);
+  background: var(--accent-strong-hover);
 }
 
 .btn.ghost { 
@@ -962,18 +1298,12 @@ input, select, textarea { font-family: inherit; color: inherit; }
   color: var(--fg-2);
   background: var(--bg-elev);
 }
-.cat.assembly { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.cat.assembly { color: var(--accent-text); border-color: var(--accent); background: var(--accent-soft); }
 .cat.electrical { color: oklch(0.50 0.13 240); border-color: oklch(0.80 0.04 240); background: oklch(0.95 0.02 240); }
 .cat.mechanical { color: oklch(0.40 0.06 60); border-color: oklch(0.78 0.04 60); background: oklch(0.94 0.02 60); }
 .cat.hardware { color: oklch(0.50 0.10 145); border-color: oklch(0.78 0.04 145); background: oklch(0.94 0.02 145); }
 .cat.cable { color: oklch(0.45 0.10 280); border-color: oklch(0.78 0.04 280); background: oklch(0.94 0.02 280); }
 .cat.optical { color: oklch(0.50 0.13 320); border-color: oklch(0.80 0.04 320); background: oklch(0.95 0.02 320); }
-
-[data-theme="dark"] .cat.electrical { background: oklch(0.22 0.04 240); border-color: oklch(0.30 0.05 240); color: oklch(0.78 0.10 240); }
-[data-theme="dark"] .cat.mechanical { background: oklch(0.22 0.03 60); border-color: oklch(0.30 0.04 60); color: oklch(0.80 0.06 60); }
-[data-theme="dark"] .cat.hardware { background: oklch(0.22 0.03 145); border-color: oklch(0.30 0.05 145); color: oklch(0.78 0.10 145); }
-[data-theme="dark"] .cat.cable { background: oklch(0.22 0.03 280); border-color: oklch(0.30 0.04 280); color: oklch(0.78 0.08 280); }
-[data-theme="dark"] .cat.optical { background: oklch(0.22 0.04 320); border-color: oklch(0.30 0.05 320); color: oklch(0.78 0.10 320); }
 
 /* Status pills */
 .status {
@@ -1056,7 +1386,6 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .spark .line { stroke: var(--fg-2); fill: none; stroke-width: 1.25; }
 .spark .area { fill: var(--accent-soft); opacity: 0.7; }
 .spark .dot { fill: var(--accent); }
-[data-theme="dark"] .spark .area { opacity: 0.4; }
 
 /* Drag handle */
 .drag-handle {
@@ -1156,9 +1485,6 @@ input, select, textarea { font-family: inherit; color: inherit; }
   font-size: 8px;
   color: var(--fg-3);
   background: rgba(253,252,250,0.7);
-}
-[data-theme="dark"] .drawer-image::after {
-  background: rgba(40,30,20,0.7);
 }
 .drawer-title { flex: 1; min-width: 0; }
 .drawer-title .pn {
@@ -1276,7 +1602,7 @@ input, select, textarea { font-family: inherit; color: inherit; }
   margin-bottom: 4px;
 }
 .deptree .node.parent { border-color: var(--fg-3); }
-.deptree .node.self { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.deptree .node.self { border-color: var(--accent); color: var(--accent-text); background: var(--accent-soft); }
 .deptree .branch {
   margin-left: 18px;
   padding-left: 10px;
@@ -1348,6 +1674,21 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .empty h3 { margin: 0; font-size: 14px; color: var(--fg-2); }
 .empty p { margin: 0; font-size: 12px; max-width: 360px; }
 
+/* Content frame — centered ~1360-1440px reading/card/form width (UI decision
+   #7); `--full` is the escape hatch for anything inside a framed container
+   that still needs edge-to-edge (BOM/Parts grids use it directly instead —
+   they never opt into `.screen-wrap`/`.content-frame` in the first place). */
+.content-frame,
+.screen-wrap {
+  max-width: var(--content-max);
+  margin-inline: auto;
+  width: 100%;
+}
+.content-frame--full,
+.screen-wrap--full {
+  max-width: none;
+}
+
 /* Secondary screens */
 .screen-wrap {
   flex: 1;
@@ -1358,7 +1699,11 @@ input, select, textarea { font-family: inherit; color: inherit; }
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  gap: var(--sp-3);
   margin-bottom: 18px;
+}
+.screen-header__crumbs {
+  margin-bottom: var(--sp-1);
 }
 .screen-header h1 {
   margin: 0;
@@ -1378,6 +1723,13 @@ input, select, textarea { font-family: inherit; color: inherit; }
   font-family: var(--font-brand);
   font-size: 11px;
   color: var(--text-muted);
+}
+.screen-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  flex: none;
 }
 
 /* Cards */
@@ -1897,7 +2249,7 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .toast .msg { flex: 1; }
 .toast .action {
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-text);
   border: none;
   font-size: 11px;
   font-weight: 600;
@@ -1930,9 +2282,6 @@ input, select, textarea { font-family: inherit; color: inherit; }
   align-items: center;
   justify-content: center;
   animation: fade-in 0.12s ease-out;
-}
-[data-theme="dark"] .modal-backdrop {
-  background: rgba(0, 0, 0, 0.6);
 }
 @keyframes fade-in {
   from { opacity: 0; }
@@ -2022,7 +2371,7 @@ input, select, textarea { font-family: inherit; color: inherit; }
   letter-spacing: 0.06em;
   color: var(--fg-3);
 }
-.field .req { color: var(--accent); }
+.field .req { color: var(--accent-text); }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .field-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
 .input, .select, textarea.input {
@@ -2099,7 +2448,7 @@ textarea.input { height: auto; min-height: 72px; padding: var(--sp-2); resize: v
   font-family: var(--font-mono);
   cursor: pointer;
 }
-.popover-h .act:hover { color: var(--accent); }
+.popover-h .act:hover { color: var(--accent-text); }
 .popover-list {
   max-height: 320px;
   overflow-y: auto;
@@ -2270,7 +2619,7 @@ body.file-dragover::after {
   font-family: var(--font-mono);
   font-size: 18px;
   letter-spacing: 0.06em;
-  color: var(--accent);
+  color: var(--accent-text);
   border: 3px dashed var(--accent);
   pointer-events: none;
 }
@@ -2358,7 +2707,7 @@ body.file-dragover::after {
   width: 100%;
   max-width: 380px;
 }
-.auth-card a { color: var(--accent); cursor: pointer; text-decoration: none; }
+.auth-card a { color: var(--accent-text); cursor: pointer; text-decoration: none; }
 .auth-card a:hover { text-decoration: underline; }
 .auth-legal {
   margin-top: 28px;
@@ -2413,7 +2762,7 @@ body.file-dragover::after {
   font-weight: 700;
   border: 1px solid var(--line);
 }
-.ob-dot.active { background: var(--accent); color: white; border-color: var(--accent); }
+.ob-dot.active { background: var(--accent-strong); color: white; border-color: var(--accent-strong); }
 .ob-dot.done { background: var(--ok); color: white; border-color: var(--ok); }
 .ob-line {
   width: 64px;
@@ -2746,11 +3095,74 @@ body.file-dragover::after {
 
 /* Mobile / tablet responsive */
 @media (max-width: 900px) {
+  /* Nav collapses out of the grid and becomes an off-canvas drawer; the main
+     content spans full width. The rail is reachable via the topbar hamburger
+     (.nav-toggle) + a tap-to-dismiss scrim — no more dead-end display:none. */
   .app { grid-template-columns: 0 1fr; }
-  .navrail { display: none; }
+  .nav-toggle { display: inline-flex; }
+
+  .navrail {
+    position: fixed;
+    top: var(--topbar-height);
+    left: 0;
+    bottom: 0;
+    width: min(300px, 84vw);
+    z-index: var(--z-drawer);
+    box-shadow: var(--shadow-xl);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform var(--dur-base) var(--ease-standard),
+                visibility 0s linear var(--dur-base);
+  }
+  .navrail[data-mobile-open="true"] {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform var(--dur-base) var(--ease-standard),
+                visibility 0s;
+  }
+
+  /* Inside the drawer the rail is always the labeled/expanded form, even if the
+     desktop rail was left collapsed — undo the icon-only overrides and hide the
+     collapse control (meaningless in a drawer). */
+  .navrail[data-collapsed="true"] .nav-item-label,
+  .navrail[data-collapsed="true"] .nav-section-text,
+  .navrail[data-collapsed="true"] .nav-section-rule,
+  .navrail[data-collapsed="true"] .nav-account-caret {
+    display: initial;
+  }
+  .navrail[data-collapsed="true"] .nav-account-meta { display: flex; }
+  .navrail[data-collapsed="true"] .nav-item,
+  .navrail[data-collapsed="true"] .nav-account,
+  .navrail[data-collapsed="true"] .nav-section-label {
+    justify-content: flex-start;
+    gap: var(--sp-2);
+    padding-left: var(--sp-2);
+    padding-right: var(--sp-2);
+  }
+  .navrail[data-collapsed="true"] .nav-section-label { height: 22px; }
+  .navrail[data-collapsed="true"] .nav-section-label::after { content: none; }
+  .nav-collapse-btn { display: none; }
+
+  .nav-scrim.open {
+    display: block;
+    position: fixed;
+    top: var(--topbar-height);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: calc(var(--z-drawer) - 1);
+    background: color-mix(in oklch, var(--fg) 45%, transparent);
+    animation: nav-scrim-in var(--dur-base) var(--ease-standard);
+  }
+
   .topbar .crumbs { display: none; }
   .topbar .search { width: 120px; }
   .topbar .search input { font-size: 11px; }
+  /* No room for the density segmented control at phone/tablet widths once
+     the hamburger + shrunk search are in play — fold it away rather than
+     let it overflow the topbar. Density is still reachable via the Tweaks
+     panel. */
+  .density-seg { display: none; }
   .ribbon { grid-template-columns: repeat(2, 1fr); }
   .ribbon .ribbon-cell:nth-child(n+5) { display: none; }
   .subheader { flex-wrap: wrap; gap: 8px; }
@@ -2798,7 +3210,6 @@ body.file-dragover::after {
   border-bottom: 1px solid var(--line);
   font-size: 12px;
 }
-[data-theme="dark"] .dup-banner { background: color-mix(in oklch, var(--warn) 14%, var(--bg-sunk)); }
 .dup-banner .ico {
   width: 26px; height: 26px;
   background: var(--warn);
@@ -2838,7 +3249,7 @@ body.file-dragover::after {
 .facet-h button {
   background: transparent;
   border: none;
-  color: var(--accent);
+  color: var(--accent-text);
   font-family: var(--font-mono);
   font-size: 10px;
   cursor: pointer;
@@ -3088,7 +3499,7 @@ body.file-dragover::after {
   .bulk-bar, .ai-panel, .network-badge, .onboarding-checklist,
   .btn, .icon-btn, .chip, .filterbar button, .subheader button,
   .dropdown-btn, .popover { display: none !important; }
-  .main { margin-left: 0 !important; padding: 0 !important; }
+  .main { grid-column: 1 / -1 !important; margin-left: 0 !important; padding: 0 !important; }
   .app { grid-template-columns: 1fr !important; }
   .bom-scroll { overflow: visible !important; max-height: none !important; }
   .bom-table { font-size: 8px !important; }
@@ -3183,7 +3594,7 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
   html, body { font-size: 16px; }
   .btn { height: 44px; padding: 0 16px; font-size: 14px; }
   .icon-btn { width: 44px; height: 44px; }
-  .nav-item { width: 44px; height: 44px; }
+  .nav-item { min-height: 44px; }
   .search { width: 100%; }
   .filterbar { min-height: 48px; }
 }
@@ -3279,7 +3690,7 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
 .fg-2          { color: var(--fg-2); }
 .fg-3          { color: var(--fg-3); }
 .fg-4          { color: var(--fg-4); }
-.fg-accent     { color: var(--accent); }
+.fg-accent     { color: var(--accent-text); }
 .fg-danger     { color: var(--danger); }
 .fg-ok         { color: var(--ok); }
 
@@ -3702,12 +4113,6 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
 .bbf-table tbody tr:hover td {
   background: rgba(181, 188, 56, 0.06);
 }
-[data-theme="dark"] .bbf-table tbody tr:nth-child(even) td {
-  background: rgba(255,255,255,0.03);
-}
-[data-theme="dark"] .bbf-table tbody tr:hover td {
-  background: rgba(181, 188, 56, 0.1);
-}
 
 /* BBF Alert Banners */
 .bbf-alert {
@@ -4028,7 +4433,8 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
 .fs-22 { font-size: 22px; }
 .fs-28 { font-size: 28px; }
 .font-mono { font-family: var(--font-mono); }
-.fg-accent { color: var(--accent); }
+/* .fg-accent lives in the earlier utility block (deduped — was defined twice
+   with conflicting cascade order; AA text color: var(--accent-text)). */
 .fg-2 { color: var(--fg-2); }
 .fg-3 { color: var(--fg-3); }
 .fg-4 { color: var(--fg-4); }
@@ -4123,7 +4529,7 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
 .grid-cols-2 { grid-template-columns: 1fr 1fr; }
 .grid-cols-3 { grid-template-columns: 1fr 1fr 1fr; }
 .grid-gap-1 { gap: 1px; }
-.hover-fg-accent:hover { color: var(--accent); }
+.hover-fg-accent:hover { color: var(--accent-text); }
 .hover-bg-elev:hover { background: var(--bg-elev); }
 .transition-fast { transition: all 0.15s ease; }
 .z-1 { z-index: 1; }

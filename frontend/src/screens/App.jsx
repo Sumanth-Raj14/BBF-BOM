@@ -93,7 +93,7 @@ function BomShellWrapper() {
         search={ctx.search}
         activeCats={ctx.activeCats}
         setActiveCats={ctx.setActiveCats}
-        density={ctx.t.density}
+        density={ctx.gridDensity}
         onOpenDetail={(r) => ctx.setSelectedRow(r)}
         selectedRow={ctx.selectedRow}
         onCloseDetail={() => ctx.setSelectedRow(null)}
@@ -226,7 +226,6 @@ function AppShell() {
 
   useKeyboardShortcuts({
     route,
-    theme: t.theme,
     setRoute,
     setModal: ctx.setModal,
     setSearch: ctx.setSearch,
@@ -573,15 +572,6 @@ function AppShell() {
 
       <window.TweaksPanel title="Tweaks">
         <window.TweakSection label="Appearance">
-          <window.TweakRadio
-            label="Theme"
-            value={t.theme}
-            onChange={(v) => setTweak("theme", v)}
-            options={[
-              { value: "light", label: "Light" },
-              { value: "dark", label: "Dark" },
-            ]}
-          />
           <window.TweakRadio
             label="Density"
             value={t.density}

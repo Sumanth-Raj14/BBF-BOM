@@ -9,8 +9,8 @@ import { apiRequest } from "../../../api.js";
 const STATUS_COLORS = {
   open: "var(--fg-3)",
   draft: "var(--fg-3)",
-  released: "var(--accent)",
-  in_progress: "var(--accent)",
+  released: "var(--accent-strong)",
+  in_progress: "var(--accent-strong)",
   pending_verification: "var(--warn)",
   completed: "var(--ok)",
   closed: "var(--ok)",
@@ -120,7 +120,7 @@ export default function WorkQueueScreen() {
   const cell = { padding: "8px 10px" };
 
   return (
-    <div className="screen-wrap" style={{ maxWidth: 1000 }}>
+    <div className="screen-wrap">
       <div className="screen-header">
         <div>
           <h1>{__t("work.title") || "My Work"}</h1>

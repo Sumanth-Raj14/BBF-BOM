@@ -241,7 +241,7 @@ function CalendarScreen() {
                 <div
                   className="font-mono fs-10 mb-4"
                   style={{
-                    color: isToday ? "var(--accent)" : "var(--fg-3)",
+                    color: isToday ? "var(--accent-text)" : "var(--fg-3)",
                     fontWeight: isToday ? 700 : 400,
                   }}
                 >

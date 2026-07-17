@@ -920,7 +920,7 @@ export default function AnalyticsScreen({ data }) {
                 {
                   label: __t("analytics.days15to30") || "15-30 days",
                   range: [15, 30],
-                  color: "var(--accent)",
+                  color: "var(--accent-text)",
                 },
                 {
                   label: __t("analytics.days30plus") || "30+ days",
