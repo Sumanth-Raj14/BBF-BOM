@@ -2,6 +2,8 @@ import PropTypes from "prop-types";
 
 import { __t } from "../i18n";
 import { INR, api, useAppStore } from "../globals";
+import { DataTable, EmptyState } from "./ui";
+
 function CostRollupView({ data }) {
   const ctx = useAppStore();
   const rows = ctx?.rows || data.rows;
@@ -24,8 +26,8 @@ function CostRollupView({ data }) {
 
   if (!top || !top.children)
     return (
-      <div className="empty" style={{ padding: 60 }}>
-        <p>{__t("common.noData")}</p>
+      <div className="bom-scroll flex items-center justify-center">
+        <EmptyState message={__t("common.noData")} />
       </div>
     );
 
@@ -39,42 +41,118 @@ function CostRollupView({ data }) {
   const total = subs.reduce((s, x) => s + x.ext, 0);
   const max = Math.max(...subs.map((s) => s.ext), 1);
 
+  const leaves = [];
+  const walk = (rs) =>
+    rs.forEach((r) => {
+      if (r.children) walk(r.children);
+      else leaves.push(r);
+    });
+  walk(rows);
+  leaves.sort((a, b) => b.cost * b.qty - a.cost * a.qty);
+  const topLeaves = leaves.slice(0, 10);
+
+  const columns = [
+    {
+      key: "pn",
+      header: __t("bomShell.colPartNo"),
+      render: (r) => <span className="font-mono">{r.pn}</span>,
+    },
+    {
+      key: "name",
+      header: __t("bomShell.colName"),
+      render: (r) => <span className="fw-500">{r.name}</span>,
+    },
+    {
+      key: "category",
+      header: __t("bomShell.colCategory"),
+      render: (r) => (
+        <span className={"cat " + r.category.toLowerCase()}>
+          {r.category}
+        </span>
+      ),
+    },
+    { key: "vendor", header: __t("bomShell.colVendor") },
+    {
+      key: "qty",
+      header: __t("bomShell.colQty"),
+      align: "num",
+      render: (r) => r.qty,
+    },
+    {
+      key: "cost",
+      header: __t("bomShell.colUnit"),
+      align: "num",
+      render: (r) => INR(r.cost, 2),
+    },
+    {
+      key: "ext",
+      header: __t("bomShell.colExt"),
+      align: "num",
+      render: (r) => (
+        <span className="fw-600">{INR(r.cost * r.qty, 2)}</span>
+      ),
+    },
+    {
+      key: "pctOfBom",
+      header: __t("bomShell.colPctOfBom"),
+      align: "num",
+      render: (r) => {
+        const ext = r.cost * r.qty;
+        const p = (ext / total) * 100;
+        return (
+          <div className="inline-flex items-center gap-8 justify-end w-100p">
+            <span
+              className="d-iblock bg-sunk br-2 overflow-h"
+              style={{ width: "48px", height: "4px" }}
+            >
+              <span
+                className="d-block h-100p bg-accent"
+                style={{ width: Math.min(100, p) + "%" }}
+              />
+            </span>
+            <span className="font-mono">{p.toFixed(1)}%</span>
+          </div>
+        );
+      },
+    },
+  ];
+
   return (
-    <div className="bom-scroll" style={{ padding: "20px 28px" }}>
+    <div
+      className="bom-scroll"
+      style={{ padding: "var(--sp-5) var(--sp-6)" }}
+    >
       <div className="flex justify-between items-baseline mb-12">
         <h2 className="m-0 fs-16 fw-600">
-          Cost roll-up \u00B7 by sub-assembly{" "}
-          {loading && <span className="fs-10 fg-3 ml-8">Loading\u2026</span>}
+          {__t("bomShell.bySubassembly")}
+          {loading && (
+            <span className="fs-10 fg-3 ml-8" role="status">
+              {__t("bomShell.loading")}
+            </span>
+          )}
         </h2>
         <div className="hint">
-          Total {INR(apiRollup?.total_cost || total, 2)}
+          {__t("bomShell.total")} {INR(apiRollup?.total_cost || total, 2)}
         </div>
       </div>
 
-      <div className="rollup-list w-full" className="p-0">
+      <div className="rollup-list">
         {subs.map((s) => {
           const pct = (s.ext / total) * 100;
           const width = (s.ext / max) * 100;
           return (
             <div key={s.id} className="rollup-row">
-              <span
-                className={("cat assembly" + " fs-9").trim()}
-                style={{ padding: "2px 4px" }}
-              >
-                {s.children.length}
-              </span>
+              <span className="cat assembly fs-9">{s.children.length}</span>
               <div>
                 <div className="name">{s.name}</div>
                 <div className="pn">
-                  {s.pn} \u00B7 Rev {s.rev}
+                  {s.pn} · Rev {s.rev}
                 </div>
-                <div className="h-18 mt-8 bg-sunk br-2 overflow-h pos-relative">
-                  <div
-                    className="h-100p bg-accent br-2 flex items-center pl-8 font-mono fs-10 fw-600"
-                    style={{ width: width + "%", color: "white" }}
-                  >
-                    {pct >= 8 ? pct.toFixed(1) + "%" : ""}
-                  </div>
+                <div className="col">
+                  <div className="fill" style={{ width: width + "%" }} />
+                  {pct >= 8 && (
+                    <span className="lbl-in">{pct.toFixed(1)}%</span>
+                  )}
                 </div>
               </div>
               <div className="ext">{INR(s.ext, 2)}</div>
@@ -84,69 +162,18 @@ function CostRollupView({ data }) {
         })}
       </div>
 
-      <h3 className="fs-14 fw-600" style={{ margin: "28px 0 12px" }}>
+      <h3 className="fs-14 fw-600" style={{ margin: "var(--sp-6) 0 var(--sp-3)" }}>
         {__t("bomShell.mostExpensive")}
       </h3>
-      <div className="border-line rounded-r3 overflow-h">
-        <table className="bom-table table-auto">
-          <thead>
-            <tr>
-              <th className="pl-14">{__t("bomShell.colPartNo")}</th>
-              <th>{__t("bomShell.colName")}</th>
-              <th>{__t("bomShell.colCategory")}</th>
-              <th>{__t("bomShell.colVendor")}</th>
-              <th className="num">{__t("bomShell.colQty")}</th>
-              <th className="num">{__t("bomShell.colUnit")}</th>
-              <th className="num">{__t("bomShell.colExt")}</th>
-              <th className="num">{__t("bomShell.colPctOfBom")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(() => {
-              const leaves = [];
-              const walk = (rs) =>
-                rs.forEach((r) => {
-                  if (r.children) walk(r.children);
-                  else leaves.push(r);
-                });
-              walk(rows);
-              leaves.sort((a, b) => b.cost * b.qty - a.cost * a.qty);
-              return leaves.slice(0, 10).map((r, i) => {
-                const ext = r.cost * r.qty;
-                const p = (ext / total) * 100;
-                return (
-                  <tr key={r.id}>
-                    <td className="mono pl-14">{r.pn}</td>
-                    <td>
-                      <span className="fw-500">{r.name}</span>
-                    </td>
-                    <td>
-                      <span className={"cat " + r.category.toLowerCase()}>
-                        {r.category}
-                      </span>
-                    </td>
-                    <td>{r.vendor}</td>
-                    <td className="num mono">{r.qty}</td>
-                    <td className="num mono">{INR(r.cost, 2)}</td>
-                    <td className="num mono fw-600">{INR(ext, 2)}</td>
-                    <td className="num">
-                      <div className="inline-flex items-center gap-8 justify-end w-100p">
-                        <span className="d-iblock w-50 h-4 bg-sunk br-2 overflow-h">
-                          <span
-                            className="d-block h-100p bg-accent"
-                            style={{ width: Math.min(100, p) + "%" }}
-                          />
-                        </span>
-                        <span className="font-mono">{p.toFixed(1)}%</span>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              });
-            })()}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        dense
+        zebra
+        columns={columns}
+        rows={topLeaves}
+        getRowKey={(r) => r.id}
+        ariaLabel={__t("bomShell.mostExpensive")}
+        empty={<EmptyState message={__t("common.noData")} />}
+      />
     </div>
   );
 }

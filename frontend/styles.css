@@ -2559,7 +2559,7 @@ textarea.input { height: auto; min-height: 72px; padding: var(--sp-2); resize: v
   position: absolute;
   left: 8px; top: 50%;
   transform: translateY(-50%);
-  color: white;
+  color: var(--accent-fg);
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
