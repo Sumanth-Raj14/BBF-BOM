@@ -1504,40 +1504,23 @@ a:hover { text-decoration: underline; }
   gap: 6px;
   flex-wrap: wrap;
 }
-.drawer-close {
-  background: transparent;
-  border: none;
-  color: var(--fg-3);
-  padding: 4px;
-  border-radius: 3px;
-}
-.drawer-close:hover { background: var(--bg-sunk); color: var(--fg); }
-
-.drawer-tabs {
-  display: flex;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--line);
-  gap: 0;
+/* Component detail drawer's Tabs instance: 7 tabs in a 420px panel need a
+   tighter, scrollable tablist rather than the ui.css default sizing. */
+.drawer .ui-tabs__list {
+  padding: 0 var(--sp-3);
   background: var(--bg-elev);
-  overflow: hidden;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: thin;
 }
-.drawer-tab {
-  padding: 8px 6px;
+.drawer .ui-tab {
+  padding: var(--sp-2) var(--sp-2);
   font-size: 10px;
-  color: var(--fg-3);
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
   font-family: var(--font-brand);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   white-space: nowrap;
-  cursor: pointer;
-  transition: color var(--transition-fast);
-  font-weight: 600;
 }
-.drawer-tab.active { color: var(--fg); border-bottom-color: var(--accent); }
 
 .drawer-body {
   flex: 1;
@@ -1600,8 +1583,12 @@ a:hover { text-decoration: underline; }
   font-family: var(--font-mono);
   font-size: 11px;
   margin-bottom: 4px;
+  color: inherit;
+  text-align: left;
 }
-.deptree .node.parent { border-color: var(--fg-3); }
+.deptree .node.parent { border-color: var(--fg-3); cursor: pointer; }
+.deptree .node.parent:hover { background: var(--bg-sunk); }
+.deptree .node.parent:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .deptree .node.self { border-color: var(--accent); color: var(--accent-text); background: var(--accent-soft); }
 .deptree .branch {
   margin-left: 18px;
