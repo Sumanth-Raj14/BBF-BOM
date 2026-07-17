@@ -3200,6 +3200,10 @@ body.file-dragover::after {
   padding: 12px 18px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-elev);
+  /* Reused as a ScreenHeader (screen-header adds margin-bottom for the
+     centered/screen-wrap case); this bar sits flush against the duplicate
+     banner / toolbar below it, so cancel that margin here. */
+  margin-bottom: 0;
 }
 .dup-banner {
   display: flex;

@@ -2,6 +2,15 @@ import PropTypes from "prop-types";
 import { storage } from "../utils/storage.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import {
+  Button,
+  Badge,
+  StatusPill,
+  ScreenHeader,
+  EmptyState,
+  DataTable,
+  Tabs,
+} from "../components/ui/index.js";
 // Component Library — full catalog with facets, search, grid/list, dups.
 // Flatten BOM tree into unique parts list with where-used count
 function buildCatalog(data) {
@@ -459,24 +468,21 @@ function PartsScreen({ openModal, onOpenDetail }) {
       data-density={ctx?.gridDensity || "dense"}
     >
       {/* Top bar */}
-      <div className="parts-topbar">
-        <div>
-          <h1
-            className="fs-20 fw-600"
-            style={{ margin: 0, letterSpacing: "-0.01em" }}
-          >
-            {__t("parts.title") || "Component Library"}
-          </h1>
-          <div className="font-mono fs-11 fg-3 mt-2">
+      <ScreenHeader
+        className="parts-topbar"
+        title={__t("parts.title") || "Component Library"}
+        description={
+          <span className="font-mono fs-11 fg-3">
             {filtered.length} {__t("common.of") || "of"} {allParts.length}{" "}
             {__t("parts.parts") || "parts"} · {Object.keys(counts.cat).length}{" "}
             {__t("parts.categories") || "categories"} ·{" "}
             {Object.keys(counts.vendor).length - 1}{" "}
             {__t("parts.vendors") || "vendors"}
-          </div>
-        </div>
-        <div className="flex-1" />
-        <div className="search w-280" style={{ height: 30 }}>
+          </span>
+        }
+        actions={
+          <>
+        <div className="search w-280" style={{ height: "var(--control-h)" }}>
           <Icon.Search size={12} />
           <input
             id="parts-search"
@@ -489,36 +495,33 @@ function PartsScreen({ openModal, onOpenDetail }) {
             aria-label={__t("parts.searchParts") || "Search parts"}
           />
           {search && (
-            <button
-              className="icon-btn w-18 h-18 b-0 bg-transparent"
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
               aria-label={__t("common.clearSearch") || "Clear search"}
               onClick={() => setSearch("")}
             >
               <Icon.X size={10} />
-            </button>
+            </Button>
           )}
         </div>
-        <div className="segctl">
-          <button
-            className={view === "grid" ? "active" : ""}
-            onClick={() => setView("grid")}
-          >
-            {__t("parts.grid") || "GRID"}
-          </button>
-          <button
-            className={view === "list" ? "active" : ""}
-            onClick={() => setView("list")}
-          >
-            {__t("parts.list") || "LIST"}
-          </button>
-        </div>
+        <Tabs
+          ariaLabel={__t("parts.viewMode") || "View mode"}
+          value={view}
+          onChange={setView}
+          items={[
+            { value: "grid", label: __t("parts.grid") || "Grid" },
+            { value: "list", label: __t("parts.list") || "List" },
+          ]}
+        />
         <DropdownButton
           width={180}
           trigger={
-            <button className="btn">
+            <Button variant="secondary" size="sm">
               {__t("common.sort") || "Sort"}: {__t("parts.sortName") || "Name"}{" "}
               <Icon.ChevronDown size={10} />
-            </button>
+            </Button>
           }
           items={[
             {
@@ -573,18 +576,25 @@ function PartsScreen({ openModal, onOpenDetail }) {
             },
           ]}
         />
-        <button
-          className="btn"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() =>
             openModal("barcode-scan", { onFound: (pn) => setSearch(pn) })
           }
         >
           <Icon.Scan size={12} /> {__t("parts.scan") || "Scan"}
-        </button>
-        <button className="btn primary" onClick={() => openModal("new-part")}>
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => openModal("new-part")}
+        >
           <Icon.Plus size={12} /> {__t("part.newPart") || "New part"}
-        </button>
-      </div>
+        </Button>
+          </>
+        }
+      />
       {/* Duplicate banner */}
       {showDupsBanner && dupGroups.length > 0 && (
         <div className="dup-banner">
@@ -604,19 +614,22 @@ function PartsScreen({ openModal, onOpenDetail }) {
             </span>
           </div>
           <div className="flex-1" />
-          <button
-            className="btn small"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => setFocusedDup(dupGroups[0])}
           >
             {__t("parts.review") || "Review"}
-          </button>
-          <button
-            className="icon-btn w-22 h-22 b-0 bg-transparent"
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            iconOnly
             aria-label={__t("parts.dismiss") || "Dismiss"}
             onClick={() => setShowDupsBanner(false)}
           >
             <Icon.X size={11} />
-          </button>
+          </Button>
         </div>
       )}
       <div className="parts-body">
@@ -626,7 +639,7 @@ function PartsScreen({ openModal, onOpenDetail }) {
             <div className="facet-h">
               <span>{__t("parts.filters") || "Filters"}</span>
               {totalFilters > 0 && (
-                <button onClick={clearAll}>
+                <button type="button" onClick={clearAll}>
                   {__t("parts.clearWithCount") || "Clear"} ({totalFilters})
                 </button>
               )}
@@ -670,7 +683,7 @@ function PartsScreen({ openModal, onOpenDetail }) {
                     toggleSet(selectedStatus, s, setSelectedStatus)
                   }
                 />
-                <span className={"status " + (STATUS_CLASS[s] || "")}>{s}</span>
+                <StatusPill status={s} />
                 <span className="cnt">{counts.status[s]}</span>
               </label>
             ))}
@@ -914,23 +927,25 @@ function PartsScreen({ openModal, onOpenDetail }) {
                   <Icon.X size={9} />
                 </span>
               )}
-              <button className="btn small h-22 fs-10" onClick={clearAll}>
+              <Button variant="ghost" size="sm" onClick={clearAll}>
                 {__t("parts.clearAll") || "Clear all"}
-              </button>
+              </Button>
             </div>
           )}
           {filtered.length === 0 ? (
-            <div className="empty" style={{ padding: 60 }}>
-              <div className="ico">∅</div>
-              <h3>{__t("parts.noMatch") || "No parts match these filters"}</h3>
-              <p>
-                {__t("parts.tryClearingFilters") ||
-                  "Try clearing some filters or searching for a different term."}
-              </p>
-              <button className="btn" onClick={clearAll}>
-                {__t("parts.clearFilters") || "Clear filters"}
-              </button>
-            </div>
+            <EmptyState
+              icon="∅"
+              title={__t("parts.noMatch") || "No parts match these filters"}
+              message={
+                __t("parts.tryClearingFilters") ||
+                "Try clearing some filters or searching for a different term."
+              }
+              actions={
+                <Button variant="secondary" size="sm" onClick={clearAll}>
+                  {__t("parts.clearFilters") || "Clear filters"}
+                </Button>
+              }
+            />
           ) : view === "grid" ? (
             <PartsGrid
               parts={filtered}
@@ -967,11 +982,11 @@ function PartsScreen({ openModal, onOpenDetail }) {
         wide
         footer={
           <>
-            <button className="btn" onClick={() => setFocusedDup(null)}>
+            <Button variant="secondary" onClick={() => setFocusedDup(null)}>
               {__t("app.cancel") || "Cancel"}
-            </button>
-            <button
-              className="btn"
+            </Button>
+            <Button
+              variant="secondary"
               onClick={() => {
                 const dismissed = storage.dupDismissed.get();
                 focusedDup?.parts?.forEach((p) => {
@@ -986,9 +1001,9 @@ function PartsScreen({ openModal, onOpenDetail }) {
               }}
             >
               {__t("parts.notDuplicate") || "Not a duplicate"}
-            </button>
-            <button
-              className="btn primary"
+            </Button>
+            <Button
+              variant="primary"
               onClick={() => {
                 const next = ctx?.rows || data.rows;
                 const patched = next.map((r) => {
@@ -1015,7 +1030,7 @@ function PartsScreen({ openModal, onOpenDetail }) {
             >
               <Icon.Check size={12} />{" "}
               {__t("parts.mergeKeepNewer") || "Merge → keep newer"}
-            </button>
+            </Button>
           </>
         }
       >
@@ -1035,9 +1050,9 @@ function PartsScreen({ openModal, onOpenDetail }) {
                     {p.pn} · Rev {p.rev}
                   </div>
                   {i === 0 && (
-                    <span className="tag-pill fg-accent border-color-accent bg-accent-soft">
+                    <Badge tone="accent" pill>
                       {__t("parts.newer") || "NEWER"}
-                    </span>
+                    </Badge>
                   )}
                 </div>
                 <h4 className="fs-14" style={{ margin: "4px 0 12px" }}>
@@ -1063,11 +1078,7 @@ function PartsScreen({ openModal, onOpenDetail }) {
                   <dd>{p.origin}</dd>
                   <dt>Status</dt>
                   <dd className="sans">
-                    <span
-                      className={"status " + (STATUS_CLASS[p.status] || "")}
-                    >
-                      {p.status}
-                    </span>
+                    <StatusPill status={p.status} />
                   </dd>
                   <dt>Used in</dt>
                   <dd>
@@ -1115,17 +1126,13 @@ function PartsGrid({
                 onClick={(e) => e.stopPropagation()}
               />
               {isDup && (
-                <span
-                  className="pos-absolute font-mono fs-9 bg-warn br-2 letter-sp-6"
-                  style={{
-                    top: 6,
-                    right: 6,
-                    padding: "1px 5px",
-                    color: "white",
-                  }}
+                <Badge
+                  tone="warning"
+                  className="pos-absolute"
+                  style={{ top: 6, right: 6 }}
                 >
                   {__t("parts.dup") || "DUP"}
-                </span>
+                </Badge>
               )}
               {p.imageUrl ? (
                 <img
@@ -1149,9 +1156,7 @@ function PartsGrid({
                 <span className={"cat " + p.category.toLowerCase()}>
                   {p.category}
                 </span>
-                <span className={"status " + (STATUS_CLASS[p.status] || "")}>
-                  {p.status}
-                </span>
+                <StatusPill status={p.status} />
               </div>
               <dl className="part-kv">
                 <dt>{__t("part.vendor") || "Vendor"}</dt>
@@ -1188,23 +1193,27 @@ function PartsGrid({
               className="part-card-actions"
               onClick={(e) => e.stopPropagation()}
             >
-              <button
-                className="icon-btn w-22 h-22"
+              <Button
+                variant="ghost"
+                size="sm"
+                iconOnly
                 onClick={() => onOpenDetail(p)}
                 title={__t("parts.openDetail") || "Open detail"}
                 aria-label={__t("parts.openDetails") || "Open details"}
               >
                 <Icon.Chevron size={11} />
-              </button>
+              </Button>
               <DropdownButton
                 width={200}
                 trigger={
-                  <button
-                    className="icon-btn w-22 h-22"
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    iconOnly
                     aria-label={__t("parts.moreOptions") || "More options"}
                   >
                     <Icon.Dots size={11} />
-                  </button>
+                  </Button>
                 }
                 items={[
                   {
@@ -1311,219 +1320,229 @@ function PartsList({
   const allSelected =
     parts.length > 0 && parts.every((p) => selectedIds.has(p.pn));
   const someSelected = !allSelected && parts.some((p) => selectedIds.has(p.pn));
-  return (
-    <div className="border-line rounded-r3 overflow-h bg-canvas">
-      <table className="bom-table table-auto">
-        <thead>
-          <tr>
-            <th className="col-check">
-              <input
-                id="parts-select-all"
-                name="selectAll"
-                type="checkbox"
-                className={
-                  "row-checkbox " + (someSelected ? "indeterminate" : "")
-                }
-                checked={allSelected}
-                onChange={toggleSelectAll}
-              />
-            </th>
-            <th className="w-32"></th>
-            <th>{__t("part.partNumber") || "Part No."}</th>
-            <th>{__t("common.name") || "Name"}</th>
-            <th>{__t("part.category") || "Category"}</th>
-            <th>{__t("part.vendor") || "Vendor"}</th>
-            <th className="num">{__t("part.unit") || "Unit"}</th>
-            <th>{__t("part.leadTime") || "Lead"}</th>
-            <th>{__t("part.origin") || "Origin"}</th>
-            <th>{__t("part.status") || "Status"}</th>
-            <th>{__t("parts.usedIn") || "Used in"}</th>
-            <th>{__t("parts.trend") || "Trend"}</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {parts.map((p) => {
-            const isSel = selectedIds.has(p.pn);
-            const isDup = dupSet.has(p.pn);
-            return (
-              <tr
-                key={p.pn}
-                className={(isSel ? "selected" : "" + " cursor-pointer").trim()}
-                onClick={() => onOpenDetail(p)}
+
+  const columns = [
+    {
+      key: "select",
+      header: (
+        <input
+          id="parts-select-all"
+          name="selectAll"
+          type="checkbox"
+          className={"row-checkbox " + (someSelected ? "indeterminate" : "")}
+          checked={allSelected}
+          onChange={toggleSelectAll}
+          aria-label={__t("parts.selectAll") || "Select all parts"}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ),
+      width: 28,
+      render: (p) => (
+        <input
+          type="checkbox"
+          className="row-checkbox"
+          checked={selectedIds.has(p.pn)}
+          aria-label={
+            (__t("parts.selectPart") || "Select") + " " + p.pn
+          }
+          onChange={() => {
+            const next = new Set(selectedIds);
+            next.has(p.pn) ? next.delete(p.pn) : next.add(p.pn);
+            setSelectedIds(next);
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ),
+    },
+    {
+      key: "thumb",
+      header: "",
+      width: 32,
+      render: (p) =>
+        p.imageUrl ? (
+          <img
+            src={p.imageUrl}
+            alt=""
+            loading="lazy"
+            className="w-28 h-28 br-4 d-block"
+            style={{ objectFit: "cover" }}
+          />
+        ) : (
+          <span className="d-iblock w-28 h-28 br-4 bg-sunk" />
+        ),
+    },
+    {
+      key: "pn",
+      header: __t("part.partNumber") || "Part No.",
+      render: (p) => (
+        <span className="mono inline-flex items-center gap-6">
+          {p.pn}
+          {dupSet.has(p.pn) && (
+            <Badge tone="warning" style={{ fontSize: 8, padding: "0 3px" }}>
+              {__t("parts.dup") || "DUP"}
+            </Badge>
+          )}
+        </span>
+      ),
+    },
+    { key: "name", header: __t("common.name") || "Name" },
+    {
+      key: "category",
+      header: __t("part.category") || "Category",
+      render: (p) => (
+        <span className={"cat " + p.category.toLowerCase()}>
+          {p.category}
+        </span>
+      ),
+    },
+    { key: "vendor", header: __t("part.vendor") || "Vendor" },
+    {
+      key: "cost",
+      header: __t("part.unit") || "Unit",
+      align: "num",
+      render: (p) => <span className="mono">{INR(p.cost, 2)}</span>,
+    },
+    {
+      key: "lead",
+      header: __t("part.leadTime") || "Lead",
+      render: (p) => <LeadHeat days={p.lead} />,
+    },
+    {
+      key: "origin",
+      header: __t("part.origin") || "Origin",
+      render: (p) => <span className="mono">{p.origin}</span>,
+    },
+    {
+      key: "status",
+      header: __t("part.status") || "Status",
+      render: (p) => <StatusPill status={p.status} />,
+    },
+    {
+      key: "usedIn",
+      header: __t("parts.usedIn") || "Used in",
+      render: (p) => (
+        <span
+          className="mono"
+          style={{ color: p.instances === 0 ? "var(--fg-4)" : "var(--fg-2)" }}
+        >
+          {p.instances === 0
+            ? "—"
+            : p.instances +
+              " " +
+              (__t("parts.bomCount") || "BOM") +
+              (p.instances !== 1 ? "s" : "")}
+        </span>
+      ),
+    },
+    {
+      key: "trend",
+      header: __t("parts.trend") || "Trend",
+      render: (p) => <Sparkline data={p.trend} />,
+    },
+    {
+      key: "actions",
+      header: "",
+      render: (p) => (
+        <span className="inline-flex gap-2" onClick={(e) => e.stopPropagation()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            iconOnly
+            aria-label={__t("parts.openDetails") || "Open details"}
+            onClick={() => onOpenDetail(p)}
+          >
+            <Icon.Chevron size={11} />
+          </Button>
+          <DropdownButton
+            width={200}
+            trigger={
+              <Button
+                variant="ghost"
+                size="sm"
+                iconOnly
+                aria-label={__t("parts.moreOptions") || "More options"}
               >
-                <td className="col-check" onClick={(e) => e.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    className="row-checkbox"
-                    checked={isSel}
-                    onChange={() => {
-                      const next = new Set(selectedIds);
-                      next.has(p.pn) ? next.delete(p.pn) : next.add(p.pn);
-                      setSelectedIds(next);
-                    }}
-                  />
-                </td>
-                <td className="w-32" style={{ padding: "2px 4px" }}>
-                  {p.imageUrl ? (
-                    <img
-                      src={p.imageUrl}
-                      alt=""
-                      loading="lazy"
-                      className="w-28 h-28 br-4 d-block"
-                      style={{ objectFit: "cover" }}
-                    />
-                  ) : (
-                    <span className="d-iblock w-28 h-28 br-4 bg-sunk" />
-                  )}
-                </td>
-                <td className="mono">
-                  <span className="inline-flex items-center gap-6">
-                    {p.pn}
-                    {isDup && (
-                      <span
-                        className="font-mono bg-warn br-2 letter-sp-6"
-                        style={{
-                          fontSize: 8,
-                          padding: "0 3px",
-                          color: "white",
-                        }}
-                      >
-                        {__t("parts.dup") || "DUP"}
-                      </span>
-                    )}
-                  </span>
-                </td>
-                <td>{p.name}</td>
-                <td>
-                  <span className={"cat " + p.category.toLowerCase()}>
-                    {p.category}
-                  </span>
-                </td>
-                <td>{p.vendor}</td>
-                <td className="num mono">{INR(p.cost, 2)}</td>
-                <td>
-                  <LeadHeat days={p.lead} />
-                </td>
-                <td className="mono">{p.origin}</td>
-                <td>
-                  <span className={"status " + (STATUS_CLASS[p.status] || "")}>
-                    {p.status}
-                  </span>
-                </td>
-                <td
-                  className="mono"
-                  style={{
-                    color: p.instances === 0 ? "var(--fg-4)" : "var(--fg-2)",
-                  }}
-                >
-                  {p.instances === 0
-                    ? "—"
-                    : p.instances +
+                <Icon.Dots size={11} />
+              </Button>
+            }
+            items={[
+              {
+                icon: <Icon.Plus size={11} />,
+                label: __t("parts.addToBomShort") || "Add to BOM",
+                onClick: () => addPartToBom(p),
+              },
+              {
+                icon: <Icon.Cart size={11} />,
+                label: __t("parts.addToPoDraft") || "Add to PO draft",
+                onClick: () => {
+                  const poDraft = window.__poDraft || [];
+                  poDraft.push({
+                    pn: p.pn,
+                    name: p.name,
+                    cost: p.cost,
+                    vendor: p.vendor,
+                  });
+                  window.__poDraft = poDraft;
+                  toast(
+                    p.pn +
                       " " +
-                      (__t("parts.bomCount") || "BOM") +
-                      (p.instances !== 1 ? "s" : "")}
-                </td>
-                <td>
-                  <Sparkline data={p.trend} />
-                </td>
-                <td onClick={(e) => e.stopPropagation()}>
-                  <span className="inline-flex gap-2">
-                    <button
-                      className="icon-btn w-22 h-22 op-06"
-                      aria-label={__t("parts.openDetails") || "Open details"}
-                      onClick={() => onOpenDetail(p)}
-                    >
-                      <Icon.Chevron size={11} />
-                    </button>
-                    <DropdownButton
-                      width={200}
-                      trigger={
-                        <button
-                          className="icon-btn w-22 h-22"
-                          aria-label={
-                            __t("parts.moreOptions") || "More options"
-                          }
-                        >
-                          <Icon.Dots size={11} />
-                        </button>
-                      }
-                      items={[
-                        {
-                          icon: <Icon.Plus size={11} />,
-                          label: __t("parts.addToBomShort") || "Add to BOM",
-                          onClick: () => addPartToBom(p),
-                        },
-                        {
-                          icon: <Icon.Cart size={11} />,
-                          label: __t("parts.addToPoDraft") || "Add to PO draft",
-                          onClick: () => {
-                            const poDraft = window.__poDraft || [];
-                            poDraft.push({
-                              pn: p.pn,
-                              name: p.name,
-                              cost: p.cost,
-                              vendor: p.vendor,
-                            });
-                            window.__poDraft = poDraft;
-                            toast(
-                              p.pn +
-                                " " +
-                                (__t("parts.addedToPoDraft") ||
-                                  "added to PO draft") +
-                                " (" +
-                                poDraft.length +
-                                " " +
-                                (__t("parts.items") || "items") +
-                                ")",
-                              { kind: "success" },
-                            );
-                          },
-                        },
-                        {
-                          icon: <Icon.Search size={11} />,
-                          label:
-                            __t("parts.findAlternates") || "Find alternates",
-                          onClick: () => {
-                            if (ctx?.openModal)
-                              ctx.openModal("find-alternates", p);
-                            else
-                              toast(
-                                __t("parts.searchingAlternates") ||
-                                  "Searching alternates for " + p.pn,
-                              );
-                          },
-                        },
-                        "divider",
-                        {
-                          icon: <Icon.Trash size={11} />,
-                          label: __t("parts.markObsolete") || "Mark obsolete",
-                          danger: true,
-                          onClick: () => {
-                            const next = ctx?.rows || data.rows;
-                            const patched = next.map((r) =>
-                              r.pn === p.pn ? { ...r, status: "Obsolete" } : r,
-                            );
-                            ctx?.setRows?.(patched);
-                            toast(
-                              p.pn +
-                                " " +
-                                (__t("parts.markedObsolete") ||
-                                  "marked obsolete"),
-                              { kind: "warn" },
-                            );
-                          },
-                        },
-                      ]}
-                    />
-                  </span>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                      (__t("parts.addedToPoDraft") || "added to PO draft") +
+                      " (" +
+                      poDraft.length +
+                      " " +
+                      (__t("parts.items") || "items") +
+                      ")",
+                    { kind: "success" },
+                  );
+                },
+              },
+              {
+                icon: <Icon.Search size={11} />,
+                label: __t("parts.findAlternates") || "Find alternates",
+                onClick: () => {
+                  if (ctx?.openModal) ctx.openModal("find-alternates", p);
+                  else
+                    toast(
+                      __t("parts.searchingAlternates") ||
+                        "Searching alternates for " + p.pn,
+                    );
+                },
+              },
+              "divider",
+              {
+                icon: <Icon.Trash size={11} />,
+                label: __t("parts.markObsolete") || "Mark obsolete",
+                danger: true,
+                onClick: () => {
+                  const next = ctx?.rows || data.rows;
+                  const patched = next.map((r) =>
+                    r.pn === p.pn ? { ...r, status: "Obsolete" } : r,
+                  );
+                  ctx?.setRows?.(patched);
+                  toast(
+                    p.pn + " " + (__t("parts.markedObsolete") || "marked obsolete"),
+                    { kind: "warn" },
+                  );
+                },
+              },
+            ]}
+          />
+        </span>
+      ),
+    },
+  ];
+
+  return (
+    <DataTable
+      className="parts-list-table"
+      ariaLabel={__t("parts.title") || "Component Library"}
+      columns={columns}
+      rows={parts}
+      getRowKey={(p) => p.pn}
+      isRowSelected={(p) => selectedIds.has(p.pn)}
+      onRowClick={(p) => onOpenDetail(p)}
+      zebra
+    />
   );
 }
 PartsList.propTypes = {
