@@ -3,7 +3,7 @@ import React from "react";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import { runUndo } from '../globals';
-export default function useKeyboardShortcuts({ route, theme, setRoute, setModal, setSearch, setTweak, setSelectedRow, GROUPS }) {
+export default function useKeyboardShortcuts({ route, setRoute, setModal, setSearch, setTweak, setSelectedRow, GROUPS }) {
   React.useEffect(() => {
     const onKey = (e) => {
       const inField = ["INPUT", "TEXTAREA", "SELECT"].includes(e.target?.tagName);
@@ -27,10 +27,6 @@ export default function useKeyboardShortcuts({ route, theme, setRoute, setModal,
         e.preventDefault();
         setModal(route === "vendors" ? "new-vendor" : route === "procurement" ? "new-po" : "new-part");
       }
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "L" || e.key === "l")) {
-        e.preventDefault();
-        setTweak("theme", theme === "dark" ? "light" : "dark");
-      }
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && /^[1-9]$/.test(e.key) && !inField) {
         e.preventDefault();
         const allItems = GROUPS?.flatMap ? GROUPS.flatMap(g => g.items) : [];
@@ -49,5 +45,5 @@ export default function useKeyboardShortcuts({ route, theme, setRoute, setModal,
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [route, theme]);
+  }, [route]);
 }

@@ -5,44 +5,9 @@ import { storage } from "../utils/storage.js";
 import PropTypes from "prop-types";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
-// ============ DARK MODE PERSISTENCE ============
-export function setTheme(theme) {
-  if (theme === "dark") {
-    document.documentElement.classList.add("dark");
-    document.documentElement.setAttribute("data-theme", "dark");
-  } else {
-    document.documentElement.classList.remove("dark");
-    document.documentElement.removeAttribute("data-theme");
-  }
-  storage.theme.set(theme);
-}
-window.setTheme = setTheme;
-export function toggleTheme() {
-  const current = document.documentElement.classList.contains("dark")
-    ? "dark"
-    : "light";
-  setTheme(current === "dark" ? "light" : "dark");
-}
-window.toggleTheme = toggleTheme;
-(function () {
-  const saved = storage.theme.get();
-  if (saved === "dark") {
-    document.documentElement.classList.add("dark");
-    document.documentElement.setAttribute("data-theme", "dark");
-  } else if (saved === "light") {
-    document.documentElement.classList.remove("dark");
-    document.documentElement.removeAttribute("data-theme");
-  }
-  if (!saved) {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    if (mq.matches) setTheme("dark");
-    mq.addEventListener("change", (e) => {
-      if (!storage.theme.get()) {
-        setTheme(e.matches ? "dark" : "light");
-      }
-    });
-  }
-})();
+// Dark mode removed — the app is light-only. A real WCAG-AA dark theme is a
+// later build; the previous setTheme/toggleTheme + prefers-color-scheme
+// auto-apply added a `.dark` class with no matching token set (dead/broken).
 // ============ VIRTUAL SCROLLING ============
 export function VirtualList({
   items,

@@ -12,10 +12,8 @@ export const KEYS = {
   DUP_DISMISSED: "__bbox_dup_dismissed",
   NOTIF_PREFS: "__bbox_notif",
   DOCS: "__bbox_docs",
-  A11Y_MODE: "__bbox_a11y",
   INR_RATE: "__bbox_rate",
   RECENT_SCANS: "__bbox_recent_scans",
-  THEME: "__bbox_theme",
   LANG: "bbox_lang",
   SAVED_SEARCHES: "__bbox_saved_searches",
   SUPPLIER_USERS: "__bbox_supplier_users",
@@ -150,10 +148,6 @@ export const storage = {
     set: (d) => setJSON(KEYS.DOCS, d),
   },
 
-  a11yMode: {
-    get: () => get(KEYS.A11Y_MODE, ""),
-    set: (m) => set(KEYS.A11Y_MODE, m),
-  },
 
   inrRate: {
     get: () => {
@@ -168,10 +162,6 @@ export const storage = {
     set: (s) => setJSON(KEYS.RECENT_SCANS, s),
   },
 
-  theme: {
-    get: () => get(KEYS.THEME, null),
-    set: (t) => set(KEYS.THEME, t),
-  },
 
   lang: {
     get: () => get(KEYS.LANG, "en"),

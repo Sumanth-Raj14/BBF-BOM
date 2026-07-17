@@ -43,7 +43,6 @@ export default function HelpModal({ open, onClose }) {
             [
               [__t("help.openSearch") || "Open search", "⌘ K"],
               [__t("help.openHelp") || "Open help", "?"],
-              [__t("help.toggleDarkLight") || "Toggle dark/light", "⌘ ⇧ L"],
               [__t("help.quickNew") || "Quick new (PO/Vendor/Part)", "⌘ N"],
             ],
           ],

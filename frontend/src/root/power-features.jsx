@@ -69,17 +69,6 @@ function CommandPalette({ open, onClose }) {
       run: () => window.dispatchEvent(new CustomEvent("open-ai")),
     },
     {
-      c: "> dark",
-      label: __t("power.cmd.dark") || "Toggle dark mode",
-      run: () =>
-        document.documentElement.setAttribute(
-          "data-theme",
-          document.documentElement.getAttribute("data-theme") === "dark"
-            ? "light"
-            : "dark",
-        ),
-    },
-    {
       c: "> sim",
       label: __t("power.cmd.sim") || "Open cost simulator",
       run: () => ctx?.openModal("cost-sim"),
@@ -1905,12 +1894,9 @@ function Presence() {
     </div>
   );
 }
-export function applyAccessibilityTheme(mode) {
-  document.documentElement.removeAttribute("data-a11y");
-  if (mode) document.documentElement.setAttribute("data-a11y", mode);
-  storage.a11yMode.set(mode || "");
-}
-window.applyAccessibilityTheme = applyAccessibilityTheme;
+// applyAccessibilityTheme (high-contrast/colorblind) removed — it was dead
+// (never called, no [data-a11y] CSS). WCAG AA is met in the base foundation;
+// dedicated a11y modes are a later build.
 export {
   CommandPalette,
   WorkOrdersScreen,

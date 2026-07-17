@@ -1,10 +1,9 @@
 export const TWEAK_DEFAULTS = {
-  "theme": "light",
   "density": "normal",
-  "accent": "#ba4816"
+  "accent": "#e85d1f"
 };
 
-export const ACCENT_PRESETS = ["#ba4816", "#3b82f6", "#10b981", "#eab308"];
+export const ACCENT_PRESETS = ["#e85d1f", "#ba4816", "#0288d1", "#2e7d32"];
 
 export const INITIAL_COMMENTS = {
   "EL-MCU-STM32H7": [

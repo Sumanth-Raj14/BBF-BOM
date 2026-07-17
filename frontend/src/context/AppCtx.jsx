@@ -208,10 +208,11 @@ function AppCtxProvider({ children }) {
   const [avaOpen, setAvaOpen] = React.useState(false);
 
   React.useEffect(() => {
-    document.documentElement.setAttribute("data-theme", t.theme);
+    // Dark mode was removed (a real AA dark theme is a later build); the app is
+    // light-only. Density + accent remain user-adjustable via Tweaks.
     document.documentElement.setAttribute("data-density", t.density);
     document.documentElement.style.setProperty("--accent", t.accent);
-  }, [t.theme, t.density, t.accent]);
+  }, [t.density, t.accent]);
 
   React.useEffect(() => {
     if (apiParts && apiParts.length > 0) {

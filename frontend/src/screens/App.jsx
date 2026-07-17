@@ -226,7 +226,6 @@ function AppShell() {
 
   useKeyboardShortcuts({
     route,
-    theme: t.theme,
     setRoute,
     setModal: ctx.setModal,
     setSearch: ctx.setSearch,
@@ -573,15 +572,6 @@ function AppShell() {
 
       <window.TweaksPanel title="Tweaks">
         <window.TweakSection label="Appearance">
-          <window.TweakRadio
-            label="Theme"
-            value={t.theme}
-            onChange={(v) => setTweak("theme", v)}
-            options={[
-              { value: "light", label: "Light" },
-              { value: "dark", label: "Dark" },
-            ]}
-          />
           <window.TweakRadio
             label="Density"
             value={t.density}

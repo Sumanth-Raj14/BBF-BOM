@@ -12,8 +12,6 @@ export default function TopBar() {
   const {
     apiConnected,
     apiLoading,
-    t,
-    setTweak,
     setModal,
     setRoute,
     route,
@@ -353,10 +351,6 @@ export default function TopBar() {
           <button className="popover-item" onClick={() => { setAvaOpen(false); setModal("settings"); }}>
             <span className="ic"><Icon.Settings size={12} /></span>
             <span className="lbl">{__t("userMenu.workspaceSettings")}</span>
-          </button>
-          <button className="popover-item" onClick={() => { setAvaOpen(false); setTweak("theme", t.theme === "dark" ? "light" : "dark"); }}>
-            <span className="ic">{t.theme === "dark" ? <Icon.Sun size={12} /> : <Icon.Moon size={12} />}</span>
-            <span className="lbl">{t.theme === "dark" ? "Switch to light" : "Switch to dark"}</span>
           </button>
 
           <div className="popover-divider" />
