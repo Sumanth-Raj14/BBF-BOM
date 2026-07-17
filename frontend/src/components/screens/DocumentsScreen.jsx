@@ -2,7 +2,8 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { DropdownButton, api, useAppStore } from "../../globals";
+import { DocumentFolderTree, Icon, api, useAppStore } from "../../globals";
+import { Button, Menu, EmptyState, ScreenHeader } from "../ui";
 // ============ DOCUMENTS ============
 export default function DocumentsScreen({ data, openModal, perms }) {
   const ctx = useAppStore();
@@ -128,7 +129,7 @@ export default function DocumentsScreen({ data, openModal, perms }) {
       if (sort === "Name A-Z") return a.name.localeCompare(b.name);
       if (sort === "Size") {
         const parseSize = (s) => {
-          if (!s || s === "\u2014") return 0;
+          if (!s || s === "—") return 0;
           const m = s.match(/([\d.]+)\s*(KB|MB|GB)?/i);
           if (!m) return 0;
           const n = parseFloat(m[1]);
@@ -141,71 +142,87 @@ export default function DocumentsScreen({ data, openModal, perms }) {
       return (b.updated || "").localeCompare(a.updated || "");
     });
 
+  const sortLabels = [
+    __t("documents.recent") || "Recent",
+    __t("documents.nameAZ") || "Name A-Z",
+    __t("documents.size") || "Size",
+    __t("documents.type") || "Type",
+  ];
+
   return (
     <div className="screen-wrap flex flex-col">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("nav.docs") || "Documents"}</h1>
-          <div className="sub">
+      <ScreenHeader
+        title={__t("nav.docs") || "Documents"}
+        description={
+          <>
             {loading
               ? __t("common.loading") || "Loading..."
               : `${filtered.length} ${__t("documents.files") || "files"}`}
             {selectedFolder && selectedFolder.path !== "/"
-              ? ` \u00B7 ${selectedFolder.label}`
+              ? ` · ${selectedFolder.label}`
               : ""}
+          </>
+        }
+        actions={
+          <div className="flex gap-8">
+            <Button
+              variant={showTree ? "secondary" : "ghost"}
+              size="sm"
+              aria-pressed={showTree}
+              onClick={() => setShowTree(!showTree)}
+            >
+              <Icon.Folder size={12} /> {__t("documents.folders") || "Folders"}
+            </Button>
+            <Menu
+              ariaLabel={__t("documents.sortBy") || "Sort by"}
+              trigger={
+                <Button variant="secondary" size="sm">
+                  {sort} <Icon.ChevronDown size={10} />
+                </Button>
+              }
+              items={sortLabels.map((s) => ({
+                icon:
+                  s === sort ? (
+                    <Icon.Check size={11} />
+                  ) : (
+                    <span className="w-11" />
+                  ),
+                label: s,
+                onSelect: () => setSort(s),
+              }))}
+            />
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => openModal("upload")}
+            >
+              <Icon.Import size={12} /> {__t("common.upload") || "Upload"}
+            </Button>
           </div>
-        </div>
-        <div className="flex gap-8">
-          <button
-            className="btn"
-            onClick={() => setShowTree(!showTree)}
-            style={{ color: showTree ? "var(--accent-text)" : "var(--fg-3)" }}
-          >
-            <Icon.Folder size={12} /> {__t("documents.folders") || "Folders"}
-          </button>
-          <DropdownButton
-            width={180}
-            trigger={
-              <button className="btn">
-                {sort} <Icon.ChevronDown size={10} />
-              </button>
-            }
-            items={[
-              __t("documents.recent") || "Recent",
-              __t("documents.nameAZ") || "Name A-Z",
-              __t("documents.size") || "Size",
-              __t("documents.type") || "Type",
-            ].map((s) => ({
-              icon:
-                s === sort ? (
-                  <Icon.Check size={11} />
-                ) : (
-                  <span className="w-11" />
-                ),
-              label: s,
-              onClick: () => setSort(s),
-            }))}
-          />
-          <button className="btn primary" onClick={() => openModal("upload")}>
-            <Icon.Import size={12} /> {__t("common.upload") || "Upload"}
-          </button>
-        </div>
-      </div>
-      <div style={{ flexWrap: "wrap" }} className="flex gap-8 mb-14">
+        }
+      />
+      <div
+        role="group"
+        aria-label={__t("documents.filterByTag") || "Filter by tag"}
+        style={{ flexWrap: "wrap" }}
+        className="flex gap-8 mb-14"
+      >
         {tags.map((t) => (
-          <span
+          <button
             key={t}
+            type="button"
             onClick={() => setTag(t)}
+            aria-pressed={t === tag}
             className={"chip cursor-pointer " + (t === tag ? "active" : "")}
           >
             {t}
-          </span>
+          </button>
         ))}
       </div>
       <div className="flex flex-1 min-h-0 gap-14">
         {showTree && (
           <div className="card flex-shrink-0">
-            <window.DocumentFolderTree
+            <DocumentFolderTree
               folders={folders}
               onSelect={setSelectedFolder}
               selected={selectedFolder}
@@ -214,14 +231,12 @@ export default function DocumentsScreen({ data, openModal, perms }) {
         )}
         <div className="doc-grid flex-1">
           {filtered.length === 0 ? (
-            <div
-              style={{ gridColumn: "1 / -1", padding: 60 }}
-              className="text-center fg-3"
-            >
-              <div className="font-mono mb-6 fs-32">∅</div>
-              <div>
-                {__t("documents.noDocuments") || "No documents in this view"}
-              </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <EmptyState
+                title={
+                  __t("documents.noDocuments") || "No documents in this view"
+                }
+              />
             </div>
           ) : (
             filtered.map((d) => (
@@ -238,22 +253,27 @@ export default function DocumentsScreen({ data, openModal, perms }) {
                       {d.tag} · {d.size} · {d.updated}
                     </span>
                     <span onClick={(e) => e.stopPropagation()}>
-                      <DropdownButton
-                        width={180}
+                      <Menu
+                        ariaLabel={__t("common.moreOptions") || "More options"}
                         align="right"
                         trigger={
-                          <button
-                            className="icon-btn w-18 h-18 b-0 bg-transparent"
-                            aria-label="More options"
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            iconOnly
+                            className="w-18 h-18"
+                            aria-label={
+                              __t("common.moreOptions") || "More options"
+                            }
                           >
                             <Icon.Dots size={11} />
-                          </button>
+                          </Button>
                         }
                         items={[
                           {
                             label: __t("common.open") || "Open",
                             icon: <Icon.Chevron size={11} />,
-                            onClick: () =>
+                            onSelect: () =>
                               (ctx || { openModal }).openModal?.(
                                 "doc-preview",
                                 d,
@@ -262,7 +282,7 @@ export default function DocumentsScreen({ data, openModal, perms }) {
                           {
                             label: __t("common.download") || "Download",
                             icon: <Icon.Export size={11} />,
-                            onClick: () =>
+                            onSelect: () =>
                               toast(
                                 __t("documents.downloaded") ||
                                   "Downloaded " + d.name,
@@ -272,7 +292,7 @@ export default function DocumentsScreen({ data, openModal, perms }) {
                           {
                             label: __t("common.copyLink") || "Copy link",
                             icon: <Icon.Link size={11} />,
-                            onClick: () =>
+                            onSelect: () =>
                               toast(__t("common.copied") || "Link copied"),
                           },
                           "divider",
@@ -282,11 +302,12 @@ export default function DocumentsScreen({ data, openModal, perms }) {
                                   label: __t("common.delete") || "Delete",
                                   icon: <Icon.Trash size={11} />,
                                   danger: true,
-                                  onClick: () =>
+                                  onSelect: () =>
                                     toast(
                                       d.name +
                                         " " +
-                                        (__t("documents.deleted") || "deleted"),
+                                        (__t("documents.deleted") ||
+                                          "deleted"),
                                       { kind: "warn" },
                                     ),
                                 },
