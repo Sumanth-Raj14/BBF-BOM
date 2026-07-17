@@ -2,7 +2,8 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { DropdownButton, api } from "../../globals";
+import { Icon, api } from "../../globals";
+import { Button, Menu, ScreenHeader } from "../ui";
 // ============ DIFF ============
 export default function DiffScreen({ data }) {
   const [swapped, setSwapped] = React.useState(false);
@@ -145,107 +146,99 @@ export default function DiffScreen({ data }) {
     acc[c.kind] = (acc[c.kind] || 0) + 1;
     return acc;
   }, {});
+
+  const versionChoices = [
+    { key: "v3.1.4", label: "v3.1.4 (" + (__t("diff.prevRelease") || "prev release") + ")" },
+    { key: "v3.1.0", label: "v3.1.0" },
+    { key: "v3.0.0", label: "v3.0.0 (" + (__t("diff.initial") || "initial") + ")" },
+  ];
+
+  const exportDiff = () =>
+    toast(__t("diff.exportedAsPdf") || "Diff exported as PDF", {
+      kind: "success",
+      action: {
+        label: __t("common.download") || "Download",
+        onClick: () =>
+          toast(
+            __t("diff.downloadedPdf") ||
+              "Downloaded diff_" + a.ver + "_to_" + b.ver + ".pdf",
+          ),
+      },
+    });
+
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>
+      <ScreenHeader
+        title={
+          <>
             {__t("diff.title") || "Compare Revisions"}{" "}
             {loading && (
-              <span className="fs-10 fg-3 ml-8">
-                {__t("common.loading") || "Loading\u2026"}
+              <span className="fs-10 fg-3 ml-8" role="status">
+                {__t("common.loading") || "Loading…"}
               </span>
             )}
-          </h1>
-          <div className="sub">
+          </>
+        }
+        description={
+          <>
             <span className="fg-ok">
               +{counts.added || 0} {__t("diff.added") || "added"}
             </span>{" "}
             ·{" "}
             <span className="fg-danger">
-              \u2212{counts.removed || 0} {__t("diff.removed") || "removed"}
+              −{counts.removed || 0} {__t("diff.removed") || "removed"}
             </span>{" "}
             ·{" "}
             <span className="fg-warn">
-              \u21BB{counts.changed || 0} {__t("diff.changed") || "changed"}
+              ↻{counts.changed || 0} {__t("diff.changed") || "changed"}
             </span>
+          </>
+        }
+        actions={
+          <div className="flex gap-8">
+            <Menu
+              ariaLabel={__t("diff.compareWith") || "Compare with…"}
+              trigger={
+                <Button variant="secondary" size="sm">
+                  {a.ver} ↔ {b.ver} <Icon.ChevronDown size={10} />
+                </Button>
+              }
+              items={versionChoices.map((v) => ({
+                icon:
+                  versionA === v.key ? (
+                    <Icon.Check size={11} />
+                  ) : (
+                    <span className="w-11" />
+                  ),
+                label: v.label,
+                onSelect: () => setVersionA(v.key),
+              }))}
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setSwapped((s) => !s)}
+            >
+              <Icon.Diff size={12} /> {__t("diff.swap") || "Swap A↔B"}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={exportDiff}>
+              <Icon.Export size={12} /> {__t("diff.exportDiff") || "Export diff"}
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => window.__open_approve_b?.()}
+            >
+              <Icon.Check size={12} /> {__t("diff.approveB") || "Approve B"}
+            </Button>
           </div>
-        </div>
-        <div className="flex gap-8">
-          <DropdownButton
-            width={220}
-            trigger={
-              <button className="btn">
-                {a.ver} ↔ {b.ver} <Icon.ChevronDown size={10} />
-              </button>
-            }
-            items={[
-              { header: __t("diff.compareWith") || "Compare with\u2026" },
-              {
-                icon:
-                  versionA === "v3.1.4" ? (
-                    <Icon.Check size={11} />
-                  ) : (
-                    <span className="w-11" />
-                  ),
-                label:
-                  "v3.1.4 (" +
-                  (__t("diff.prevRelease") || "prev release") +
-                  ")",
-                onClick: () => setVersionA("v3.1.4"),
-              },
-              {
-                icon:
-                  versionA === "v3.1.0" ? (
-                    <Icon.Check size={11} />
-                  ) : (
-                    <span className="w-11" />
-                  ),
-                label: "v3.1.0",
-                onClick: () => setVersionA("v3.1.0"),
-              },
-              {
-                icon:
-                  versionA === "v3.0.0" ? (
-                    <Icon.Check size={11} />
-                  ) : (
-                    <span className="w-11" />
-                  ),
-                label: "v3.0.0 (" + (__t("diff.initial") || "initial") + ")",
-                onClick: () => setVersionA("v3.0.0"),
-              },
-            ]}
-          />
-          <button className="btn" onClick={() => setSwapped((s) => !s)}>
-            <Icon.Diff size={12} /> {__t("diff.swap") || "Swap A\u2194B"}
-          </button>
-          <button
-            className="btn"
-            onClick={() =>
-              toast(__t("diff.exportedAsPdf") || "Diff exported as PDF", {
-                kind: "success",
-                action: {
-                  label: __t("common.download") || "Download",
-                  onClick: () =>
-                    toast(
-                      __t("diff.downloadedPdf") ||
-                        "Downloaded diff_" + a.ver + "_to_" + b.ver + ".pdf",
-                    ),
-                },
-              })
-            }
-          >
-            <Icon.Export size={12} /> {__t("diff.exportDiff") || "Export diff"}
-          </button>
-          <button
-            className="btn primary"
-            onClick={() => window.__open_approve_b?.()}
-          >
-            <Icon.Check size={12} /> {__t("diff.approveB") || "Approve B"}
-          </button>
-        </div>
-      </div>
-      <div className="diff-wrap">
+        }
+      />
+      <div
+        className="diff-wrap"
+        role="group"
+        aria-label={__t("diff.comparisonLabel") || "Revision comparison"}
+      >
         <div className="diff-side">
           <div className="diff-head">
             <span className="ver">
@@ -261,6 +254,7 @@ export default function DiffScreen({ data }) {
                 <div
                   key={c.pn + "-b"}
                   className="diff-row"
+                  aria-hidden="true"
                   style={{ visibility: "hidden" }}
                 >
                   —
@@ -310,6 +304,7 @@ export default function DiffScreen({ data }) {
                 <div
                   key={c.pn + "-a"}
                   className="diff-row"
+                  aria-hidden="true"
                   style={{ visibility: "hidden" }}
                 >
                   —
