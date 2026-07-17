@@ -14,12 +14,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
 from app.db.session import get_db
+from app.integrations.events import emit_integration_event
 from app.models.quality import CapaAction
 from app.models.team import TeamMember
 from app.models.user import User
 from app.models.work_order import WorkOrder
 
 router = APIRouter()
+
+
+async def _emit_assign(db, user, item_type, item, assignee_email=None, team=None):
+    await emit_integration_event(
+        db, user.tenantId, item_type, item.id, "assigned",
+        {
+            "ref": getattr(item, "wo_number", None) or getattr(item, "capa_number", None) or f"{item_type}-{item.id}",
+            "status": getattr(item, "status", None),
+            "assignee_email": assignee_email,
+            "team": team,
+        },
+    )
 
 
 class AssignRequest(BaseModel):
@@ -138,6 +151,18 @@ async def assign_work(
     # Explicit nulls unassign.
     item.assigned_to = body.assigned_to
     item.assigned_team_id = body.assigned_team_id
+
+    assignee_email = None
+    if body.assigned_to:
+        u = await db.get(User, body.assigned_to)
+        assignee_email = u.email if u else None
+    team_label = None
+    if body.assigned_team_id:
+        from app.models.team import Team
+        t = await db.get(Team, body.assigned_team_id)
+        team_label = t.name if t else None
+    await _emit_assign(db, user, body.item_type, item, assignee_email, team_label)
+
     await db.commit()
 
     return {
