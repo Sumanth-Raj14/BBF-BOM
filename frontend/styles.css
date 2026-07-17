@@ -2033,7 +2033,17 @@ a:hover { text-decoration: underline; }
 .feed-item .body { font-size: 12px; }
 .feed-item .body .who { font-weight: 600; }
 .feed-item .body .what { color: var(--fg-2); }
-.feed-item .body .obj { font-family: var(--font-mono); padding: 0 4px; background: var(--bg-sunk); border-radius: 2px; }
+.feed-item .body .obj {
+  font-family: var(--font-mono);
+  padding: 0 4px;
+  background: var(--bg-sunk);
+  border-radius: 2px;
+  border: none;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  appearance: none;
+}
 .feed-item .body .quote {
   margin-top: 6px;
   padding: 8px 10px;

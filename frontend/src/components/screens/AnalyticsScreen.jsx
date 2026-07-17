@@ -4,12 +4,13 @@ import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
 import {
   BOM_DATA,
-  DropdownButton,
+  Icon,
   INR,
   analyticsAPI,
   downloadBlob,
   useAppStore,
 } from "../../globals";
+import { Button, Menu, ScreenHeader } from "../ui";
 // ============ ANALYTICS ============
 export default function AnalyticsScreen({ data }) {
   const ctx = useAppStore();
@@ -133,57 +134,66 @@ export default function AnalyticsScreen({ data }) {
 
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("nav.analytics") || "Analytics"}</h1>
-          <div className="sub">
+      <ScreenHeader
+        title={__t("nav.analytics") || "Analytics"}
+        description={
+          <>
             {__t("analytics.projectAtlas") || "Project ATLAS"} ·{" "}
             {__t("analytics.last") || "Last"} {range}
-          </div>
-        </div>
-        <div className="flex gap-8">
-          <DropdownButton
-            width={160}
-            trigger={
-              <button className="btn">
-                {range} <Icon.ChevronDown size={10} />
-              </button>
-            }
-            items={["1 mo", "3 mo", "6 mo", "1 yr", "All time"].map((r) => ({
-              icon:
-                r === range ? (
-                  <Icon.Check size={11} />
-                ) : (
-                  <span className="w-11" />
-                ),
-              label:
-                r === "All time" ? __t("analytics.allTime") || "All time" : r,
-              onClick: () => setRange(r),
-            }))}
-          />
-          <button
-            className="btn"
-            onClick={() => ctx?.openModal("price-alerts")}
-          >
-            <Icon.Chart size={12} />{" "}
-            {__t("analytics.priceAlerts") || "Price alerts"}
-          </button>
-          <button className="btn" onClick={() => ctx?.openModal("inflation")}>
-            <Icon.Chart size={12} /> {__t("analytics.inflation") || "Inflation"}
-          </button>
-          <DropdownButton
-            width={180}
-            trigger={
-              <button className="btn">
-                <Icon.Export size={12} /> {__t("common.export") || "Export"}{" "}
-                <Icon.ChevronDown size={10} />
-              </button>
-            }
-            items={[
-              {
-                icon: <Icon.Doc size={11} />,
-                label: __t("analytics.pdfReport") || "PDF report",
-                onClick: () => {
+          </>
+        }
+        actions={
+          <div className="flex gap-8">
+            <Menu
+              ariaLabel={__t("analytics.dateRange") || "Date range"}
+              trigger={
+                <Button variant="secondary" size="sm">
+                  {range} <Icon.ChevronDown size={10} />
+                </Button>
+              }
+              items={["1 mo", "3 mo", "6 mo", "1 yr", "All time"].map((r) => ({
+                icon:
+                  r === range ? (
+                    <Icon.Check size={11} />
+                  ) : (
+                    <span className="w-11" />
+                  ),
+                label:
+                  r === "All time"
+                    ? __t("analytics.allTime") || "All time"
+                    : r,
+                onSelect: () => setRange(r),
+              }))}
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => ctx?.openModal("price-alerts")}
+            >
+              <Icon.Chart size={12} />{" "}
+              {__t("analytics.priceAlerts") || "Price alerts"}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => ctx?.openModal("inflation")}
+            >
+              <Icon.Chart size={12} />{" "}
+              {__t("analytics.inflation") || "Inflation"}
+            </Button>
+            <Menu
+              ariaLabel={__t("common.export") || "Export"}
+              trigger={
+                <Button variant="secondary" size="sm">
+                  <Icon.Export size={12} /> {__t("common.export") || "Export"}{" "}
+                  <Icon.ChevronDown size={10} />
+                </Button>
+              }
+              items={[
+                {
+                  icon: <Icon.Doc size={11} />,
+                  label: __t("analytics.pdfReport") || "PDF report",
+                  onSelect: () => {
                   toast(
                     __t("analytics.generatingPdf") || "Generating PDF\u2026",
                   );
@@ -214,9 +224,9 @@ export default function AnalyticsScreen({ data }) {
                 },
               },
               {
-                icon: <Icon.Doc size={11} />,
-                label: __t("analytics.pngCharts") || "PNG charts",
-                onClick: () => {
+                  icon: <Icon.Doc size={11} />,
+                  label: __t("analytics.pngCharts") || "PNG charts",
+                  onSelect: () => {
                   toast(
                     __t("analytics.generatingChart") ||
                       "Generating chart image\u2026",
@@ -318,9 +328,9 @@ export default function AnalyticsScreen({ data }) {
                 },
               },
               {
-                icon: <Icon.Doc size={11} />,
-                label: __t("analytics.csvData") || "CSV data",
-                onClick: () => {
+                  icon: <Icon.Doc size={11} />,
+                  label: __t("analytics.csvData") || "CSV data",
+                  onSelect: () => {
                   downloadBlob &&
                     downloadBlob(
                       "month,cost_usd\n" +
@@ -334,9 +344,10 @@ export default function AnalyticsScreen({ data }) {
                 },
               },
             ]}
-          />
-        </div>
-      </div>
+            />
+          </div>
+        }
+      />
 
       <div
         className="kpi-grid"
@@ -567,22 +578,22 @@ export default function AnalyticsScreen({ data }) {
               {__t("analytics.vendorScorecards") || "Vendor scorecards"} · top 6
             </h3>
           </div>
-          <div style={{ padding: 4 }}>
+          <div data-density="dense" style={{ padding: 4 }}>
             <table className="bom-table table-auto">
               <thead>
                 <tr>
-                  <th className="pl-12">
+                  <th className="pl-12" scope="col">
                     {__t("analytics.vendor") || "Vendor"}
                   </th>
-                  <th className="num">
+                  <th className="num" scope="col">
                     {__t("analytics.onTime") || "On-time"}
                   </th>
-                  <th className="num">
+                  <th className="num" scope="col">
                     {__t("analytics.quality") || "Quality"}
                   </th>
-                  <th className="num">{__t("analytics.cost") || "Cost"}</th>
-                  <th className="num">{__t("analytics.lead") || "Lead"}</th>
-                  <th>{__t("analytics.score") || "Score"}</th>
+                  <th className="num" scope="col">{__t("analytics.cost") || "Cost"}</th>
+                  <th className="num" scope="col">{__t("analytics.lead") || "Lead"}</th>
+                  <th scope="col">{__t("analytics.score") || "Score"}</th>
                 </tr>
               </thead>
               <tbody>
@@ -597,6 +608,19 @@ export default function AnalyticsScreen({ data }) {
                   <tr
                     key={r[0]}
                     onClick={() => window.__nav?.("vendors")}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        window.__nav?.("vendors");
+                      }
+                    }}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={
+                      (__t("analytics.viewVendor") || "View vendor") +
+                      " " +
+                      r[0]
+                    }
                     className="cursor-pointer"
                   >
                     <td className="pl-12 fw-600">{r[0]}</td>
@@ -1180,8 +1204,14 @@ export default function AnalyticsScreen({ data }) {
         <div className="card">
           <div className="card-h">
             <h3>{__t("analytics.bomSummaryReport") || "BOM summary report"}</h3>
-            <span
+            <button
+              type="button"
               className="hint cursor-pointer"
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+              }}
               onClick={() => {
                 const bomData = {
                   project: ctx?.project || BOM_DATA.project,
@@ -1256,7 +1286,7 @@ export default function AnalyticsScreen({ data }) {
             >
               <Icon.Export size={11} />{" "}
               {__t("analytics.downloadReport") || "Download report"}
-            </span>
+            </button>
           </div>
           <div style={{ padding: "12px 16px" }}>
             {(() => {
@@ -1439,8 +1469,14 @@ export default function AnalyticsScreen({ data }) {
               {__t("analytics.vendorCostComparison") ||
                 "Vendor cost comparison"}
             </h3>
-            <span
+            <button
+              type="button"
               className="hint cursor-pointer"
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+              }}
               onClick={() => {
                 const lines = [
                   __t("analytics.vendorCostComparison") ||
@@ -1503,9 +1539,9 @@ export default function AnalyticsScreen({ data }) {
             >
               <Icon.Export size={11} />{" "}
               {__t("analytics.downloadComparison") || "Download comparison"}
-            </span>
+            </button>
           </div>
-          <div className="ox-auto" style={{ padding: 12 }}>
+          <div className="ox-auto" data-density="dense" style={{ padding: 12 }}>
             {(() => {
               const parts = (ctx?.rows || BOM_DATA.rows)[0].children
                 .flatMap((s) => s.children || [])
@@ -1522,24 +1558,24 @@ export default function AnalyticsScreen({ data }) {
                 <table className="bom-table table-auto">
                   <thead>
                     <tr>
-                      <th className="pl-12">
+                      <th className="pl-12" scope="col">
                         {__t("analytics.part") || "Part"}
                       </th>
-                      <th>
+                      <th scope="col">
                         {__t("analytics.currentVendor") || "Current vendor"}
                       </th>
-                      <th className="num">
+                      <th className="num" scope="col">
                         {__t("analytics.currentCost") || "Current cost"}
                       </th>
-                      <th>{__t("analytics.altVendor") || "Alt vendor"}</th>
-                      <th className="num">
+                      <th scope="col">{__t("analytics.altVendor") || "Alt vendor"}</th>
+                      <th className="num" scope="col">
                         {__t("analytics.altCost") || "Alt cost"}
                       </th>
-                      <th className="num">
+                      <th className="num" scope="col">
                         {__t("analytics.deltaPercent") || "\u0394%"}
                       </th>
-                      <th className="num">{__t("analytics.lead") || "Lead"}</th>
-                      <th className="num">{__t("vendor.moq") || "MOQ"}</th>
+                      <th className="num" scope="col">{__t("analytics.lead") || "Lead"}</th>
+                      <th className="num" scope="col">{__t("vendor.moq") || "MOQ"}</th>
                     </tr>
                   </thead>
                   <tbody>

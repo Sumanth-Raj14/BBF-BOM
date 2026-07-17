@@ -2,8 +2,20 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { DropdownButton } from "../../globals";
+import { Icon } from "../../globals";
+import { Button, Menu, EmptyState, ScreenHeader } from "../ui";
 // ============ ACTIVITY ============
+
+// Maps the semantic color tag on each activity item to the avatar's CSS
+// modifier class (kept separate so the underlying palette can live in
+// styles.css as tokens/oklch without the JSX caring about class names).
+const AVA_COLOR_CLASS = {
+  blue: "user-2",
+  green: "user-3",
+  purple: "user-4",
+  gray: "sys",
+};
+
 export default function ActivityScreen({ data }) {
   const [filter, setFilter] = React.useState("All");
   const [activityItems, setActivityItems] = React.useState(data.activity || []);
@@ -89,12 +101,21 @@ export default function ActivityScreen({ data }) {
   };
   const filtered = activityItems.filter(matches);
 
+  const filterLabels = [
+    __t("activity.filterAll") || "All",
+    __t("activity.filterEdits") || "Edits",
+    __t("activity.filterApprovals") || "Approvals",
+    __t("activity.filterComments") || "Comments",
+    __t("activity.filterSystem") || "System",
+    __t("activity.filterMineOnly") || "Mine only",
+  ];
+
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("activity.title") || "Team Activity"}</h1>
-          <div className="sub">
+      <ScreenHeader
+        title={__t("activity.title") || "Team Activity"}
+        description={
+          <>
             {filtered.length} {__t("activity.of") || "of"}{" "}
             {activityItems.length} {__t("activity.events") || "events"} ·{" "}
             {filter === "All" ? "" : filter + " · "}
@@ -102,67 +123,74 @@ export default function ActivityScreen({ data }) {
             {autoRefresh
               ? " · " + (__t("activity.autoRefreshing") || "auto-refreshing")
               : ""}
+          </>
+        }
+        actions={
+          <div className="flex gap-8">
+            <Button
+              variant={autoRefresh ? "primary" : "secondary"}
+              size="sm"
+              aria-pressed={autoRefresh}
+              onClick={function () {
+                setAutoRefresh(function (v) {
+                  return !v;
+                });
+              }}
+            >
+              {autoRefresh
+                ? __t("activity.autoRefreshOn") || "Auto-refresh ON"
+                : __t("activity.autoRefreshOff") || "Auto-refresh OFF"}
+            </Button>
+            <Menu
+              ariaLabel={__t("activity.filterBy") || "Filter activity"}
+              trigger={
+                <Button variant="secondary" size="sm">
+                  {filter} <Icon.ChevronDown size={10} />
+                </Button>
+              }
+              items={filterLabels.map((f) => ({
+                icon:
+                  f === filter ? (
+                    <Icon.Check size={11} />
+                  ) : (
+                    <span className="w-11" />
+                  ),
+                label: f,
+                onSelect: () => setFilter(f),
+              }))}
+            />
           </div>
-        </div>
-        <div className="flex gap-8">
-          <button
-            className={"btn" + (autoRefresh ? " primary" : "")}
-            onClick={function () {
-              setAutoRefresh(function (v) {
-                return !v;
-              });
-            }}
-          >
-            {autoRefresh
-              ? __t("activity.autoRefreshOn") || "Auto-refresh ON"
-              : __t("activity.autoRefreshOff") || "Auto-refresh OFF"}
-          </button>
-          <DropdownButton
-            width={180}
-            trigger={
-              <button className="btn">
-                {filter} <Icon.ChevronDown size={10} />
-              </button>
-            }
-            items={[
-              __t("activity.filterAll") || "All",
-              __t("activity.filterEdits") || "Edits",
-              __t("activity.filterApprovals") || "Approvals",
-              __t("activity.filterComments") || "Comments",
-              __t("activity.filterSystem") || "System",
-              __t("activity.filterMineOnly") || "Mine only",
-            ].map((f) => ({
-              icon:
-                f === filter ? (
-                  <Icon.Check size={11} />
-                ) : (
-                  <span className="w-11" />
-                ),
-              label: f,
-              onClick: () => setFilter(f),
-            }))}
-          />
-        </div>
-      </div>
+        }
+      />
       <div className="feed">
         {filtered.length === 0 ? (
-          <div className="empty" style={{ padding: 80 }}>
-            <div className="ico">∅</div>
-            <h3>
-              {__t("activity.noMatchFilter") || "No events match this filter"}
-            </h3>
-            <button className="btn" onClick={() => setFilter("All")}>
-              {__t("activity.showAll") || "Show all"}
-            </button>
-          </div>
+          <EmptyState
+            icon="∅"
+            title={
+              __t("activity.noMatchFilter") || "No events match this filter"
+            }
+            actions={
+              <Button variant="secondary" size="sm" onClick={() => setFilter("All")}>
+                {__t("activity.showAll") || "Show all"}
+              </Button>
+            }
+          />
         ) : (
           filtered.map((a, i) => (
             <div key={a.who + "-" + a.time + "-" + i} className="feed-item">
-              <span className={"ava " + a.color}>{a.init}</span>
+              <span
+                className={
+                  "ava " + (AVA_COLOR_CLASS[a.color] || "")
+                }
+                aria-hidden="true"
+              >
+                {a.init}
+              </span>
               <div className="body">
                 <span className="who">{a.who}</span>{" "}
                 <span className="what">{a.action}</span>{" "}
-                <span
+                <button
+                  type="button"
                   className="obj cursor-pointer"
                   onClick={() => {
                     // Route to appropriate view based on obj content
@@ -178,7 +206,7 @@ export default function ActivityScreen({ data }) {
                   }}
                 >
                   {a.obj}
-                </span>
+                </button>
                 {a.note && <span className="what dot-sep">{a.note}</span>}
                 {a.quote && <div className="quote">{a.quote}</div>}
               </div>
