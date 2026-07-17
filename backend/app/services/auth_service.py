@@ -10,6 +10,7 @@ from typing import Optional
 import pyotp
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import blacklist_token
@@ -215,6 +216,48 @@ async def refresh_user_token(db: AsyncSession, refresh_token_str: str) -> dict:
     return make_tokens(user)
 
 
+async def _get_or_create_admin_role(db: AsyncSession, tenant_id: int):
+    """Find-or-create the "admin" Role for opt-in tenant self-signup.
+
+    `Role.name` is GLOBALLY unique (a known deferred quirk -- roles aren't
+    yet fully tenant-scoped), so an "admin" role created for any tenant is
+    found and reused by name rather than duplicated.
+
+    Registration is unauthenticated, so there is normally no tenant context
+    and this SELECT runs unfiltered. But it can still run inside a tenant
+    context (e.g. tests that set one globally), in which case the tenant
+    ORM event filter (app.core.tenant_events) may append a `tenantId`
+    predicate and hide an existing global "admin" row, racing us into
+    trying to create a second one. Guard that with a SAVEPOINT: create the
+    role in a nested transaction so that a unique-constraint violation only
+    rolls back the savepoint (not the caller's pending tenant/user rows),
+    then re-query for the row the concurrent registration created.
+    """
+    from app.models.role import Role
+
+    result = await db.execute(select(Role).where(Role.name == "admin"))
+    admin_role = result.scalar_one_or_none()
+    if admin_role:
+        return admin_role
+
+    try:
+        async with db.begin_nested():
+            admin_role = Role(
+                name="admin",
+                description="Tenant administrator",
+                tenantId=tenant_id,
+            )
+            db.add(admin_role)
+            await db.flush()
+    except IntegrityError:
+        result = await db.execute(select(Role).where(Role.name == "admin"))
+        admin_role = result.scalar_one_or_none()
+        if admin_role is None:
+            raise
+
+    return admin_role
+
+
 async def register_new_user(
     db: AsyncSession,
     email: str,
@@ -235,6 +278,7 @@ async def register_new_user(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username already taken")
 
+    from app.models.role import Role, user_roles
     from app.models.tenant import Tenant
 
     # Secure local-first default: self-registration must never let an anonymous
@@ -271,11 +315,28 @@ async def register_new_user(
         hashedPassword=get_password_hash(password),
         fullName=full_name,
         tenantId=new_tenant.id,
-        # Bootstrapping (or self-signup creating its own tenant) always makes
-        # the registering user the admin of that brand-new tenant.
-        isSuperuser=True,
+        # SECURITY: isSuperuser is a GLOBAL tenant-bypass (see
+        # models/user.py::effective_tenant_id, which returns None -- i.e. no
+        # tenant filtering at all -- for superusers; core/rbac.py also lets
+        # superusers bypass every role/tenant check). Only the very first-ever
+        # registration (tenant_count == 0, the single-tenant on-prem bootstrap)
+        # may become a global superuser -- that's acceptable for the sole
+        # admin of a fresh install. Every subsequent self-signup (opt-in via
+        # ALLOW_TENANT_SELF_SIGNUP) must NOT get global superuser, or every
+        # anonymous signup would become a cross-tenant superuser, reopening
+        # the breach this workstream closes -- it gets a tenant-scoped
+        # "admin" role instead (below).
+        isSuperuser=is_bootstrap,
     )
     db.add(db_user)
+    await db.flush()  # assigns db_user.id, needed for the role association insert
+
+    if not is_bootstrap:
+        admin_role = await _get_or_create_admin_role(db, new_tenant.id)
+        await db.execute(
+            user_roles.insert().values(user_id=db_user.id, role_id=admin_role.id)
+        )
+
     await db.commit()
     await db.refresh(db_user)
 
