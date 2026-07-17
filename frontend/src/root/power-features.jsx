@@ -3,6 +3,40 @@ import { storage } from "../utils/storage.js";
 import { screenData } from "../services/screenDataBridge.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import {
+  ScreenHeader,
+  Button,
+  Field,
+  Input,
+  Select,
+  Textarea,
+  Card,
+  DataTable,
+  StatusPill,
+  Badge,
+  Menu,
+  EmptyState,
+} from "../components/ui";
+
+function woStatusTone(status) {
+  if (status === "Complete") return "success";
+  if (status === "In Progress") return "warning";
+  if (status === "Released") return "info";
+  return "neutral";
+}
+
+function ncrStatusTone(status) {
+  if (status === "Resolved") return "success";
+  if (status === "In review") return "warning";
+  return "danger";
+}
+
+function ncrSeverityTone(severity) {
+  if (severity === "Critical") return "danger";
+  if (severity === "Major") return "warning";
+  return "neutral";
+}
+
 function CommandPalette({ open, onClose }) {
   const ctx = useAppStore();
   const [q, setQ] = React.useState("");
@@ -127,12 +161,17 @@ function CommandPalette({ open, onClose }) {
       } else if (e.key === "Enter" && results[idx]) {
         e.preventDefault();
         pick(results[idx]);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, results, idx]);
+  }, [open, results, idx, onClose]);
   if (!open) return null;
+  const listboxId = "cmd-palette-listbox";
+  const activeId = results[idx] ? "cmd-palette-item-" + idx : undefined;
   return (
     <div
       className="modal-backdrop items-start"
@@ -141,6 +180,9 @@ function CommandPalette({ open, onClose }) {
     >
       <div
         className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={__t("power.cmdPaletteTitle") || "Command palette"}
         onClick={(e) => e.stopPropagation()}
         style={{ width: "min(620px, calc(100vw - 40px))" }}
       >
@@ -148,11 +190,22 @@ function CommandPalette({ open, onClose }) {
           className="flex items-center gap-10 border-bottom"
           style={{ padding: "14px 16px" }}
         >
-          <span className="font-mono fg-accent">{isCmd ? "$" : "›"}</span>
+          <span className="font-mono fg-accent" aria-hidden="true">
+            {isCmd ? "$" : "›"}
+          </span>
           <input
             id="cmd-palette"
             name="commandSearch"
             autoFocus
+            role="combobox"
+            aria-expanded="true"
+            aria-controls={listboxId}
+            aria-autocomplete="list"
+            aria-activedescendant={activeId}
+            aria-label={
+              __t("power.cmdPalettePlaceholder") ||
+              "Type a command (> for actions) or search…"
+            }
             value={q}
             onChange={(e) => {
               setQ(e.target.value);
@@ -165,12 +218,24 @@ function CommandPalette({ open, onClose }) {
             className="flex-1 bg-transparent b-0 fs-14 fg font-mono"
             style={{ outline: "none" }}
           />
-          <span className="kbd font-mono fs-10">ESC</span>
+          <span className="kbd font-mono fs-10" aria-hidden="true">
+            ESC
+          </span>
         </div>
-        <div className="oy-auto" style={{ maxHeight: 380 }}>
+        <div
+          className="oy-auto"
+          style={{ maxHeight: 380 }}
+          id={listboxId}
+          role="listbox"
+          aria-label={__t("power.cmdPaletteResults") || "Command results"}
+        >
           {results.map((r, i) => (
             <button
               key={r.label + "-" + r.c}
+              id={"cmd-palette-item-" + i}
+              role="option"
+              aria-selected={i === idx}
+              type="button"
               className="popover-item"
               style={{
                 padding: "10px 14px",
@@ -186,7 +251,9 @@ function CommandPalette({ open, onClose }) {
                 {r.c}
               </span>
               <span className="lbl">{r.label}</span>
-              <span className="font-mono fs-9 fg-4">↵</span>
+              <span className="font-mono fs-9 fg-4" aria-hidden="true">
+                ↵
+              </span>
             </button>
           ))}
         </div>
@@ -316,132 +383,274 @@ function WorkOrdersScreen() {
     a[o.status] = (a[o.status] || 0) + 1;
     return a;
   }, {});
+
+  const woColumns = [
+    {
+      key: "id",
+      header: __t("power.workOrders.woId") || "WO ID",
+      render: (o) => <span className="mono fw-600">{o.id}</span>,
+    },
+    { key: "bom", header: __t("power.workOrders.bomCol") || "BOM" },
+    {
+      key: "qty",
+      header: __t("part.quantity") || "Qty",
+      align: "num",
+      render: (o) => <span className="mono">{o.qty}</span>,
+    },
+    {
+      key: "scheduled",
+      header: __t("power.workOrders.scheduledCol") || "Scheduled",
+      render: (o) => <span className="mono">{o.scheduled}</span>,
+    },
+    {
+      key: "progress",
+      header: __t("power.workOrders.progress") || "Progress",
+      render: (o) => (
+        <div className="flex items-center gap-8" style={{ minWidth: 140 }}>
+          <div
+            className="flex-1 bg-sunk overflow-h"
+            style={{ height: 6, borderRadius: 3 }}
+          >
+            <div
+              className="h-100p bg-accent"
+              style={{ width: (o.built / o.qty) * 100 + "%" }}
+            />
+          </div>
+          <span className="font-mono fs-10 fg-3">
+            {o.built}/{o.qty}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: "yield",
+      header: __t("power.workOrders.yieldCol") || "Yield",
+      render: (o) => {
+        const yield_ = o.built > 0 ? (o.good / o.built) * 100 : 0;
+        return (
+          <span
+            className="mono"
+            style={{
+              color:
+                yield_ >= 95
+                  ? "var(--ok)"
+                  : yield_ >= 85
+                    ? "var(--warn)"
+                    : yield_ > 0
+                      ? "var(--danger)"
+                      : "var(--fg-3)",
+            }}
+          >
+            {o.built > 0 ? yield_.toFixed(1) + "%" : "\u2014"}
+          </span>
+        );
+      },
+    },
+    {
+      key: "status",
+      header: __t("part.status") || "Status",
+      render: (o) => <StatusPill status={o.status} tone={woStatusTone(o.status)} />,
+    },
+    {
+      key: "actions",
+      header: "",
+      render: (o) => (
+        <Menu
+          ariaLabel={__t("common.moreOptions") || "More options"}
+          trigger={
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              aria-label={__t("common.moreOptions") || "More options"}
+            >
+              <Icon.Dots size={11} />
+            </Button>
+          }
+          items={[
+            {
+              icon: <Icon.Plus size={11} />,
+              label: __t("power.workOrders.reportBuild") || "Report build",
+              onSelect: () => {
+                const next = orders.map((x) =>
+                  x.id === o.id
+                    ? { ...x, built: x.built + 1, good: x.good + 1 }
+                    : x,
+                );
+                persist(next);
+                toast(
+                  __t("power.workOrders.buildReported") ||
+                    "Build reported \u00B7 1 good unit",
+                );
+              },
+            },
+            {
+              icon: <Icon.Flag size={11} />,
+              label: __t("power.workOrders.reportDefect") || "Report defect",
+              onSelect: () => {
+                const next = orders.map((x) =>
+                  x.id === o.id
+                    ? { ...x, built: x.built + 1, defect: x.defect + 1 }
+                    : x,
+                );
+                persist(next);
+                toast(
+                  __t("power.workOrders.defectReported") ||
+                    "Defect reported \u00B7 NCR drafted",
+                  { kind: "warn" },
+                );
+              },
+            },
+            {
+              icon: <Icon.Doc size={11} />,
+              label:
+                __t("power.workOrders.printRoutingCard") ||
+                "Print routing card",
+              onSelect: () => {
+                const h = escapeHtml;
+                openPrintWindow(
+                  "Routing Card",
+                  "<html><head><title>Routing - " +
+                    h(o.id) +
+                    "</title><style>body{font-family:monospace;padding:30px}</style></head><body><h1>" +
+                    h(o.id) +
+                    "</h1><p>BOM: " +
+                    h(o.bom) +
+                    "</p><p>Qty: " +
+                    h(o.qty) +
+                    " | Scheduled: " +
+                    h(o.scheduled) +
+                    "</p><p>Status: " +
+                    h(o.status) +
+                    "</p></body></html>",
+                  {
+                    features: "width=600,height=400",
+                    printDelay: 300,
+                  },
+                );
+              },
+            },
+          ]}
+        />
+      ),
+    },
+  ];
+
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("power.workOrders.title") || "Work Orders"}</h1>
-          <div className="sub">
-            {orders.length} {__t("power.workOrders.orders") || "orders"} \u00B7{" "}
-            {orders.reduce((s, o) => s + o.qty, 0)}{" "}
-            {__t("power.workOrders.unitsScheduled") || "units scheduled"}
+      <ScreenHeader
+        title={__t("power.workOrders.title") || "Work Orders"}
+        description={
+          orders.length +
+          " " +
+          (__t("power.workOrders.orders") || "orders") +
+          " \u00B7 " +
+          orders.reduce((s, o) => s + o.qty, 0) +
+          " " +
+          (__t("power.workOrders.unitsScheduled") || "units scheduled")
+        }
+        actions={
+          <div className="flex gap-8">
+            <Button
+              variant="secondary"
+              onClick={() =>
+                toast(
+                  __t("power.workOrders.scheduleExported") ||
+                    "Work order schedule exported",
+                  { kind: "success" },
+                )
+              }
+            >
+              <Icon.Export size={12} />{" "}
+              {__t("power.workOrders.exportSchedule") || "Export schedule"}
+            </Button>
+            <Button variant="primary" onClick={() => setShowForm(!showForm)}>
+              <Icon.Plus size={12} />{" "}
+              {__t("power.workOrders.newWorkOrder") || "New work order"}
+            </Button>
           </div>
-        </div>
-        <div className="flex gap-8">
-          <button
-            className="btn"
-            onClick={() =>
-              toast(
-                __t("power.workOrders.scheduleExported") ||
-                  "Work order schedule exported",
-                { kind: "success" },
-              )
-            }
-          >
-            <Icon.Export size={12} />{" "}
-            {__t("power.workOrders.exportSchedule") || "Export schedule"}
-          </button>
-          <button
-            className="btn primary"
-            onClick={() => setShowForm(!showForm)}
-          >
-            <Icon.Plus size={12} />{" "}
-            {__t("power.workOrders.newWorkOrder") || "New work order"}
-          </button>
-        </div>
-      </div>
+        }
+      />
       {showForm && (
-        <div className="card mb-12" style={{ padding: 16 }}>
-          <div className="fw-600 fs-13 mb-12">
-            {__t("power.workOrders.createWorkOrder") || "Create Work Order"}
-          </div>
-          <div
-            className="d-grid gap-12"
-            style={{ gridTemplateColumns: "1fr 1fr 1fr" }}
-          >
-            <div className="field">
-              <label>{__t("power.workOrders.bomLabel") || "BOM"}</label>
-              <select
-                className="select"
+        <Card
+          className="mb-12"
+          title={__t("power.workOrders.createWorkOrder") || "Create Work Order"}
+          footer={
+            <div className="flex gap-8 justify-end">
+              <Button variant="secondary" onClick={() => setShowForm(false)}>
+                {__t("common.cancel") || "Cancel"}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  if (!newWo.scheduled) {
+                    toast(
+                      __t("power.workOrders.scheduleDateRequired") ||
+                        "Schedule date required",
+                      { kind: "warn" },
+                    );
+                    return;
+                  }
+                  const id =
+                    "WO-2026-" + String(43 + orders.length).padStart(4, "0");
+                  persist([
+                    {
+                      id,
+                      bom: newWo.bom,
+                      qty: newWo.qty,
+                      scheduled: newWo.scheduled,
+                      status: "Draft",
+                      built: 0,
+                      good: 0,
+                      defect: 0,
+                    },
+                    ...orders,
+                  ]);
+                  setShowForm(false);
+                  toast(
+                    id + " " + (__t("power.workOrders.created") || "created"),
+                    { kind: "success" },
+                  );
+                }}
+              >
+                {__t("power.workOrders.create") || "Create"}
+              </Button>
+            </div>
+          }
+        >
+          <div className="field-row-3">
+            <Field label={__t("power.workOrders.bomLabel") || "BOM"}>
+              <Select
                 value={newWo.bom}
                 onChange={(e) => setNewWo({ ...newWo, bom: e.target.value })}
-                aria-label={__t("power.workOrders.bomLabel") || "BOM"}
               >
                 <option>ATLAS Mainframe v3.2.0</option>
                 <option>HORIZON Sensor Pod v1.4.0</option>
                 <option>ATLAS-LITE Eval v1.0.0</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>
-                {__t("power.workOrders.quantityLabel") || "Quantity"}
-              </label>
-              <input
-                className="input"
+              </Select>
+            </Field>
+            <Field label={__t("power.workOrders.quantityLabel") || "Quantity"}>
+              <Input
                 type="number"
                 value={newWo.qty}
                 onChange={(e) => setNewWo({ ...newWo, qty: +e.target.value })}
-                aria-label={__t("power.workOrders.quantityLabel") || "Quantity"}
               />
-            </div>
-            <div className="field">
-              <label>
-                {__t("power.workOrders.scheduledDateLabel") || "Scheduled Date"}
-              </label>
-              <input
-                className="input"
+            </Field>
+            <Field
+              label={
+                __t("power.workOrders.scheduledDateLabel") || "Scheduled Date"
+              }
+            >
+              <Input
                 type="date"
                 value={newWo.scheduled}
                 onChange={(e) =>
                   setNewWo({ ...newWo, scheduled: e.target.value })
                 }
-                aria-label={
-                  __t("power.workOrders.scheduledDateLabel") || "Scheduled date"
-                }
               />
-            </div>
+            </Field>
           </div>
-          <div className="flex gap-8 mt-12 justify-end">
-            <button className="btn" onClick={() => setShowForm(false)}>
-              {__t("common.cancel") || "Cancel"}
-            </button>
-            <button
-              className="btn primary"
-              onClick={() => {
-                if (!newWo.scheduled) {
-                  toast(
-                    __t("power.workOrders.scheduleDateRequired") ||
-                      "Schedule date required",
-                    { kind: "warn" },
-                  );
-                  return;
-                }
-                const id =
-                  "WO-2026-" + String(43 + orders.length).padStart(4, "0");
-                persist([
-                  {
-                    id,
-                    bom: newWo.bom,
-                    qty: newWo.qty,
-                    scheduled: newWo.scheduled,
-                    status: "Draft",
-                    built: 0,
-                    good: 0,
-                    defect: 0,
-                  },
-                  ...orders,
-                ]);
-                setShowForm(false);
-                toast(
-                  id + " " + (__t("power.workOrders.created") || "created"),
-                  { kind: "success" },
-                );
-              }}
-            >
-              {__t("power.workOrders.create") || "Create"}
-            </button>
-          </div>
-        </div>
+        </Card>
       )}
       <div
         className="kpi-grid"
@@ -484,169 +693,21 @@ function WorkOrdersScreen() {
           </div>
         ))}
       </div>
-      <div className="card">
-        <table className="bom-table table-auto">
-          <thead>
-            <tr>
-              <th>{__t("power.workOrders.woId") || "WO ID"}</th>
-              <th>{__t("power.workOrders.bomCol") || "BOM"}</th>
-              <th className="num pl-16">{__t("part.quantity") || "Qty"}</th>
-              <th>{__t("power.workOrders.scheduledCol") || "Scheduled"}</th>
-              <th>{__t("power.workOrders.progress") || "Progress"}</th>
-              <th>{__t("power.workOrders.yieldCol") || "Yield"}</th>
-              <th>{__t("part.status") || "Status"}</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {orders.map((o) => {
-              const yield_ = o.built > 0 ? (o.good / o.built) * 100 : 0;
-              return (
-                <tr key={o.id}>
-                  <td className="mono pl-16 fw-600">{o.id}</td>
-                  <td>{o.bom}</td>
-                  <td className="num mono">{o.qty}</td>
-                  <td className="mono">{o.scheduled}</td>
-                  <td style={{ minWidth: 140 }}>
-                    <div className="flex items-center gap-8">
-                      <div
-                        className="flex-1 bg-sunk overflow-h"
-                        style={{ height: 6, borderRadius: 3 }}
-                      >
-                        <div
-                          className="h-100p bg-accent"
-                          style={{ width: (o.built / o.qty) * 100 + "%" }}
-                        />
-                      </div>
-                      <span className="font-mono fs-10 fg-3">
-                        {o.built}/{o.qty}
-                      </span>
-                    </div>
-                  </td>
-                  <td
-                    className="mono"
-                    style={{
-                      color:
-                        yield_ >= 95
-                          ? "var(--ok)"
-                          : yield_ >= 85
-                            ? "var(--warn)"
-                            : yield_ > 0
-                              ? "var(--danger)"
-                              : "var(--fg-3)",
-                    }}
-                  >
-                    {o.built > 0 ? yield_.toFixed(1) + "%" : "\u2014"}
-                  </td>
-                  <td>
-                    <span
-                      className={
-                        "status " +
-                        (o.status === "Complete"
-                          ? "released"
-                          : o.status === "In Progress"
-                            ? "review"
-                            : o.status === "Released"
-                              ? "approved"
-                              : "draft")
-                      }
-                    >
-                      {o.status}
-                    </span>
-                  </td>
-                  <td>
-                    <DropdownButton
-                      width={180}
-                      trigger={
-                        <button
-                          className="icon-btn w-22 h-22"
-                          aria-label={
-                            __t("common.moreOptions") || "More options"
-                          }
-                        >
-                          <Icon.Dots size={11} />
-                        </button>
-                      }
-                      items={[
-                        {
-                          icon: <Icon.Plus size={11} />,
-                          label:
-                            __t("power.workOrders.reportBuild") ||
-                            "Report build",
-                          onClick: () => {
-                            const next = orders.map((x) =>
-                              x.id === o.id
-                                ? { ...x, built: x.built + 1, good: x.good + 1 }
-                                : x,
-                            );
-                            persist(next);
-                            toast(
-                              __t("power.workOrders.buildReported") ||
-                                "Build reported \u00B7 1 good unit",
-                            );
-                          },
-                        },
-                        {
-                          icon: <Icon.Flag size={11} />,
-                          label:
-                            __t("power.workOrders.reportDefect") ||
-                            "Report defect",
-                          onClick: () => {
-                            const next = orders.map((x) =>
-                              x.id === o.id
-                                ? {
-                                    ...x,
-                                    built: x.built + 1,
-                                    defect: x.defect + 1,
-                                  }
-                                : x,
-                            );
-                            persist(next);
-                            toast(
-                              __t("power.workOrders.defectReported") ||
-                                "Defect reported \u00B7 NCR drafted",
-                              { kind: "warn" },
-                            );
-                          },
-                        },
-                        {
-                          icon: <Icon.Doc size={11} />,
-                          label:
-                            __t("power.workOrders.printRoutingCard") ||
-                            "Print routing card",
-                          onClick: () => {
-                            const h = escapeHtml;
-                            openPrintWindow(
-                              "Routing Card",
-                              "<html><head><title>Routing - " +
-                                h(o.id) +
-                                "</title><style>body{font-family:monospace;padding:30px}</style></head><body><h1>" +
-                                h(o.id) +
-                                "</h1><p>BOM: " +
-                                h(o.bom) +
-                                "</p><p>Qty: " +
-                                h(o.qty) +
-                                " | Scheduled: " +
-                                h(o.scheduled) +
-                                "</p><p>Status: " +
-                                h(o.status) +
-                                "</p></body></html>",
-                              {
-                                features: "width=600,height=400",
-                                printDelay: 300,
-                              },
-                            );
-                          },
-                        },
-                      ]}
-                    />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        dense
+        ariaLabel={__t("power.workOrders.title") || "Work Orders"}
+        columns={woColumns}
+        rows={orders}
+        empty={
+          <EmptyState
+            title={__t("power.workOrders.noOrders") || "No work orders"}
+            message={
+              __t("power.workOrders.noOrdersMsg") ||
+              "Create a work order to get started."
+            }
+          />
+        }
+      />
     </div>
   );
 }
@@ -757,111 +818,165 @@ function NCRScreen() {
       ]);
     }
   };
+  const ncrColumns = [
+    {
+      key: "id",
+      header: __t("power.ncr.ncrId") || "NCR ID",
+      render: (n) => <span className="mono fw-600">{n.id}</span>,
+    },
+    {
+      key: "pn",
+      header: __t("part.partNumber") || "Part",
+      render: (n) => <span className="mono">{n.pn}</span>,
+    },
+    {
+      key: "wo",
+      header: __t("power.ncr.workOrder") || "Work Order",
+      render: (n) => <span className="mono fg-3">{n.wo}</span>,
+    },
+    {
+      key: "defect",
+      header: __t("power.ncr.defect") || "Defect",
+      render: (n) => (
+        <>
+          {n.defect}
+          <div className="font-mono fs-10 fg-3">
+            {n.reporter} \u00B7 {n.date}
+          </div>
+        </>
+      ),
+    },
+    {
+      key: "severity",
+      header: __t("power.ncr.severity") || "Severity",
+      render: (n) => (
+        <Badge tone={ncrSeverityTone(n.severity)}>
+          {n.severity.toUpperCase()}
+        </Badge>
+      ),
+    },
+    { key: "action", header: __t("power.ncr.action") || "Action" },
+    {
+      key: "status",
+      header: __t("part.status") || "Status",
+      render: (n) => (
+        <StatusPill status={n.status} tone={ncrStatusTone(n.status)} />
+      ),
+    },
+  ];
+
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("power.ncr.title") || "Non-Conformance Reports"}</h1>
-          <div className="sub">
-            {ncrs.length} {__t("power.ncr.reports") || "reports"} \u00B7{" "}
-            {critCount} {__t("power.ncr.critical") || "critical"} \u00B7{" "}
-            {majorCount} {__t("power.ncr.major") || "major"} \u00B7 {minorCount}{" "}
-            {__t("power.ncr.minor") || "minor"}
+      <ScreenHeader
+        title={__t("power.ncr.title") || "Non-Conformance Reports"}
+        description={
+          ncrs.length +
+          " " +
+          (__t("power.ncr.reports") || "reports") +
+          " \u00B7 " +
+          critCount +
+          " " +
+          (__t("power.ncr.critical") || "critical") +
+          " \u00B7 " +
+          majorCount +
+          " " +
+          (__t("power.ncr.major") || "major") +
+          " \u00B7 " +
+          minorCount +
+          " " +
+          (__t("power.ncr.minor") || "minor")
+        }
+        actions={
+          <div className="flex gap-8">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                const csv = ncrs
+                  .map(
+                    (n) =>
+                      `${n.id},${n.pn},${n.defect},${n.severity},${n.status},${n.date}`,
+                  )
+                  .join("\n");
+                const b = new Blob([csv], { type: "text/csv" });
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(b);
+                a.download = "ncr_log.csv";
+                a.click();
+                toast(__t("power.ncr.exported") || "NCR log exported", {
+                  kind: "success",
+                });
+              }}
+            >
+              <Icon.Export size={12} /> {__t("common.export") || "Export"}
+            </Button>
+            <Button variant="primary" onClick={() => setShowForm(!showForm)}>
+              <Icon.Plus size={12} /> {__t("power.ncr.newNcr") || "New NCR"}
+            </Button>
           </div>
-        </div>
-        <div>
-          <button
-            className="btn flex gap-8"
-            onClick={() => {
-              const csv = ncrs
-                .map(
-                  (n) =>
-                    `${n.id},${n.pn},${n.defect},${n.severity},${n.status},${n.date}`,
-                )
-                .join("\n");
-              const b = new Blob([csv], { type: "text/csv" });
-              const a = document.createElement("a");
-              a.href = URL.createObjectURL(b);
-              a.download = "ncr_log.csv";
-              a.click();
-              toast(__t("power.ncr.exported") || "NCR log exported", {
-                kind: "success",
-              });
-            }}
-          >
-            <Icon.Export size={12} /> {__t("common.export") || "Export"}
-          </button>
-          <button
-            className="btn primary"
-            onClick={() => setShowForm(!showForm)}
-          >
-            <Icon.Plus size={12} /> {__t("power.ncr.newNcr") || "New NCR"}
-          </button>
-        </div>
-      </div>
+        }
+      />
       {showForm && (
-        <div className="card mb-12" style={{ padding: 16 }}>
-          <div className="fw-600 fs-13 mb-12">
-            {__t("power.ncr.createNewNcr") || "Create New NCR"}
-          </div>
-          <div
-            className="d-grid gap-12"
-            style={{ gridTemplateColumns: "1fr 1fr" }}
-          >
-            <div className="field">
-              <label>{__t("power.ncr.partNumber") || "Part Number"} *</label>
-              <input
-                className="input"
+        <Card
+          className="mb-12"
+          title={__t("power.ncr.createNewNcr") || "Create New NCR"}
+          footer={
+            <div className="flex gap-8 justify-end">
+              <Button variant="secondary" onClick={() => setShowForm(false)}>
+                {__t("common.cancel") || "Cancel"}
+              </Button>
+              <Button variant="primary" onClick={createNcr}>
+                {__t("power.ncr.createNcr") || "Create NCR"}
+              </Button>
+            </div>
+          }
+        >
+          <div className="field-row">
+            <Field
+              label={__t("power.ncr.partNumber") || "Part Number"}
+              required
+            >
+              <Input
                 value={newNcr.pn}
                 onChange={(e) => setNewNcr({ ...newNcr, pn: e.target.value })}
                 placeholder="e.g. EL-PSU-240W"
-                aria-label={__t("power.ncr.partNumber") || "Part number"}
               />
-            </div>
-            <div className="field">
-              <label>{__t("power.ncr.severity") || "Severity"}</label>
-              <select
-                className="select"
+            </Field>
+            <Field label={__t("power.ncr.severity") || "Severity"}>
+              <Select
                 value={newNcr.severity}
                 onChange={(e) =>
                   setNewNcr({ ...newNcr, severity: e.target.value })
                 }
-                aria-label={__t("power.ncr.severity") || "Severity"}
               >
                 <option>Critical</option>
                 <option>Major</option>
                 <option>Minor</option>
-              </select>
-            </div>
-            <div className="field" style={{ gridColumn: "1 / -1" }}>
-              <label>
-                {__t("power.ncr.defectDescription") || "Defect Description"} *
-              </label>
-              <textarea
-                className="input"
-                value={newNcr.defect}
-                onChange={(e) =>
-                  setNewNcr({ ...newNcr, defect: e.target.value })
-                }
-                placeholder={
-                  __t("power.ncr.describeNonConformance") ||
-                  "Describe the non-conformance..."
-                }
-                style={{ minHeight: 60 }}
-                aria-label={
-                  __t("power.ncr.defectDescription") || "Defect description"
-                }
-              />
-            </div>
-            <div className="field">
-              <label>{__t("power.ncr.disposition") || "Disposition"}</label>
-              <select
-                className="select"
+              </Select>
+            </Field>
+          </div>
+          <Field
+            label={__t("power.ncr.defectDescription") || "Defect Description"}
+            required
+          >
+            <Textarea
+              value={newNcr.defect}
+              onChange={(e) =>
+                setNewNcr({ ...newNcr, defect: e.target.value })
+              }
+              placeholder={
+                __t("power.ncr.describeNonConformance") ||
+                "Describe the non-conformance..."
+              }
+              style={{ minHeight: 60 }}
+            />
+          </Field>
+          <div className="field-row">
+            <Field label={__t("power.ncr.disposition") || "Disposition"}>
+              <Select
                 value={newNcr.action}
                 onChange={(e) =>
                   setNewNcr({ ...newNcr, action: e.target.value })
                 }
-                aria-label={__t("power.ncr.disposition") || "Disposition"}
               >
                 <option>{__t("power.ncr.rework") || "Rework"}</option>
                 <option>
@@ -874,100 +989,41 @@ function NCRScreen() {
                   {__t("power.ncr.useAsIs") || "Use as-is (waiver)"}
                 </option>
                 <option>{__t("power.ncr.scrap") || "Scrap"}</option>
-              </select>
-            </div>
+              </Select>
+            </Field>
           </div>
-          <div className="flex gap-8 mt-12 justify-end">
-            <button className="btn" onClick={() => setShowForm(false)}>
-              {__t("common.cancel") || "Cancel"}
-            </button>
-            <button className="btn primary" onClick={createNcr}>
-              {__t("power.ncr.createNcr") || "Create NCR"}
-            </button>
-          </div>
-        </div>
+        </Card>
       )}
-      <div className="card">
-        <table className="bom-table table-auto">
-          <thead>
-            <tr>
-              <th className="pl-16">{__t("power.ncr.ncrId") || "NCR ID"}</th>
-              <th>{__t("part.partNumber") || "Part"}</th>
-              <th>{__t("power.ncr.workOrder") || "Work Order"}</th>
-              <th>{__t("power.ncr.defect") || "Defect"}</th>
-              <th>{__t("power.ncr.severity") || "Severity"}</th>
-              <th>{__t("power.ncr.action") || "Action"}</th>
-              <th>{__t("part.status") || "Status"}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ncrs.map((n) => (
-              <tr
-                key={n.id}
-                className="cursor-pointer"
-                onClick={() =>
-                  toast(n.id + ": " + n.defect + " [" + n.severity + "]", {
-                    kind: "warn",
-                    action: {
-                      label:
-                        __t("power.ncr.viewWorkOrder") || "View work order",
-                      onClick: () => {
-                        window.__nav?.("work-orders");
-                      },
-                    },
-                  })
-                }
-              >
-                <td className="mono pl-16 fw-600">{n.id}</td>
-                <td className="mono">{n.pn}</td>
-                <td className="mono fg-3">{n.wo}</td>
-                <td>
-                  {n.defect}
-                  <div className="font-mono fs-10 fg-3">
-                    {n.reporter} \u00B7 {n.date}
-                  </div>
-                </td>
-                <td>
-                  <span
-                    className="tag-pill"
-                    style={{
-                      borderColor:
-                        n.severity === "Critical"
-                          ? "var(--danger)"
-                          : n.severity === "Major"
-                            ? "var(--warn)"
-                            : "var(--fg-3)",
-                      color:
-                        n.severity === "Critical"
-                          ? "var(--danger)"
-                          : n.severity === "Major"
-                            ? "var(--warn)"
-                            : "var(--fg-3)",
-                    }}
-                  >
-                    {n.severity.toUpperCase()}
-                  </span>
-                </td>
-                <td>{n.action}</td>
-                <td>
-                  <span
-                    className={
-                      "status " +
-                      (n.status === "Resolved"
-                        ? "released"
-                        : n.status === "In review"
-                          ? "review"
-                          : "deprecated")
-                    }
-                  >
-                    {n.status}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        dense
+        ariaLabel={
+          __t("power.ncr.title") || "Non-conformance reports"
+        }
+        columns={ncrColumns}
+        rows={ncrs}
+        onRowClick={(n) =>
+          toast(n.id + ": " + n.defect + " [" + n.severity + "]", {
+            kind: "warn",
+            action: {
+              label: __t("power.ncr.viewWorkOrder") || "View work order",
+              onClick: () => {
+                window.__nav?.("work-orders");
+              },
+            },
+          })
+        }
+        empty={
+          <EmptyState
+            title={
+              __t("power.ncr.noNcrs") || "No non-conformance reports"
+            }
+            message={
+              __t("power.ncr.noNcrsMsg") ||
+              "Report a non-conformance to get started."
+            }
+          />
+        }
+      />
     </div>
   );
 }
