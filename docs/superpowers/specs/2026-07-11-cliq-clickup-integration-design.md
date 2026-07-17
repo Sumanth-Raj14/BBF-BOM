@@ -140,6 +140,15 @@ entity type can be toggled off per tenant in config.
 **Later — live (option a), when you provide creds:**
 - ClickUp token + Cliq webhook → "Send test" from the UI + a real `assign → ClickUp task + Cliq message` round-trip.
 
+**How to run the live round-trip once credentials are available:**
+1. Obtain a ClickUp personal API token (with access to the target List) and a Zoho Cliq incoming webhook URL.
+2. Sign in as a tenant admin and open the **Integrations** screen.
+3. Add a ClickUp connection: paste the API token, pick/enter the target List ID, save. Add a Cliq connection: paste the webhook URL, save. Both connections start `is_enabled = true`.
+4. Click **Send test** on each connection and confirm: a test task appears in the configured ClickUp List, and a test message appears in the configured Cliq channel/webhook. If either fails, check `status` / `last_error` on the connection row (never logs the raw secret).
+5. Assign a work order (or update a CAPA/ECO/ECR/NCR/PO/Approval) to trigger `emit_integration_event`.
+6. Let the background worker drain the outbox (or invoke `deliver_pending` directly in a shell), then confirm: a ClickUp task now exists for that entity with the expected title/assignee, and a Cliq message was posted describing the change.
+7. Re-trigger the same entity mutation again and confirm the **same** ClickUp task is updated in place (check `integration_external_links` for a single row, `external_id` unchanged) rather than a duplicate task being created.
+
 ## Acceptance criteria
 
 - [ ] Enabling ClickUp + Cliq for a tenant and assigning/altering any of the six entity types enqueues outbox rows and (via worker) creates/updates a ClickUp task + posts a Cliq message.
