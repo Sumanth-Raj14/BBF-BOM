@@ -6,6 +6,7 @@ from typing import Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import cache_get, cache_set
@@ -205,7 +206,14 @@ async def perform_work_order_action(
         db, current_user.tenantId, "work_order", wo.id, "status_change",
         {"ref": wo.wo_number, "status": wo.status},
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot transition work order to status '{wo.status}': {e.orig}",
+        )
     await _log_audit(
         db,
         current_user,

@@ -35,7 +35,9 @@ class WorkOrder(Base, TenantAwareMixin):
     quantity_ordered = Column(Integer, nullable=False)
     quantity_completed = Column(Integer, default=0)
     quantity_scrapped = Column(Integer, default=0)
-    status = Column(String(50), default="draft")  # draft, released, in_progress, completed, closed
+    status = Column(
+        String(50), default="draft"
+    )  # draft, released, in_progress, completed, closed, cancelled, on_hold, scrapped
     priority = Column(String(50), default="normal")
     due_date = Column(Date)
     start_date = Column(Date)
@@ -62,7 +64,8 @@ class WorkOrder(Base, TenantAwareMixin):
         Index("idx_work_orders_tenant_status", "tenantId", "status"),
         Index("idx_work_orders_status_due", "status", "due_date"),
         CheckConstraint(
-            "status IN ('draft', 'released', 'in_progress', 'completed', 'closed', 'cancelled')",
+            "status IN ('draft', 'released', 'in_progress', 'completed', 'closed', "
+            "'cancelled', 'on_hold', 'scrapped')",
             name="ck_work_orders_status",
         ),
         CheckConstraint(
