@@ -67,7 +67,7 @@ function InflationAnalysisModal({ open, onClose }) {
           {
             l: "Highest category",
             v: categories.sort((a, b) => b.current - a.current)[0].name,
-            c: "var(--accent)",
+            c: "var(--accent-text)",
             small: true,
           },
         ].map((k) => (

@@ -103,6 +103,12 @@ export function DataTable({
                   onKeyDown={
                     clickable
                       ? (e) => {
+                          // Only activate the row when the row itself is the
+                          // event target (i.e. it has focus). If a nested
+                          // interactive control (checkbox, button, menu
+                          // trigger) is focused, let it handle its own
+                          // keyboard activation instead of hijacking it here.
+                          if (e.target !== e.currentTarget) return;
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
                             onRowClick(row);
