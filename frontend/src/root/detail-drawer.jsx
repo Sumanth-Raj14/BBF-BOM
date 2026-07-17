@@ -1,6 +1,16 @@
 import PropTypes from "prop-types";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import {
+  Button,
+  Badge,
+  StatusPill,
+  Tabs,
+  Card,
+  Field,
+  Textarea,
+  EmptyState,
+} from "../components/ui/index.js";
 // Component Detail Drawer — opens when a row is selected.
 function Drawer({ row, onClose, data, openModal, overlay }) {
   const ctx = useAppStore();
@@ -93,46 +103,42 @@ function Drawer({ row, onClose, data, openModal, overlay }) {
             </div>
             <h3>{row.name}</h3>
             <div className="meta">
-              <span className={"cat " + row.category.toLowerCase()}>
-                {row.category}
-              </span>
-              <span className={"status " + (STATUS_CLASS[row.status] || "")}>
-                {row.status}
-              </span>
+              <Badge tone="neutral">{row.category}</Badge>
+              <StatusPill status={row.status} />
             </div>
           </div>
-          <button
-            className="drawer-close"
+          <Button
+            variant="ghost"
+            size="sm"
+            iconOnly
             onClick={onClose}
             title={__t("common.close") || "Close"}
             aria-label={__t("common.close") || "Close"}
           >
             <Icon.X />
-          </button>
+          </Button>
         </div>
-        <div className="drawer-tabs">
-          {[
-            ["specs", __t("detailDrawer.specs") || "specs"],
-            ["vendors", __t("detailDrawer.vendors") || "vendors"],
-            ["where-used", __t("detailDrawer.whereUsed") || "where used"],
-            ["files", __t("detailDrawer.files") || "files"],
-            ["barcode", __t("detailDrawer.barcode") || "barcode"],
-            [
-              "comments",
-              (__t("detailDrawer.comments") || "comments") +
-                (commentList.length ? ` (${commentList.length})` : ""),
-            ],
-            ["history", __t("detailDrawer.history") || "history"],
-          ].map(([id, label]) => (
-            <button
-              key={id}
-              className={"drawer-tab " + (tab === id ? "active" : "")}
-              onClick={() => setTab(id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          ariaLabel={__t("detailDrawer.tabs") || "Component detail tabs"}
+          value={tab}
+          onChange={setTab}
+          items={[
+            { value: "specs", label: __t("detailDrawer.specs") || "Specs" },
+            { value: "vendors", label: __t("detailDrawer.vendors") || "Vendors" },
+            {
+              value: "where-used",
+              label: __t("detailDrawer.whereUsed") || "Where used",
+            },
+            { value: "files", label: __t("detailDrawer.files") || "Files" },
+            { value: "barcode", label: __t("detailDrawer.barcode") || "Barcode" },
+            {
+              value: "comments",
+              label: __t("detailDrawer.comments") || "Comments",
+              count: commentList.length || undefined,
+            },
+            { value: "history", label: __t("detailDrawer.history") || "History" },
+          ]}
+        />
         <div className="drawer-body">
           {tab === "specs" && (
             <SpecsTab
@@ -186,20 +192,17 @@ function SpecsTab({ row, ext, approval, approvalKey }) {
     <>
       {/* Approval widget — appears for assemblies or parts under an assembly */}
       {approval && (
-        <div
-          className="border-line rounded-r3 bg-canvas mb-16"
-          style={{ padding: 12 }}
-        >
-          <div className="flex justify-between items-center mb-10">
-            <span className="font-mono fs-10 uppercase letter-sp-6 fg-3">
-              {__t("detailDrawer.approvalWorkflow") || "Approval workflow"}
-            </span>
+        <Card
+          className="mb-16"
+          title={__t("detailDrawer.approvalWorkflow") || "Approval workflow"}
+          actions={
             <span className="font-mono fs-10 fg-3">
               {Object.values(approval).filter((v) => v === "approved").length}{" "}
               {__t("detailDrawer.of") || "of"} {Object.keys(approval).length}{" "}
               {__t("detailDrawer.signedOff") || "signed off"}
             </span>
-          </div>
+          }
+        >
           <div
             className="d-grid border-line rounded-r2 overflow-h"
             style={{
@@ -269,7 +272,7 @@ function SpecsTab({ row, ext, approval, approvalKey }) {
               );
             })}
           </div>
-        </div>
+        </Card>
       )}
       <dl className="kv-grid">
         <dt>{__t("detailDrawer.partNo") || "Part No."}</dt>
@@ -341,8 +344,9 @@ function SpecsTab({ row, ext, approval, approvalKey }) {
             >
               {row.cadUrl.split("/").pop()}
             </span>
-            <button
-              className="btn small"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 const a = document.createElement("a");
                 a.href = row.cadUrl;
@@ -356,9 +360,10 @@ function SpecsTab({ row, ext, approval, approvalKey }) {
             >
               <Icon.Import size={10} />{" "}
               {__t("detailDrawer.openCad") || "Open CAD"}
-            </button>
-            <button
-              className="btn small"
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() =>
                 ctx?.openModal?.("doc-preview", {
                   name: row.cadUrl?.split("/").pop() || row.pn + ".stp",
@@ -367,7 +372,7 @@ function SpecsTab({ row, ext, approval, approvalKey }) {
               }
             >
               <Icon.Search size={10} /> {__t("common.preview") || "Preview"}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -378,13 +383,9 @@ function SpecsTab({ row, ext, approval, approvalKey }) {
           </div>
           <div className="flex gap-4" style={{ flexWrap: "wrap" }}>
             {row.tags.map((t) => (
-              <span
-                key={t}
-                className="chip active fs-10 c-default"
-                style={{ padding: "2px 8px" }}
-              >
+              <Badge key={t} tone="neutral" pill className="fs-10">
                 {t}
-              </span>
+              </Badge>
             ))}
           </div>
         </div>
@@ -396,20 +397,9 @@ function SpecsTab({ row, ext, approval, approvalKey }) {
           </div>
           <div className="flex gap-4" style={{ flexWrap: "wrap" }}>
             {row.compliance.map((c) => (
-              <span
-                key={c}
-                style={{
-                  fontSize: 10,
-                  fontFamily: "var(--font-mono)",
-                  padding: "2px 8px",
-                  border: "1px solid var(--ok)",
-                  borderRadius: 4,
-                  color: "var(--ok)",
-                  background: "color-mix(in oklch, var(--ok) 10%, var(--bg))",
-                }}
-              >
+              <Badge key={c} tone="success" className="font-mono fs-10">
                 {c}
-              </span>
+              </Badge>
             ))}
           </div>
         </div>
@@ -495,17 +485,7 @@ function SpecsTab({ row, ext, approval, approvalKey }) {
       <div className="section-title">
         {__t("detailDrawer.notes") || "Notes"}
       </div>
-      <div
-        style={{
-          border: "1px solid var(--line)",
-          borderRadius: "var(--r-2)",
-          background: "var(--bg)",
-          padding: "10px 12px",
-          fontSize: 12,
-          color: "var(--fg-2)",
-          lineHeight: 1.5,
-        }}
-      >
+      <Card bodyClassName="fs-12 fg-2" style={{ lineHeight: 1.5 }}>
         {row.category === "Electrical"
           ? __t("detailDrawer.noteElectrical") ||
             "Validated against the H743 errata sheet ES0392. Stock 100 units min — lead time creep observed Q1-Q2."
@@ -514,7 +494,7 @@ function SpecsTab({ row, ext, approval, approvalKey }) {
               "Lens is critical for the August field demo. Order in pairs."
             : __t("detailDrawer.noteDefault") ||
               "Refer to drawing in Files tab. Confirm finish on PO."}
-      </div>
+      </Card>
       {row.freight !== undefined && (
         <>
           <div className="section-title">
@@ -577,33 +557,37 @@ function SpecsTab({ row, ext, approval, approvalKey }) {
         </div>
       )}
       <div className="flex gap-8 mt-16" style={{ flexWrap: "wrap" }}>
-        <button
-          className="btn small"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => ctx?.openModal("auto-scrape", row)}
         >
           <Icon.Sparkles size={11} />{" "}
           {__t("detailDrawer.autoScrape") || "Auto-scrape from web"}
-        </button>
-        <button
-          className="btn small"
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => ctx?.openModal("find-alternates", row)}
         >
           <Icon.Search size={11} />{" "}
           {__t("detailDrawer.findAlternates") || "Find alternates"}
-        </button>
-        <button
-          className="btn small"
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => ctx?.openModal("send-rfq", row)}
         >
           <Icon.Cart size={11} /> {__t("detailDrawer.sendRfq") || "Send RFQ"}
-        </button>
-        <button
-          className="btn small"
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => ctx?.openModal("change-owner", row)}
         >
           <Icon.User size={11} />{" "}
           {__t("detailDrawer.changeOwner") || "Change owner"}
-        </button>
+        </Button>
       </div>
     </>
   );
@@ -632,15 +616,16 @@ function VendorsTab({ row, data, openModal }) {
             </span>
           )}
         </div>
-        <button
-          className="btn small"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => openModal && openModal("new-vendor")}
         >
           <Icon.Plus size={11} />{" "}
           {__t("detailDrawer.addVendor") || "Add vendor"}
-        </button>
+        </Button>
       </div>
-      <table className="bom-table dense" style={{ width: "100%", fontSize: 11 }}>
+      <table className="bom-table dense fs-11" style={{ width: "100%" }}>
         <thead>
           <tr>
             <th>Vendor</th>
@@ -700,48 +685,53 @@ function WhereUsedTab({ row }) {
           "Used in 3 assemblies across 2 projects."}
       </div>
       <div className="deptree">
-        <div
-          className="node parent cursor-pointer"
+        <button
+          type="button"
+          className="node parent"
           onClick={() => go("ATLAS / Mainframe")}
         >
           ATLAS / Mainframe / Rev C
-        </div>
+        </button>
         <div className="branch">
-          <div
-            className="node parent cursor-pointer"
+          <button
+            type="button"
+            className="node parent"
             onClick={() => go("ATL-MFR-CTL")}
           >
             ATL-MFR-CTL / Control Subsystem · Rev D
-          </div>
+          </button>
           <div className="branch">
             <div className="node self">{row.pn}</div>
           </div>
         </div>
         <div className="h-8" />
-        <div
-          className="node parent cursor-pointer"
+        <button
+          type="button"
+          className="node parent"
           onClick={() => go("HORIZON / Sensor Pod")}
         >
           HORIZON / Sensor Pod / Rev B
-        </div>
+        </button>
         <div className="branch">
-          <div
-            className="node parent cursor-pointer"
+          <button
+            type="button"
+            className="node parent"
             onClick={() => go("HZN-POD-CTL")}
           >
             HZN-POD-CTL · Rev A
-          </div>
+          </button>
           <div className="branch">
             <div className="node self">{row.pn} (qty 2)</div>
           </div>
         </div>
         <div className="h-8" />
-        <div
-          className="node parent cursor-pointer"
+        <button
+          type="button"
+          className="node parent"
           onClick={() => go("ATLAS-LITE")}
         >
           ATLAS-LITE / Eval Board · Rev A
-        </div>
+        </button>
         <div className="branch">
           <div className="node self">{row.pn}</div>
         </div>
@@ -799,12 +789,13 @@ function FilesTab({ row, openModal }) {
         <div className="hint">
           {__t("detailDrawer.filesVersioned") || "4 files · versioned"}
         </div>
-        <button
-          className="btn small"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => (ctx || { openModal }).openModal?.("upload")}
         >
           <Icon.Plus size={11} /> {__t("common.upload") || "Upload"}
-        </button>
+        </Button>
       </div>
       {files.map((f, i) => (
         <div
@@ -821,35 +812,31 @@ function FilesTab({ row, openModal }) {
             background: "var(--bg)",
           }}
         >
-          <span
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 9,
-              padding: "2px 4px",
-              background: "var(--fg)",
-              color: "var(--bg)",
-              borderRadius: 2,
-              textAlign: "center",
-              letterSpacing: "0.06em",
-            }}
-          >
+          <Badge tone="neutral" className="font-mono fs-9 text-center">
             {f.ext}
-          </span>
-          <div onClick={() => open(f)} className="cursor-pointer">
+          </Badge>
+          <button
+            type="button"
+            onClick={() => open(f)}
+            className="text-left"
+            style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
+          >
             <div className="fs-12 font-mono">{f.name}</div>
             <div className="fs-10 fg-3 font-mono">
               {f.size} · {f.date}
             </div>
-          </div>
+          </button>
           <DropdownButton
             width={170}
             trigger={
-              <button
-                className="icon-btn w-22 h-22"
+              <Button
+                variant="ghost"
+                size="sm"
+                iconOnly
                 aria-label={__t("common.moreOptions") || "More options"}
               >
                 <Icon.Dots size={12} />
-              </button>
+              </Button>
             }
             items={[
               {
@@ -1065,13 +1052,13 @@ function CommentsTab({ row }) {
   return (
     <>
       {list.length === 0 ? (
-        <div className="text-center fg-3" style={{ padding: 30 }}>
-          <div className="font-mono fs-28 fg-4">“ ”</div>
-          <div className="fs-12 mt-4">
-            {__t("detailDrawer.noComments") ||
-              "No comments yet. Start the conversation."}
-          </div>
-        </div>
+        <EmptyState
+          icon={<span className="font-mono fs-28">“ ”</span>}
+          message={
+            __t("detailDrawer.noComments") ||
+            "No comments yet. Start the conversation."
+          }
+        />
       ) : (
         <div className="flex flex-col gap-12 mb-14">
           {list.map((c) => (
@@ -1109,20 +1096,22 @@ function CommentsTab({ row }) {
         >
           <span className="ava w-24 h-24 fs-10">EC</span>
           <div className="relative">
-            <textarea
-              id="comment-input"
-              name="commentText"
-              ref={textareaRef}
-              placeholder={
-                __t("detailDrawer.commentPlaceholder") ||
-                "Add a comment…  Type @ to mention. Markdown supported."
-              }
-              value={draft}
-              onChange={onChange}
-              onKeyDown={onKeyDown}
-              className="input fs-12 font-sans"
-              style={{ minHeight: 70 }}
-            />
+            <Field>
+              <Textarea
+                id="comment-input"
+                name="commentText"
+                ref={textareaRef}
+                aria-label={__t("detailDrawer.comment") || "Add a comment"}
+                placeholder={
+                  __t("detailDrawer.commentPlaceholder") ||
+                  "Add a comment…  Type @ to mention. Markdown supported."
+                }
+                value={draft}
+                onChange={onChange}
+                onKeyDown={onKeyDown}
+                className="fs-12 font-sans"
+              />
+            </Field>
             {mentionOpen && filteredMentions.length > 0 && (
               <div className="pos-absolute">
                 <div
@@ -1173,8 +1162,11 @@ function CommentsTab({ row }) {
             )}
             <div className="flex justify-between items-center mt-6">
               <div className="flex gap-6">
-                <button
-                  className="icon-btn w-22 h-22 font-mono fw-600 fs-12"
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  iconOnly
+                  className="font-mono fw-600 fs-12"
                   title={__t("detailDrawer.mentionUser") || "Mention @user"}
                   aria-label={__t("detailDrawer.mentionUser") || "Mention user"}
                   onClick={() => {
@@ -1187,17 +1179,21 @@ function CommentsTab({ row }) {
                   }}
                 >
                   <span>@</span>
-                </button>
-                <button
-                  className="icon-btn w-22 h-22"
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  iconOnly
                   title={__t("detailDrawer.attachFile") || "Attach file"}
                   aria-label={__t("detailDrawer.attachFile") || "Attach file"}
                   onClick={() => ctx?.openModal("upload")}
                 >
                   <Icon.Import size={11} />
-                </button>
-                <button
-                  className="icon-btn w-22 h-22"
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  iconOnly
                   title={
                     __t("detailDrawer.markAsDecision") || "Mark as decision"
                   }
@@ -1224,20 +1220,20 @@ function CommentsTab({ row }) {
                   }}
                 >
                   <Icon.Flag size={11} />
-                </button>
+                </Button>
               </div>
               <div className="flex items-center gap-8">
                 <span className="hint">
                   {__t("detailDrawer.cmdEnterToSend") || "⌘↵ to send"}
                 </span>
-                <button
-                  className="btn primary small"
+                <Button
+                  variant="primary"
+                  size="sm"
                   onClick={post}
                   disabled={!draft.trim()}
-                  style={{ opacity: draft.trim() ? 1 : 0.5 }}
                 >
                   {__t("detailDrawer.comment") || "Comment"}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -1419,8 +1415,9 @@ function BarcodeTab({ row }) {
         </div>
       </div>
       <div className="d-grid gap-8" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        <button
-          className="btn small"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() =>
             barcodeRef.current &&
             downloadSVG(barcodeRef.current, row.pn + "_barcode.svg")
@@ -1428,33 +1425,36 @@ function BarcodeTab({ row }) {
         >
           <Icon.Export size={11} />{" "}
           {__t("detailDrawer.downloadBarcode") || "Download barcode"}
-        </button>
-        <button
-          className="btn small"
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() =>
             qrRef.current && downloadSVG(qrRef.current, row.pn + "_qr.svg")
           }
         >
           <Icon.Export size={11} />{" "}
           {__t("detailDrawer.downloadQr") || "Download QR"}
-        </button>
-        <button
-          className="btn small"
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() =>
             barcodeRef.current &&
             printOne(barcodeRef.current.outerHTML, row.pn + " barcode")
           }
         >
           {__t("detailDrawer.printBarcodeLabel") || "Print barcode label"}
-        </button>
-        <button
-          className="btn small"
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() =>
             qrRef.current && printOne(qrRef.current.outerHTML, row.pn + " QR")
           }
         >
           {__t("detailDrawer.printQrLabel") || "Print QR label"}
-        </button>
+        </Button>
       </div>
       <div
         className="mt-10 bg-sunk border-line rounded-r2 fs-11 fg-3 font-mono"
