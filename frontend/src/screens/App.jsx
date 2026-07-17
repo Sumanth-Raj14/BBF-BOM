@@ -93,7 +93,7 @@ function BomShellWrapper() {
         search={ctx.search}
         activeCats={ctx.activeCats}
         setActiveCats={ctx.setActiveCats}
-        density={ctx.t.density}
+        density={ctx.gridDensity}
         onOpenDetail={(r) => ctx.setSelectedRow(r)}
         selectedRow={ctx.selectedRow}
         onCloseDetail={() => ctx.setSelectedRow(null)}

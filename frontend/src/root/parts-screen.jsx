@@ -453,7 +453,11 @@ function PartsScreen({ openModal, onOpenDetail }) {
     else setSelectedIds(new Set(filtered.map((p) => p.pn)));
   };
   return (
-    <div className="parts-page" data-screen-label="Components">
+    <div
+      className="parts-page"
+      data-screen-label="Components"
+      data-density={ctx?.gridDensity || "dense"}
+    >
       {/* Top bar */}
       <div className="parts-topbar">
         <div>

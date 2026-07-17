@@ -201,6 +201,12 @@ function AppCtxProvider({ children }) {
     toast(__t("app.crumbSwitchProject") + ": " + key, { kind: "success" });
   }, []);
 
+  // LOCKED DECISIONS UI #6: data grids (Parts, BOM) default to DENSE, the rest
+  // of the shell stays at the user's density (default 'normal'). When the tweak
+  // sits at its 'normal' default we bump grids to 'dense'; an explicit user
+  // choice (dense/comfortable) flows through to the grids unchanged.
+  const gridDensity = t.density === "normal" ? "dense" : t.density;
+
   const unreadCount = notifications.filter((n) => !n.read).length;
   const bellRef = React.useRef(null);
   const avatarRef = React.useRef(null);
@@ -325,6 +331,7 @@ function AppCtxProvider({ children }) {
     route,
     setRoute,
     t,
+    gridDensity,
     setTweak,
     selectedRow,
     setSelectedRow,
