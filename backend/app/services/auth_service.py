@@ -237,23 +237,43 @@ async def register_new_user(
 
     from app.models.tenant import Tenant
 
-    result = await db.execute(select(Tenant).limit(1))
-    default_tenant = result.scalar_one_or_none()
-    if not default_tenant:
-        default_tenant = Tenant(
-            tenant_name=f"{username}'s Organization",
-            tenant_code=f"org_{username}",
+    # Secure local-first default: self-registration must never let an anonymous
+    # signer-upper join an EXISTING tenant (that would be a cross-tenant breach —
+    # the old `select(Tenant).limit(1)` behavior). If no tenant exists yet, the
+    # first registration bootstraps a brand-new tenant and becomes its admin.
+    # If a tenant already exists, open self-registration is rejected; new members
+    # must be invited by an admin instead (unless explicitly opted in via
+    # ALLOW_TENANT_SELF_SIGNUP, which always creates a fresh tenant per signup).
+    result = await db.execute(select(func.count()).select_from(Tenant))
+    tenant_count = result.scalar_one()
+
+    is_bootstrap = tenant_count == 0
+    if not is_bootstrap and not settings.ALLOW_TENANT_SELF_SIGNUP:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Self-registration is disabled. Ask your organization admin "
+                "to invite you."
+            ),
         )
-        db.add(default_tenant)
-        await db.flush()
-        await db.refresh(default_tenant)
+
+    new_tenant = Tenant(
+        tenant_name=f"{username}'s Organization",
+        tenant_code=f"org_{username}_{secrets.token_hex(4)}",
+    )
+    db.add(new_tenant)
+    await db.flush()
+    await db.refresh(new_tenant)
 
     db_user = User(
         email=email,
         username=username,
         hashedPassword=get_password_hash(password),
         fullName=full_name,
-        tenantId=default_tenant.id,
+        tenantId=new_tenant.id,
+        # Bootstrapping (or self-signup creating its own tenant) always makes
+        # the registering user the admin of that brand-new tenant.
+        isSuperuser=True,
     )
     db.add(db_user)
     await db.commit()
