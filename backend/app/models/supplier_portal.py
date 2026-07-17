@@ -3,11 +3,12 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.sql import func
 
@@ -22,13 +23,15 @@ class SupplierUser(Base, TenantAwareMixin):
     vendorId = Column(
         Integer, ForeignKey("vendors.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    email = Column(String, unique=True, nullable=False)
+    email = Column(String, nullable=False)  # unique per tenant
     name = Column(String, nullable=False)
     passwordHash = Column(String, nullable=False)
     active = Column(Boolean, default=True)
     lastLoginAt = Column(DateTime(timezone=True))
     createdAt = Column(DateTime(timezone=True), server_default=func.now())
     updatedAt = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("tenantId", "email", name="uq_supplier_users_tenant_email"),)
 
     def __repr__(self):
         return f"<SupplierUser {self.email}>"
@@ -42,8 +45,8 @@ class SupplierPriceUpdate(Base, TenantAwareMixin):
         Integer, ForeignKey("supplier_users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     partId = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True)
-    oldPrice = Column(Float, default=0.0)
-    newPrice = Column(Float, default=0.0)
+    oldPrice = Column(Numeric(18, 4), default=0.0)
+    newPrice = Column(Numeric(18, 4), default=0.0)
     status = Column(String, default="pending")
     __table_args__ = (
         Index("idx_supplier_price_updates_tenant_status", "tenantId", "status"),
@@ -63,7 +66,7 @@ class RfqHeader(Base, TenantAwareMixin):
     __tablename__ = "rfq_headers"
 
     id = Column(Integer, primary_key=True)
-    rfq_number = Column(String, unique=True, nullable=False)
+    rfq_number = Column(String, nullable=False)  # unique per tenant
     title = Column(String, nullable=False)
     description = Column(String)
     status = Column(String, default="draft")
@@ -78,6 +81,7 @@ class RfqHeader(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_rfq_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "rfq_number", name="uq_rfq_headers_tenant_rfq_number"),
         CheckConstraint(
             "status IN ('draft', 'sent', 'responded', 'awarded', 'cancelled')",
             name="ck_rfq_status",
@@ -99,7 +103,7 @@ class RfqLineItem(Base, TenantAwareMixin):
         Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True
     )
     quantity = Column(Integer, nullable=False)
-    target_price = Column(Float)
+    target_price = Column(Numeric(18, 4))
     notes = Column(String)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -120,7 +124,7 @@ class RfqSupplierResponse(Base, TenantAwareMixin):
     line_item_id = Column(
         Integer, ForeignKey("rfq_line_items.id", ondelete="CASCADE"), nullable=False
     )
-    quoted_price = Column(Float, nullable=False)
+    quoted_price = Column(Numeric(18, 4), nullable=False)
     quoted_lead_time_days = Column(Integer)
     notes = Column(String)
     status = Column(String, default="submitted")

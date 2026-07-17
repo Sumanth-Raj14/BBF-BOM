@@ -8,6 +8,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -51,14 +52,16 @@ class Role(Base, TenantAwareMixin):
 
     id = Column(Integer, primary_key=True)
     name = Column(
-        String, unique=True, index=True, nullable=False
-    )  # admin, engineering, procurement, finance, viewer
+        String, index=True, nullable=False
+    )  # admin, engineering, procurement, finance, viewer -- unique PER TENANT, see __table_args__
     description = Column(Text)
     isActive = Column(Boolean, default=True)
 
     # Timestamps
     createdAt = Column(DateTime(timezone=True), server_default=func.now())
     updatedAt = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("tenantId", "name", name="uq_roles_tenant_name"),)
 
     # Relationships
     users = relationship("User", secondary=user_roles, back_populates="roles")

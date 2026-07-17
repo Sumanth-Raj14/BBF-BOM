@@ -8,6 +8,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -20,7 +21,7 @@ class FAIReport(Base, TenantAwareMixin):
     __tablename__ = "fai_reports"
 
     id = Column(Integer, primary_key=True)
-    faiNumber = Column(String, unique=True, nullable=False)  # FAI-2026-001
+    faiNumber = Column(String, nullable=False)  # FAI-2026-001 (unique per tenant)
     partId = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True)
     projectId = Column(
         Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True
@@ -61,6 +62,7 @@ class FAIReport(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_fai_reports_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "faiNumber", name="uq_fai_reports_tenant_faiNumber"),
         CheckConstraint(
             "status IN ('Draft', 'In Progress', 'Pending Approval', 'Approved', 'Rejected')",
             name="ck_fai_reports_status",

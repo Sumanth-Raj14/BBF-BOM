@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.cache import cache_get, cache_set
+from app.core.cache import cache_get, cache_invalidate, cache_set
 from app.core.tenant_context import get_tenant_id
 from app.models.bom import BOM, BOMItem
 from app.models.bom_item import BomItem as TemplateBomItem
@@ -95,6 +95,259 @@ async def create_bom(db: AsyncSession, data: dict) -> BOM:
     await db.commit()
     await db.refresh(bom)
     return bom
+
+
+# ============ Instance-line CRUD (X1 canonical-BOM model) ============
+#
+# BOM ("boms") + BOMItem ("bom_items_master") is the single source of truth
+# for instance-BOM structure (P0-architectural design brief, X1). Every
+# function below is scoped by BOTH bom_id AND tenantId — the P0 leak class —
+# and reuses _compute_levels_and_effective_qty / get_quantity_rollup /
+# get_bom_explosion rather than duplicating traversal logic.
+
+_BOM_ITEM_WRITABLE_FIELDS = {
+    "part_id",
+    "quantity",
+    "unit",
+    "reference_designator",
+    "find_number",
+    "sort_order",
+    "parent_item_id",
+    "unit_cost_snapshot",
+    "extended_cost",
+    "notes",
+}
+
+
+async def _invalidate_bom_caches(bom_id: int) -> None:
+    await cache_invalidate(f"bom:{bom_id}")
+    await cache_invalidate(f"bom:explosion:{bom_id}:*")
+    await cache_invalidate(f"bom:cost_rollup:{bom_id}")
+
+
+def _serialize_bom_item(item: BOMItem, part: Optional[Part] = None) -> dict:
+    return {
+        "id": item.id,
+        "bom_id": item.bom_id,
+        "part_id": item.part_id,
+        "part_number": part.pn if part else None,
+        "part_name": part.name if part else None,
+        "quantity": item.quantity,
+        "unit": item.unit,
+        "reference_designator": item.reference_designator,
+        "find_number": item.find_number,
+        "sort_order": item.sort_order,
+        "parent_item_id": item.parent_item_id,
+        "unit_cost_snapshot": item.unit_cost_snapshot,
+        "extended_cost": item.extended_cost,
+        "notes": item.notes,
+    }
+
+
+async def _get_bom_item_or_404(db: AsyncSession, bom_id: int, item_id: int, tid) -> BOMItem:
+    """Fetch a BOMItem scoped by BOTH bom_id and tenantId. Never resolves an
+    item that belongs to a different bom_id or a different tenant, even if
+    the row's primary key alone would otherwise match."""
+    stmt = select(BOMItem).where(BOMItem.id == item_id, BOMItem.bom_id == bom_id)
+    if tid is not None:
+        stmt = stmt.where(BOMItem.tenantId == tid)
+    result = await db.execute(stmt)
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="BOM line item not found")
+    return item
+
+
+async def _validate_parent(
+    db: AsyncSession, bom_id: int, tid, parent_item_id: Optional[int], self_id: Optional[int]
+) -> None:
+    if parent_item_id is None:
+        return
+    if self_id is not None and parent_item_id == self_id:
+        raise HTTPException(status_code=400, detail="A BOM line cannot be its own parent")
+    # The parent must live in the SAME bom_id and tenant — otherwise a
+    # crafted parent_item_id could graft another BOM's (or tenant's)
+    # subtree into this one's explosion tree.
+    stmt = select(BOMItem).where(BOMItem.id == parent_item_id, BOMItem.bom_id == bom_id)
+    if tid is not None:
+        stmt = stmt.where(BOMItem.tenantId == tid)
+    result = await db.execute(stmt)
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail="parent_item_id must reference a line within the same BOM",
+        )
+
+
+async def _validate_no_duplicate(
+    db: AsyncSession,
+    bom_id: int,
+    tid,
+    part_id: Optional[int],
+    parent_item_id: Optional[int],
+    reference_designator: Optional[str],
+    exclude_item_id: Optional[int] = None,
+) -> None:
+    if part_id is None:
+        return
+    stmt = select(BOMItem).where(
+        BOMItem.bom_id == bom_id,
+        BOMItem.part_id == part_id,
+        BOMItem.parent_item_id == parent_item_id,
+        BOMItem.reference_designator == reference_designator,
+    )
+    if tid is not None:
+        stmt = stmt.where(BOMItem.tenantId == tid)
+    if exclude_item_id is not None:
+        stmt = stmt.where(BOMItem.id != exclude_item_id)
+    result = await db.execute(stmt)
+    if result.scalars().first():
+        raise HTTPException(
+            status_code=400,
+            detail="Duplicate BOM line: this part already exists under the same "
+            "parent with the same reference designator",
+        )
+
+
+async def list_bom_items(db: AsyncSession, bom_id: int) -> list[dict]:
+    await get_bom_or_404(db, bom_id)
+    tid = get_tenant_id()
+    stmt = select(BOMItem).where(BOMItem.bom_id == bom_id)
+    if tid is not None:
+        stmt = stmt.where(BOMItem.tenantId == tid)
+    stmt = stmt.order_by(BOMItem.sort_order, BOMItem.id)
+    items = (await db.execute(stmt)).scalars().all()
+
+    part_ids = {i.part_id for i in items if i.part_id}
+    parts_map: dict[int, Part] = {}
+    if part_ids:
+        pr_stmt = select(Part).where(Part.id.in_(part_ids))
+        if tid is not None:
+            pr_stmt = pr_stmt.where(Part.tenantId == tid)
+        pr = await db.execute(pr_stmt)
+        for p in pr.scalars().all():
+            parts_map[p.id] = p
+
+    return [_serialize_bom_item(i, parts_map.get(i.part_id)) for i in items]
+
+
+async def create_bom_item(
+    db: AsyncSession, bom_id: int, data: dict, tenant_id: Optional[int] = None
+) -> dict:
+    """Add a child line to a BOM (part + quantity/refdes/find-number/uom).
+    Scoped by bom_id + tenantId; validates parent scoping, self-parent, and
+    exact-duplicate lines before writing.
+
+    `tenant_id`, when supplied, is used as the row's owning tenant instead of
+    the ambient tenant context. This matters for superusers: `get_tenant_id()`
+    resolves to None for a superuser request (by design, so reads aren't
+    tenant-filtered), but a new row's `tenantId` column is NOT NULL and must
+    still be stamped with a real tenant — callers with a concrete user (the
+    API layer) should pass `current_user.tenantId` explicitly.
+    """
+    bom = await get_bom_or_404(db, bom_id)
+    tid = tenant_id if tenant_id is not None else get_tenant_id()
+
+    part_id = data.get("part_id")
+    if part_id is not None:
+        pr_stmt = select(Part).where(Part.id == part_id)
+        if tid is not None:
+            pr_stmt = pr_stmt.where(Part.tenantId == tid)
+        if not (await db.execute(pr_stmt)).scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Part not found")
+
+    parent_item_id = data.get("parent_item_id")
+    await _validate_parent(db, bom_id, tid, parent_item_id, self_id=None)
+    await _validate_no_duplicate(
+        db, bom_id, tid, part_id, parent_item_id, data.get("reference_designator")
+    )
+
+    fields = {k: v for k, v in data.items() if k in _BOM_ITEM_WRITABLE_FIELDS}
+    item = BOMItem(bom_id=bom.id, tenantId=tid, **fields)
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+
+    await _invalidate_bom_caches(bom_id)
+
+    part = None
+    if item.part_id is not None:
+        pr = await db.execute(select(Part).where(Part.id == item.part_id))
+        part = pr.scalar_one_or_none()
+    return _serialize_bom_item(item, part)
+
+
+async def update_bom_item(db: AsyncSession, bom_id: int, item_id: int, data: dict) -> dict:
+    """Update qty/refdes/find-number/notes/etc on an existing line. Scoped by
+    bom_id + tenantId (an item_id from another BOM or tenant 404s)."""
+    tid = get_tenant_id()
+    item = await _get_bom_item_or_404(db, bom_id, item_id, tid)
+
+    fields = {k: v for k, v in data.items() if k in _BOM_ITEM_WRITABLE_FIELDS}
+
+    if "part_id" in fields and fields["part_id"] is not None:
+        pr_stmt = select(Part).where(Part.id == fields["part_id"])
+        if tid is not None:
+            pr_stmt = pr_stmt.where(Part.tenantId == tid)
+        if not (await db.execute(pr_stmt)).scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Part not found")
+
+    if "parent_item_id" in fields:
+        await _validate_parent(db, bom_id, tid, fields["parent_item_id"], self_id=item.id)
+
+    new_part_id = fields.get("part_id", item.part_id)
+    new_parent_id = fields.get("parent_item_id", item.parent_item_id)
+    new_refdes = fields.get("reference_designator", item.reference_designator)
+    if "part_id" in fields or "parent_item_id" in fields or "reference_designator" in fields:
+        await _validate_no_duplicate(
+            db, bom_id, tid, new_part_id, new_parent_id, new_refdes, exclude_item_id=item.id
+        )
+
+    for field, value in fields.items():
+        setattr(item, field, value)
+
+    await db.commit()
+    await db.refresh(item)
+
+    await _invalidate_bom_caches(bom_id)
+
+    part = None
+    if item.part_id is not None:
+        pr_stmt = select(Part).where(Part.id == item.part_id)
+        if tid is not None:
+            pr_stmt = pr_stmt.where(Part.tenantId == tid)
+        part = (await db.execute(pr_stmt)).scalar_one_or_none()
+    return _serialize_bom_item(item, part)
+
+
+async def delete_bom_item(db: AsyncSession, bom_id: int, item_id: int) -> None:
+    tid = get_tenant_id()
+    item = await _get_bom_item_or_404(db, bom_id, item_id, tid)
+    await db.delete(item)
+    await db.commit()
+    await _invalidate_bom_caches(bom_id)
+
+
+async def reorder_bom_items(db: AsyncSession, bom_id: int, item_ids: list[int]) -> dict:
+    """Assign sort_order by position in item_ids. Scoped to bom_id + tenant —
+    an id from another bom/tenant is silently skipped (not reassigned into
+    this BOM), rather than being pulled cross-scope."""
+    await get_bom_or_404(db, bom_id)
+    tid = get_tenant_id()
+    reordered = 0
+    for idx, item_id in enumerate(item_ids):
+        stmt = select(BOMItem).where(BOMItem.id == item_id, BOMItem.bom_id == bom_id)
+        if tid is not None:
+            stmt = stmt.where(BOMItem.tenantId == tid)
+        result = await db.execute(stmt)
+        item = result.scalar_one_or_none()
+        if item:
+            item.sort_order = idx
+            reordered += 1
+
+    await db.commit()
+    await _invalidate_bom_caches(bom_id)
+    return {"status": "reordered", "count": reordered}
 
 
 # ============ BOM Explosion (Multi-level) ============
@@ -190,18 +443,24 @@ def _compute_levels_and_effective_qty(
             return
         item = id_map[item_id]
         parent_id = item.parent_item_id
+        # quantity is a Numeric(10,4) column (Decimal at the ORM layer) so it
+        # can hold fractional line quantities; cast to float here so the
+        # effective-qty map stays plain float as declared, matching the
+        # float-based cost arithmetic in get_cost_rollup/get_quantity_rollup
+        # below (mixing float and Decimal raises TypeError).
+        qty = float(item.quantity or 0)
         if parent_id is None or parent_id not in id_map or item_id in visiting:
             # Root item, or parent isn't part of this BOM's item set (shouldn't
             # happen for well-formed data), or a cycle — treat as a root so we
             # never recurse forever.
             levels[item_id] = 1
-            effective[item_id] = item.quantity or 0
+            effective[item_id] = qty
             return
         visiting.add(item_id)
         resolve(parent_id, visiting)
         visiting.discard(item_id)
         levels[item_id] = levels[parent_id] + 1
-        effective[item_id] = (item.quantity or 0) * effective[parent_id]
+        effective[item_id] = qty * effective[parent_id]
 
     for item in items:
         resolve(item.id, set())

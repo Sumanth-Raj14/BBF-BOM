@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -35,7 +35,7 @@ class PartVendorPrice(Base, TenantAwareMixin):
     )
     vendor_id = Column(Integer, ForeignKey("vendors.id", ondelete="SET NULL"), index=True)
     vendor_name = Column(String(255))
-    price = Column(Float, nullable=False)
+    price = Column(Numeric(18, 4), nullable=False)
     currency = Column(String(3), server_default="USD")
     quantity_break = Column(Integer, server_default="1")
     date_quoted = Column(DateTime(timezone=True))

@@ -15,6 +15,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -27,7 +28,7 @@ class EcoHeader(Base, TenantAwareMixin):
     __tablename__ = "eco_headers"
 
     id = Column(Integer, primary_key=True)
-    eco_number = Column(String(50), unique=True, nullable=False, index=True)
+    eco_number = Column(String(50), nullable=False, index=True)  # unique per tenant
     title = Column(String(255), nullable=False)
     description = Column(Text)
     reason = Column(Text)
@@ -63,6 +64,7 @@ class EcoHeader(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_eco_headers_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "eco_number", name="uq_eco_headers_tenant_eco_number"),
         CheckConstraint(
             "change_type IN ('design', 'process', 'supplier', 'quality', 'other')",
             name="ck_eco_headers_change_type",

@@ -1,3 +1,4 @@
+import decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,6 +20,22 @@ from app.schemas.should_cost import (
 router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
+
+
+def _dec(value) -> decimal.Decimal:
+    """Coerce a Numeric-column value (Decimal, float, int, or None) to Decimal.
+
+    Numeric(18,4) cost columns round-trip as Decimal, while the non-monetary
+    percentage/hours columns stay Float, and incoming request payloads are
+    plain floats (Pydantic schema fields are typed float). Mixing Decimal
+    and float in arithmetic raises TypeError, so every operand is normalized
+    to Decimal before any add/multiply/divide.
+    """
+    if value is None:
+        return decimal.Decimal("0")
+    if isinstance(value, decimal.Decimal):
+        return value
+    return decimal.Decimal(str(value))
 
 
 @router.get("/")
@@ -57,16 +74,22 @@ async def create_model(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_parts_write),
 ):
-    material_total = payload.rawMaterialCost * (1 + payload.materialWastePct / 100)
-    labor_total = payload.laborHours * payload.laborRatePerHour
-    overhead_total = labor_total * payload.overheadPct / 100
+    material_total = _dec(payload.rawMaterialCost) * (1 + _dec(payload.materialWastePct) / 100)
+    labor_total = _dec(payload.laborHours) * _dec(payload.laborRatePerHour)
+    overhead_total = labor_total * _dec(payload.overheadPct) / 100
     tooling_per_unit = (
-        payload.toolingCost / payload.toolingAmortizedQty if payload.toolingAmortizedQty else 0
+        _dec(payload.toolingCost) / payload.toolingAmortizedQty
+        if payload.toolingAmortizedQty
+        else decimal.Decimal("0")
     )
     subtotal = material_total + labor_total + overhead_total + tooling_per_unit
-    profit_amount = subtotal * payload.profitMarginPct / 100
+    profit_amount = subtotal * _dec(payload.profitMarginPct) / 100
     should_cost = subtotal + profit_amount
-    variance = ((payload.actualVendorPrice - should_cost) / should_cost * 100) if should_cost else 0
+    variance = (
+        ((_dec(payload.actualVendorPrice) - should_cost) / should_cost * 100)
+        if should_cost
+        else decimal.Decimal("0")
+    )
 
     obj = ShouldCostModel(
         **payload.model_dump(
@@ -87,7 +110,7 @@ async def create_model(
         toolingPerUnit=tooling_per_unit,
         profitAmount=profit_amount,
         shouldCostPerUnit=should_cost,
-        variancePct=variance,
+        variancePct=float(variance),
         Assumptions=payload.assumptions,
         createdBy=current_user.id,
         tenantId=current_user.tenantId,
@@ -111,15 +134,19 @@ async def update_model(
         raise HTTPException(status_code=404, detail="Should-cost model not found")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(obj, k, v)
-    obj.materialTotal = obj.rawMaterialCost * (1 + obj.materialWastePct / 100)
-    obj.laborTotal = obj.laborHours * obj.laborRatePerHour
-    obj.overheadTotal = obj.laborTotal * obj.overheadPct / 100
-    obj.toolingPerUnit = obj.toolingCost / obj.toolingAmortizedQty if obj.toolingAmortizedQty else 0
+    obj.materialTotal = _dec(obj.rawMaterialCost) * (1 + _dec(obj.materialWastePct) / 100)
+    obj.laborTotal = _dec(obj.laborHours) * _dec(obj.laborRatePerHour)
+    obj.overheadTotal = obj.laborTotal * _dec(obj.overheadPct) / 100
+    obj.toolingPerUnit = (
+        _dec(obj.toolingCost) / obj.toolingAmortizedQty
+        if obj.toolingAmortizedQty
+        else decimal.Decimal("0")
+    )
     subtotal = obj.materialTotal + obj.laborTotal + obj.overheadTotal + obj.toolingPerUnit
-    obj.profitAmount = subtotal * obj.profitMarginPct / 100
+    obj.profitAmount = subtotal * _dec(obj.profitMarginPct) / 100
     obj.shouldCostPerUnit = subtotal + obj.profitAmount
-    obj.variancePct = (
-        ((obj.actualVendorPrice - obj.shouldCostPerUnit) / obj.shouldCostPerUnit * 100)
+    obj.variancePct = float(
+        ((_dec(obj.actualVendorPrice) - obj.shouldCostPerUnit) / obj.shouldCostPerUnit * 100)
         if obj.shouldCostPerUnit
         else 0
     )

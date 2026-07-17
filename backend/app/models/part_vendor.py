@@ -5,6 +5,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     UniqueConstraint,
 )
@@ -30,7 +31,7 @@ class PartVendor(Base, TenantAwareMixin):
 
     # Part-specific vendor data
     vendorPn = Column(String)  # Vendor's part number (may differ from our PN)
-    vendorCost = Column(Float)  # Vendor-specific price
+    vendorCost = Column(Numeric(18, 4))  # Vendor-specific price
     vendorLead = Column(Integer)  # Vendor-specific lead time
     vendorMoq = Column(Integer)  # Vendor-specific MOQ
 

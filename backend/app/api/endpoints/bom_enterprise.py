@@ -3,6 +3,7 @@ BOM Management Enterprise API
 Multi-level BOM, quantity rollups, snapshots, where-used, variants
 """
 
+from decimal import Decimal
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -10,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
-from app.core.rbac import require_viewer
+from app.core.rbac import require_engineering, require_viewer
 from app.db.session import get_db
 from app.models.user import User
 from app.services import bom_service
@@ -18,6 +19,36 @@ from app.services import bom_service
 router = APIRouter(
     tags=["bom-enterprise"], dependencies=[Depends(get_current_user), Depends(require_viewer)]
 )
+
+
+class BomItemCreateRequest(BaseModel):
+    part_id: Optional[int] = None
+    quantity: Decimal = Decimal("1")
+    unit: Optional[str] = "EA"
+    reference_designator: Optional[str] = None
+    find_number: Optional[str] = None
+    sort_order: int = 0
+    parent_item_id: Optional[int] = None
+    unit_cost_snapshot: Optional[Decimal] = None
+    extended_cost: Optional[Decimal] = None
+    notes: Optional[str] = None
+
+
+class BomItemUpdateRequest(BaseModel):
+    part_id: Optional[int] = None
+    quantity: Optional[Decimal] = None
+    unit: Optional[str] = None
+    reference_designator: Optional[str] = None
+    find_number: Optional[str] = None
+    sort_order: Optional[int] = None
+    parent_item_id: Optional[int] = None
+    unit_cost_snapshot: Optional[Decimal] = None
+    extended_cost: Optional[Decimal] = None
+    notes: Optional[str] = None
+
+
+class BomItemReorderRequest(BaseModel):
+    item_ids: list[int]
 
 
 class BomSnapshotRequest(BaseModel):
@@ -66,6 +97,70 @@ async def get_quantity_rollup(
 @router.get("/{bom_id}/cost-rollup")
 async def get_cost_rollup(bom_id: int, db: AsyncSession = Depends(get_db)):
     return await bom_service.get_cost_rollup(db, bom_id)
+
+
+@router.get("/{bom_id}/items")
+async def list_bom_items(bom_id: int, db: AsyncSession = Depends(get_db)):
+    return await bom_service.list_bom_items(db, bom_id)
+
+
+@router.post("/{bom_id}/items", status_code=201)
+async def create_bom_item(
+    bom_id: int,
+    request: BomItemCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_engineering),
+):
+    return await bom_service.create_bom_item(
+        db, bom_id, request.model_dump(exclude_unset=True), tenant_id=current_user.tenantId
+    )
+
+
+@router.put("/{bom_id}/items/{item_id}")
+async def update_bom_item(
+    bom_id: int,
+    item_id: int,
+    request: BomItemUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_engineering),
+):
+    return await bom_service.update_bom_item(
+        db, bom_id, item_id, request.model_dump(exclude_unset=True)
+    )
+
+
+@router.patch("/{bom_id}/items/{item_id}")
+async def patch_bom_item(
+    bom_id: int,
+    item_id: int,
+    request: BomItemUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_engineering),
+):
+    return await bom_service.update_bom_item(
+        db, bom_id, item_id, request.model_dump(exclude_unset=True)
+    )
+
+
+@router.delete("/{bom_id}/items/{item_id}", status_code=204)
+async def delete_bom_item(
+    bom_id: int,
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_engineering),
+):
+    await bom_service.delete_bom_item(db, bom_id, item_id)
+    return None
+
+
+@router.post("/{bom_id}/items/reorder")
+async def reorder_bom_items(
+    bom_id: int,
+    request: BomItemReorderRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_engineering),
+):
+    return await bom_service.reorder_bom_items(db, bom_id, request.item_ids)
 
 
 @router.get("/where-used/{part_id}")

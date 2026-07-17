@@ -2,13 +2,13 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -23,11 +23,11 @@ class POHeader(Base, TenantAwareMixin):
     __tablename__ = "po_headers"
 
     id = Column(Integer, primary_key=True)
-    poNumber = Column(String, unique=True, index=True, nullable=False)
+    poNumber = Column(String, index=True, nullable=False)  # unique per tenant
     poDate = Column(String)
     vendorName = Column(String, nullable=False)
     project = Column(String)
-    poTotal = Column(Float, default=0)
+    poTotal = Column(Numeric(18, 4), default=0)
     status = Column(String)
     notes = Column(Text)
     shipping_address = Column(Text)
@@ -49,6 +49,7 @@ class POHeader(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_po_headers_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "poNumber", name="uq_po_headers_tenant_poNumber"),
         CheckConstraint(
             "status IN ('draft', 'submitted', 'approved', 'received', 'closed', 'cancelled', 'Not Ordered', 'RFQ Sent', 'Under Review', 'Ordered', 'In Transit', 'Quality Check', 'Rejected', 'Open')",
             name="ck_po_headers_status",
@@ -73,10 +74,10 @@ class POLineItem(Base, TenantAwareMixin):
     itemDesc = Column(Text)
     partId = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), index=True)
     quantity = Column(Integer, default=1)
-    itemPrice = Column(Float, default=0)
-    amount = Column(Float, default=0)
-    gst = Column(Float, default=0)
-    total = Column(Float, default=0)
+    itemPrice = Column(Numeric(18, 4), default=0)
+    amount = Column(Numeric(18, 4), default=0)
+    gst = Column(Numeric(18, 4), default=0)
+    total = Column(Numeric(18, 4), default=0)
     eta = Column(String)
     createdAt = Column(DateTime(timezone=True), server_default=func.now())
     updatedAt = Column(DateTime(timezone=True), onupdate=func.now())

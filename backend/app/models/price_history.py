@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -16,7 +16,7 @@ class PriceHistory(Base, TenantAwareMixin):
     )  # Optional if it's a general market price
 
     # Price details
-    price = Column(Float, nullable=False)
+    price = Column(Numeric(18, 4), nullable=False)
     currency = Column(String, default="USD")
     effectiveDate = Column(DateTime(timezone=True))  # When this price became effective
 

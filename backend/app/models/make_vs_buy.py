@@ -3,10 +3,10 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
 )
@@ -28,16 +28,16 @@ class MakeVsBuyAnalysis(Base, TenantAwareMixin):
     decision = Column(String, nullable=False)  # "Make", "Buy", "TBD"
 
     # Make costs
-    makeMaterialCost = Column(Float, default=0.0)
-    makeLaborCost = Column(Float, default=0.0)
-    makeOverheadCost = Column(Float, default=0.0)
-    makeToolingCost = Column(Float, default=0.0)
-    makeTotalCost = Column(Float, default=0.0)
+    makeMaterialCost = Column(Numeric(18, 4), default=0.0)
+    makeLaborCost = Column(Numeric(18, 4), default=0.0)
+    makeOverheadCost = Column(Numeric(18, 4), default=0.0)
+    makeToolingCost = Column(Numeric(18, 4), default=0.0)
+    makeTotalCost = Column(Numeric(18, 4), default=0.0)
 
     # Buy costs
-    buyUnitPrice = Column(Float, default=0.0)
-    buyNreCost = Column(Float, default=0.0)  # Non-recurring engineering
-    buyTotalCost = Column(Float, default=0.0)
+    buyUnitPrice = Column(Numeric(18, 4), default=0.0)
+    buyNreCost = Column(Numeric(18, 4), default=0.0)  # Non-recurring engineering
+    buyTotalCost = Column(Numeric(18, 4), default=0.0)
 
     # Non-cost factors (1-10 scale)
     qualityScore = Column(Integer, default=5)

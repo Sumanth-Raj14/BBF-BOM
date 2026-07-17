@@ -8,6 +8,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -20,7 +21,7 @@ class Deviation(Base, TenantAwareMixin):
     __tablename__ = "deviations"
 
     id = Column(Integer, primary_key=True)
-    deviationNumber = Column(String, unique=True, nullable=False)  # DEV-2026-001
+    deviationNumber = Column(String, nullable=False)  # DEV-2026-001 (unique per tenant)
     title = Column(String, nullable=False)
     type = Column(String, nullable=False)  # "Deviation", "Waiver", "Concession"
 
@@ -65,6 +66,7 @@ class Deviation(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_deviations_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "deviationNumber", name="uq_deviations_tenant_deviationNumber"),
         CheckConstraint("type IN ('Deviation', 'Waiver', 'Concession')", name="ck_deviations_type"),
         CheckConstraint(
             "riskLevel IN ('Low', 'Medium', 'High', 'Critical')", name="ck_deviations_risk_level"

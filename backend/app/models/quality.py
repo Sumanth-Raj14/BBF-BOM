@@ -15,6 +15,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -59,7 +60,7 @@ class InspectionRecord(Base, TenantAwareMixin):
     __tablename__ = "inspection_records"
 
     id = Column(Integer, primary_key=True)
-    record_number = Column(String(50), unique=True, nullable=False)
+    record_number = Column(String(50), nullable=False)  # unique per tenant
     inspection_plan_id = Column(
         Integer, ForeignKey("inspection_plans.id", ondelete="CASCADE"), index=True
     )
@@ -78,6 +79,9 @@ class InspectionRecord(Base, TenantAwareMixin):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
+        UniqueConstraint(
+            "tenantId", "record_number", name="uq_inspection_records_tenant_record_number"
+        ),
         CheckConstraint(
             "result IN ('pass', 'fail', 'conditional', 'pending')",
             name="ck_inspection_records_result",
@@ -98,7 +102,7 @@ class NcrReport(Base, TenantAwareMixin):
     __tablename__ = "ncr_reports"
 
     id = Column(Integer, primary_key=True)
-    ncr_number = Column(String(50), unique=True, nullable=False)
+    ncr_number = Column(String(50), nullable=False)  # unique per tenant
     part_id = Column(
         Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -127,6 +131,7 @@ class NcrReport(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_ncr_reports_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "ncr_number", name="uq_ncr_reports_tenant_ncr_number"),
         CheckConstraint(
             "severity IN ('minor', 'major', 'critical')", name="ck_ncr_reports_severity"
         ),
@@ -156,7 +161,7 @@ class CapaAction(Base, TenantAwareMixin):
     __tablename__ = "capa_actions"
 
     id = Column(Integer, primary_key=True)
-    capa_number = Column(String(50), unique=True, nullable=False)
+    capa_number = Column(String(50), nullable=False)  # unique per tenant
     ncr_id = Column(Integer, ForeignKey("ncr_reports.id", ondelete="CASCADE"), index=True)
     eco_id = Column(Integer, ForeignKey("eco_headers.id", ondelete="CASCADE"), index=True)
     action_type = Column(String(50), nullable=False)
@@ -178,6 +183,7 @@ class CapaAction(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_capa_actions_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "capa_number", name="uq_capa_actions_tenant_capa_number"),
         CheckConstraint(
             "action_type IN ('corrective', 'preventive')", name="ck_capa_actions_action_type"
         ),

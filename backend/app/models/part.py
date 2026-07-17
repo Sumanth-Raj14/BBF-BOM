@@ -13,7 +13,9 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
 )
+# Float import retained: Part.weight (grams) is a physical measurement, not money.
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -54,7 +56,7 @@ class Part(Base, TenantAwareMixin):
     __tablename__ = "parts"
 
     id = Column(Integer, primary_key=True)
-    pn = Column(String, unique=True, index=True, nullable=False)  # Part Number
+    pn = Column(String, index=True, nullable=False)  # Part Number (unique per tenant)
     name = Column(String, nullable=False)
     description = Column(Text)
     rev = Column(String, default="A")
@@ -77,7 +79,7 @@ class Part(Base, TenantAwareMixin):
     primary_vendor_id = Column(Integer, ForeignKey("vendors.id", ondelete="CASCADE"), index=True)
 
     # Cost and timing
-    cost = Column(Float, default=0.0)
+    cost = Column(Numeric(18, 4), default=0.0)
     lead = Column(Integer, default=0)  # Lead time in days
     origin = Column(String)  # Country of origin
 
@@ -88,7 +90,7 @@ class Part(Base, TenantAwareMixin):
     assembly = Column(Boolean, default=False)  # Whether this part has children (is a BOM)
 
     # Technical specs
-    barcode = Column(String, unique=True, index=True)
+    barcode = Column(String, index=True)  # unique per tenant
     material = Column(String)
     weight = Column(Float)  # in grams
     dimensions = Column(String)  # L x W x H format
@@ -100,9 +102,9 @@ class Part(Base, TenantAwareMixin):
     # Tags and compliance use join tables: part_tags, part_compliance
 
     # Cost breakdown
-    freight = Column(Float, default=0.0)
-    tax = Column(Float, default=0.0)
-    landedCost = Column(Float, default=0.0)
+    freight = Column(Numeric(18, 4), default=0.0)
+    tax = Column(Numeric(18, 4), default=0.0)
+    landedCost = Column(Numeric(18, 4), default=0.0)
 
     # CAD reference
     cadUrl = Column(String)  # Path or URL to CAD file
@@ -121,6 +123,8 @@ class Part(Base, TenantAwareMixin):
 
     __table_args__ = (
         Index("idx_parts_tenant_status", "tenantId", "status"),
+        UniqueConstraint("tenantId", "pn", name="uq_parts_tenant_pn"),
+        UniqueConstraint("tenantId", "barcode", name="uq_parts_tenant_barcode"),
         CheckConstraint(
             "status IN ('Draft', 'Review', 'Released', 'Deprecated', 'Obsolete', 'Archived')",
             name="ck_parts_status",
