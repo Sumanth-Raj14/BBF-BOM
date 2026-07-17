@@ -3,6 +3,7 @@ import { Button } from "../Button.jsx";
 import { StatusPill, Badge, toneForStatus } from "../Badge.jsx";
 import { Modal } from "../Modal.jsx";
 import { Switch } from "../Choice.jsx";
+import { Menu } from "../Menu.jsx";
 
 describe("Button", () => {
   it("applies variant + size token classes", () => {
@@ -55,6 +56,58 @@ describe("Switch", () => {
     expect(sw).toHaveAttribute("aria-checked", "false");
     fireEvent.click(sw);
     expect(onChange).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("Menu", () => {
+  it("injects menu-button semantics onto an interactive trigger without nesting a role=button wrapper", () => {
+    render(
+      <Menu
+        ariaLabel="Row actions"
+        trigger={<Button iconOnly aria-label="Actions">...</Button>}
+        items={[{ label: "Edit", onSelect: () => {} }]}
+      />,
+    );
+    // The real <button> carries the menu-button semantics directly.
+    const trigger = screen.getByRole("button", { name: "Actions" });
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    // No extra wrapper button was introduced (only the trigger button exists).
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+  });
+
+  it("opens the menu on trigger click and preserves the trigger's own onClick", () => {
+    const onClick = vi.fn();
+    render(
+      <Menu
+        ariaLabel="Row actions"
+        trigger={
+          <Button iconOnly aria-label="Actions" onClick={onClick}>
+            ...
+          </Button>
+        }
+        items={[{ label: "Edit", onSelect: () => {} }]}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Actions" });
+    fireEvent.click(trigger);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("menu", { name: "Row actions" })).toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("wraps a non-interactive trigger in a role=button span", () => {
+    render(
+      <Menu
+        ariaLabel="More"
+        trigger={<span>label</span>}
+        items={[{ label: "Edit", onSelect: () => {} }]}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "label" });
+    expect(trigger.tagName).toBe("SPAN");
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
   });
 });
 

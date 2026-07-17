@@ -1,5 +1,19 @@
 import PropTypes from "prop-types";
-import { useEffect, useId, useRef, useState } from "react";
+import { cloneElement, isValidElement, useEffect, useId, useRef, useState } from "react";
+
+function assignRef(ref, value) {
+  if (typeof ref === "function") ref(value);
+  else if (ref && typeof ref === "object") ref.current = value;
+}
+
+const INTERACTIVE_TAGS = new Set(["button", "a", "input", "select", "textarea"]);
+// Whether a trigger element already establishes an interactive, focusable role
+// on its own. Native interactive tags do; a custom component (the idiomatic
+// trigger is <Button>) is assumed to render one. Only plain intrinsic elements
+// (span/div/…) need role="button" + tabIndex added so they stay keyboard-usable.
+function isInteractiveTrigger(el) {
+  return typeof el.type === "string" ? INTERACTIVE_TAGS.has(el.type) : true;
+}
 
 /**
  * Menu — accessible menu-button (WAI-ARIA menu pattern).
@@ -87,21 +101,62 @@ export function Menu({ trigger, items = [], align = "left", ariaLabel }) {
     item.onSelect && item.onSelect();
   };
 
-  return (
-    <span className="ui-menu-root" ref={rootRef} style={{ position: "relative" }}>
+  const handleTriggerClick = () => (open ? close(false) : openMenu(false));
+
+  // If the consumer passes an already-interactive element (e.g. an icon-only
+  // Button), clone it and inject the menu-button semantics/handlers directly,
+  // composing with any existing handlers/ref. This avoids nesting a real
+  // <button> inside a role="button" span (a nested-interactive ARIA
+  // anti-pattern). Only non-element triggers fall back to a span wrapper.
+  const triggerAria = {
+    "aria-haspopup": "menu",
+    "aria-expanded": open,
+    "aria-controls": open ? menuId : undefined,
+  };
+  let triggerNode;
+  if (isValidElement(trigger)) {
+    const prev = trigger.props || {};
+    const prevRef = trigger.ref;
+    // Add button role/focusability only if the element isn't already interactive,
+    // so an interactive trigger (e.g. <Button>) is never a nested interactive.
+    const roleProps = isInteractiveTrigger(trigger)
+      ? {}
+      : { role: "button", tabIndex: prev.tabIndex ?? 0 };
+    triggerNode = cloneElement(trigger, {
+      ...triggerAria,
+      ...roleProps,
+      ref: (node) => {
+        triggerRef.current = node;
+        assignRef(prevRef, node);
+      },
+      onClick: (e) => {
+        prev.onClick && prev.onClick(e);
+        if (!e.defaultPrevented) handleTriggerClick();
+      },
+      onKeyDown: (e) => {
+        prev.onKeyDown && prev.onKeyDown(e);
+        onTriggerKey(e);
+      },
+    });
+  } else {
+    triggerNode = (
       <span
         ref={triggerRef}
         role="button"
         tabIndex={0}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
-        onClick={() => (open ? close(false) : openMenu(false))}
+        {...triggerAria}
+        onClick={handleTriggerClick}
         onKeyDown={onTriggerKey}
         style={{ display: "inline-flex" }}
       >
         {trigger}
       </span>
+    );
+  }
+
+  return (
+    <span className="ui-menu-root" ref={rootRef} style={{ position: "relative" }}>
+      {triggerNode}
       {open && (
         <div
           id={menuId}

@@ -50,14 +50,17 @@
               border-color var(--dur-fast) var(--ease-standard),
               color var(--dur-fast) var(--ease-standard);
 }
-.ui-btn--sm { height: 26px; padding: 0 var(--sp-2); font-size: var(--fs-100); }
-.ui-btn--md { height: 32px; padding: 0 var(--sp-3); font-size: var(--fs-200); }
-.ui-btn--lg { height: 38px; padding: 0 var(--sp-4); font-size: var(--fs-300); }
+/* Heights derive from the density-driven --control-h token (styles.css)
+   so Button aligns pixel-for-pixel with Input/Select/Textarea in every
+   density mode. md == --control-h; sm/lg step relative to it. */
+.ui-btn--sm { height: calc(var(--control-h) - 4px); padding: 0 var(--sp-2); font-size: var(--fs-100); }
+.ui-btn--md { height: var(--control-h); padding: 0 var(--sp-3); font-size: var(--fs-200); }
+.ui-btn--lg { height: calc(var(--control-h) + 6px); padding: 0 var(--sp-4); font-size: var(--fs-300); }
 
 .ui-btn--icon { padding: 0; aspect-ratio: 1 / 1; }
-.ui-btn--icon.ui-btn--sm { width: 26px; }
-.ui-btn--icon.ui-btn--md { width: 32px; }
-.ui-btn--icon.ui-btn--lg { width: 38px; }
+.ui-btn--icon.ui-btn--sm { width: calc(var(--control-h) - 4px); }
+.ui-btn--icon.ui-btn--md { width: var(--control-h); }
+.ui-btn--icon.ui-btn--lg { width: calc(var(--control-h) + 6px); }
 
 .ui-btn--primary {
   background: var(--accent-strong);
@@ -185,6 +188,7 @@
   padding: var(--sp-3) var(--sp-4);
   border-bottom: 1px solid var(--border-subtle);
 }
+.ui-card__actions { display: inline-flex; align-items: center; gap: var(--sp-2); flex: none; }
 .ui-card__title { margin: 0; font-size: var(--fs-300); font-weight: var(--fw-semibold); color: var(--text-primary); }
 .ui-card__subtitle { margin: 2px 0 0; font-size: var(--fs-100); color: var(--text-muted); font-weight: var(--fw-regular); }
 .ui-card__body { padding: var(--sp-4); }
