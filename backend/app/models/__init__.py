@@ -73,7 +73,6 @@ from app.models.part_vendor import PartVendor
 from app.models.permission import Permission
 from app.models.po_models import POHeader, POLineItem
 from app.models.price_history import PriceHistory
-from app.models.procurement import PurchaseOrder
 from app.models.project import Project
 from app.models.quality import CapaAction, InspectionPlan, InspectionRecord, NcrReport
 from app.models.resource_scheduling import CapacityReport, ResourceSchedule, WorkCenter
