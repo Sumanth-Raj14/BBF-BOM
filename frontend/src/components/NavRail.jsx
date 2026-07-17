@@ -175,6 +175,25 @@ export default function NavRail() {
     return () => window.removeEventListener("keydown", onKey);
   }, [mobileNavOpen, setMobileNavOpen]);
 
+  // Mobile drawer focus management: move focus into the rail when it opens
+  // (Esc / scrim-click / navigate all funnel through setMobileNavOpen(false),
+  // so restoring focus to the hamburger on the false-transition covers all
+  // three close paths uniformly).
+  const wasMobileOpenRef = React.useRef(false);
+  React.useEffect(() => {
+    if (mobileNavOpen) {
+      wasMobileOpenRef.current = true;
+      const rail = document.getElementById("primary-nav");
+      const firstFocusable = rail?.querySelector(
+        'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      );
+      firstFocusable?.focus();
+    } else if (wasMobileOpenRef.current) {
+      wasMobileOpenRef.current = false;
+      document.getElementById("nav-toggle-btn")?.focus();
+    }
+  }, [mobileNavOpen]);
+
   // If the viewport grows past the ≤900px breakpoint while the drawer is open,
   // close it so it never lingers as a stray overlay on desktop.
   React.useEffect(() => {
@@ -252,7 +271,10 @@ export default function NavRail() {
 
         {SECTIONS.map((section) => (
           <div className="nav-section" key={section.label}>
-            <div className="nav-section-label">
+            <div
+              className="nav-section-label"
+              title={collapsed ? section.label : undefined}
+            >
               <span className="nav-section-text">{section.label}</span>
               <span className="nav-section-rule" aria-hidden="true" />
             </div>

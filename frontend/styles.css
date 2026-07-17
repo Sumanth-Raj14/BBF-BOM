@@ -620,6 +620,8 @@ a:hover { text-decoration: underline; }
 
 /* ── Primary navigation rail (labeled, collapsible) ── */
 .navrail {
+  grid-column: 1;
+  grid-row: 2;
   background: var(--bg-surface);
   border-right: 1px solid var(--border-subtle);
   display: flex;
@@ -838,6 +840,12 @@ a:hover { text-decoration: underline; }
 
 /* Main — BBF Accent Bar */
 .main {
+  /* Explicit placement (not auto-placement) so .main always keeps the fluid
+     column, even below 900px where .navrail switches to position:fixed and
+     is removed from grid flow — without this, .main would auto-place into
+     the (now 0-width) column 1 and the whole content area would go blank. */
+  grid-column: 2 / -1;
+  grid-row: 2;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -3136,6 +3144,11 @@ body.file-dragover::after {
   .topbar .crumbs { display: none; }
   .topbar .search { width: 120px; }
   .topbar .search input { font-size: 11px; }
+  /* No room for the density segmented control at phone/tablet widths once
+     the hamburger + shrunk search are in play — fold it away rather than
+     let it overflow the topbar. Density is still reachable via the Tweaks
+     panel. */
+  .density-seg { display: none; }
   .ribbon { grid-template-columns: repeat(2, 1fr); }
   .ribbon .ribbon-cell:nth-child(n+5) { display: none; }
   .subheader { flex-wrap: wrap; gap: 8px; }
@@ -3473,7 +3486,7 @@ body.file-dragover::after {
   .bulk-bar, .ai-panel, .network-badge, .onboarding-checklist,
   .btn, .icon-btn, .chip, .filterbar button, .subheader button,
   .dropdown-btn, .popover { display: none !important; }
-  .main { margin-left: 0 !important; padding: 0 !important; }
+  .main { grid-column: 1 / -1 !important; margin-left: 0 !important; padding: 0 !important; }
   .app { grid-template-columns: 1fr !important; }
   .bom-scroll { overflow: visible !important; max-height: none !important; }
   .bom-table { font-size: 8px !important; }

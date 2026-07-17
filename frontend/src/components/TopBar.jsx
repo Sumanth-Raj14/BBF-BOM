@@ -43,6 +43,7 @@ export default function TopBar() {
       <header className="topbar">
         <button
           type="button"
+          id="nav-toggle-btn"
           className="icon-btn nav-toggle"
           aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
           title={mobileNavOpen ? "Close navigation" : "Open navigation"}
