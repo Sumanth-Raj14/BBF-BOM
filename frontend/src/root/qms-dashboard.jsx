@@ -3,11 +3,14 @@ import { __t } from "../i18n";
 import {
   ScreenHeader,
   Tabs,
+  TabPanel,
   DataTable,
   StatusPill,
   EmptyState,
   Spinner,
 } from "../components/ui";
+
+const QMS_TABS_ID = "qms-tabs";
 
 const NCR_COLUMNS = [
   { key: "id", header: __t("enterprise.qms.col.id") || "ID" },
@@ -82,13 +85,14 @@ export function QMSDashboard() {
       />
 
       <Tabs
+        id={QMS_TABS_ID}
         items={tabs}
         value={activeTab}
         onChange={setActiveTab}
         ariaLabel={__t("enterprise.qms.tabsLabel") || "QMS record types"}
       />
 
-      <div role="tabpanel" aria-label={activeTab} tabIndex={0} className="mt-14">
+      <TabPanel id={QMS_TABS_ID} value={activeTab} active className="mt-14">
         {loading ? (
           <div className="flex items-center gap-8 fg-3 fs-12" style={{ padding: "32px 0" }}>
             <Spinner size="sm" label={(__t("enterprise.qms.loading") || "Loading") + " " + activeTab + "…"} />
@@ -142,7 +146,7 @@ export function QMSDashboard() {
             )}
           </>
         )}
-      </div>
+      </TabPanel>
     </div>
   );
 }

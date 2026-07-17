@@ -92,12 +92,26 @@ export function DataTable({
           ) : (
             rows.map((row, i) => {
               const selected = isRowSelected ? isRowSelected(row) : undefined;
+              const clickable = !!onRowClick;
               return (
                 <tr
                   key={rowKey(row, i)}
                   aria-selected={selected}
-                  onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  style={onRowClick ? { cursor: "pointer" } : undefined}
+                  role={clickable ? "button" : undefined}
+                  tabIndex={clickable ? 0 : undefined}
+                  onClick={clickable ? () => onRowClick(row) : undefined}
+                  onKeyDown={
+                    clickable
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onRowClick(row);
+                          }
+                        }
+                      : undefined
+                  }
+                  className={clickable ? "ui-table__row--clickable" : undefined}
+                  style={clickable ? { cursor: "pointer" } : undefined}
                 >
                   {columns.map((col) => {
                     const isNum =

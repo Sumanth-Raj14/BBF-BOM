@@ -6,6 +6,7 @@ import { apiRequest } from "../../../api.js";
 import {
   ScreenHeader,
   Tabs,
+  TabPanel,
   Button,
   Select,
   DataTable,
@@ -15,6 +16,7 @@ import {
 } from "../ui";
 
 // WS2 — unified "My Work / Team Work" board wired to /work/* + /teams/* .
+const WORK_QUEUE_TABS_ID = "work-queue-tabs";
 
 export default function WorkQueueScreen() {
   const [tab, setTab] = React.useState("mine");
@@ -185,16 +187,17 @@ export default function WorkQueueScreen() {
       />
 
       <Tabs
+        id={WORK_QUEUE_TABS_ID}
         items={tabItems}
         value={tab}
         onChange={setTab}
         ariaLabel="Work queue view"
       />
 
-      <div
-        role="tabpanel"
-        aria-label={tab === "mine" ? "My Work" : "Team Work"}
-        tabIndex={0}
+      <TabPanel
+        id={WORK_QUEUE_TABS_ID}
+        value={tab}
+        active
         className="mt-16"
       >
         {loading ? (
@@ -225,7 +228,7 @@ export default function WorkQueueScreen() {
             }
           />
         )}
-      </div>
+      </TabPanel>
     </div>
   );
 }

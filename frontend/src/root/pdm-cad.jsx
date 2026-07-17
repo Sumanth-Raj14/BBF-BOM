@@ -643,7 +643,7 @@ function PDMVaultScreen() {
                         style={{
                           color:
                             f.checked_out === "E. Chen"
-                              ? "var(--accent)"
+                              ? "var(--accent-text)"
                               : "var(--warn)",
                         }}
                       >

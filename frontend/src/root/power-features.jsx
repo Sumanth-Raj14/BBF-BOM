@@ -660,7 +660,7 @@ function WorkOrdersScreen() {
           {
             l: __t("power.workOrders.inProgress") || "In progress",
             v: counts["In Progress"] || 0,
-            c: "var(--accent)",
+            c: "var(--accent-text)",
           },
           {
             l: __t("power.workOrders.released") || "Released",
@@ -1366,7 +1366,7 @@ function MarginModal({ open, onClose }) {
           [
             __t("power.margin.suggestedSellPrice") || "Suggested sell price",
             sellPrice,
-            "var(--accent)",
+            "var(--accent-text)",
           ],
           [
             __t("power.margin.grossProfit") || "Gross profit per unit",
