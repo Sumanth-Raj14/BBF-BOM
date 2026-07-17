@@ -136,17 +136,28 @@ async def clean_db(test_engine):
 
 @pytest.fixture(autouse=True)
 def reset_rate_limit_caches():
-    """Clear module-level rate limit caches between tests to prevent state pollution."""
+    """Clear module-level rate limit caches between tests to prevent state pollution.
+
+    Also resets the slowapi `limiter`'s in-memory storage: `noop_lifespan` (above)
+    skips the real app startup, so the module-level in-memory limiter singleton
+    (app.core.rate_limit.limiter) is shared and never reset across the whole
+    pytest process. Without this, endpoint-level limits like /register's
+    "3/hour" silently accumulate across unrelated test functions/files and
+    cause unrelated tests to fail with 429s.
+    """
     import app.core.deps as deps_mod
     import app.services.auth_service as auth_svc
+    from app.core.rate_limit import limiter
 
     auth_svc._FAILED_LOGIN_IPS.clear()
     deps_mod._user_rate_limits.clear()
     deps_mod._api_key_rate_limits.clear()
+    limiter.reset()
     yield
     auth_svc._FAILED_LOGIN_IPS.clear()
     deps_mod._user_rate_limits.clear()
     deps_mod._api_key_rate_limits.clear()
+    limiter.reset()
 
 
 @pytest_asyncio.fixture(scope="session")

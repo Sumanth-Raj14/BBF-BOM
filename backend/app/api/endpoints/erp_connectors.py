@@ -1,5 +1,3 @@
-from datetime import UTC, datetime
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -157,17 +155,26 @@ async def sync_connector(
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
 
+    # HONESTY (R10): No real ERP integration exists yet — nothing is actually
+    # transmitted to/from the external system. Previously this logged
+    # status="completed" and bumped lastSyncAt even though zero records were
+    # ever exchanged, which made the UI falsely report a successful sync.
+    # Log it as "failed" (an allowed status) with an explanatory error instead
+    # of claiming success, and leave lastSyncAt untouched since no sync ran.
     log = ERPSyncLog(
         connectorId=connector.id,
         direction=data.direction,
         entityType=data.entityType,
         recordsCount=0,
-        status="completed",
+        status="failed",
+        errors=(
+            "ERP sync is not implemented for this connector type — no network "
+            "call was made and no records were exchanged."
+        ),
         tenantId=current_user.tenantId,
     )
     db.add(log)
 
-    connector.lastSyncAt = datetime.now(UTC)
     await db.commit()
     await db.refresh(log)
 
@@ -208,9 +215,15 @@ async def get_sync_logs(connector_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.post("/test-connection")
 async def test_connection(data: ERPTestConnectionRequest):
+    # HONESTY (R10): no real network call is made to data.baseUrl — this
+    # previously reported status="success" unconditionally, which misled
+    # users into believing connectivity had actually been verified.
     return {
-        "status": "success",
-        "message": f"Connection test to {data.baseUrl} simulated successfully",
+        "status": "simulated",
+        "message": (
+            f"Connection test to {data.baseUrl} was simulated — no real network "
+            "call was made. ERP connectivity testing is not yet implemented."
+        ),
         "baseUrl": data.baseUrl,
     }
 
@@ -221,8 +234,12 @@ async def test_connection_by_id(connector_id: int, db: AsyncSession = Depends(ge
     connector = result.scalar_one_or_none()
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
+    # HONESTY (R10): see test_connection() above — no real network call is made.
     return {
-        "status": "success",
-        "message": f"Connection test to {connector.baseUrl} simulated successfully",
+        "status": "simulated",
+        "message": (
+            f"Connection test to {connector.baseUrl} was simulated — no real "
+            "network call was made. ERP connectivity testing is not yet implemented."
+        ),
         "baseUrl": connector.baseUrl,
     }

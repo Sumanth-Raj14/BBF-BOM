@@ -1,4 +1,5 @@
 import { storage } from '../utils/storage.js';
+import { toast } from '../utils/toast.js';
 
 function getApi() {
   return typeof window !== 'undefined' && window.api ? window.api : {};
@@ -16,9 +17,20 @@ function tryAPIFirst(domain, apiCall) {
     .catch(() => storage[domain]?.get() ?? null);
 }
 
+// R9 fix: writes must NOT resolve as a success when the API call actually
+// failed (or was never wired up, e.g. `apiModule` missing). Previously this
+// caught every error and quietly returned the local `data` as if the server
+// had accepted it, so users believed their change was saved when it was only
+// ever written to localStorage. Now: keep the optimistic local write (so the
+// UI still updates immediately), but surface the failure with a toast and
+// reject so callers know the save did not actually reach the server.
 function saveToAPI(domain, apiSaveCall, data) {
   if (storage[domain]?.set) storage[domain].set(data);
-  return apiSaveCall().catch(() => data);
+  return apiSaveCall().catch((err) => {
+    const message = (err && err.message) || 'Unknown error';
+    toast(`Save failed — not synced to server (kept locally only): ${message}`, { kind: 'error' });
+    throw err;
+  });
 }
 
 function listWithFallback(apiModule, method, domain, params = {}) {
@@ -51,7 +63,12 @@ function updateWithFallback(apiModule, id, data, domain) {
 
 function removeWithFallback(apiModule, id, domain) {
   if (storage[domain]?.remove) storage[domain].remove();
-  return apiModule?.delete ? apiModule.delete(id).catch(() => {}) : Promise.resolve();
+  if (!apiModule?.delete) return Promise.resolve();
+  return apiModule.delete(id).catch((err) => {
+    const message = (err && err.message) || 'Unknown error';
+    toast(`Delete failed — not synced to server (removed locally only): ${message}`, { kind: 'error' });
+    throw err;
+  });
 }
 
 export const screenData = {

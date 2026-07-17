@@ -22,6 +22,7 @@ class AuditLog(Base, TenantAwareMixin):
         "vendor",
         "auth",
         "api_key",
+        "work_order",
     }
 
     id = Column(Integer, primary_key=True)

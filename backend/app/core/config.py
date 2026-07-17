@@ -220,6 +220,13 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     IS_PRODUCTION: bool = False
 
+    # Self-registration: if a tenant already exists, open self-registration into
+    # it is a cross-tenant breach and is rejected by default. Only the very first
+    # registration (no tenant exists yet) is allowed to bootstrap a new tenant.
+    # Set True to permit anonymous self-registrations to always create a brand new
+    # tenant even when tenants already exist (multi-tenant SaaS signup flows).
+    ALLOW_TENANT_SELF_SIGNUP: bool = False
+
     @field_validator("IS_PRODUCTION", mode="before")
     @classmethod
     def derive_is_production(cls, v, info):

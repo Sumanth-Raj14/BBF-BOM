@@ -9,11 +9,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import cache_get, cache_set
 from app.core.idempotency import check_idempotency
+from app.core.rbac import ECO_APPROVER_ROLES, user_has_any_role
 from app.core.tenant_context import get_tenant_id
 from app.integrations.events import emit_integration_event
 from app.models.audit_log import AuditLog
 from app.models.eco import EcoApproval, EcoHeader, EcoItem, EcoItemAttributeChange, EcoNotification
 from app.models.user import User
+
+# ECO change-control state machine (R8, surgical): the source status(es) an
+# ECO must be in for a given action to be legal. Full multi-approver
+# chain + 21 CFR Part 11 e-sign is DEFERRED — this only enforces the
+# minimum guardrails: no illegal transitions, no self-approval.
+ECO_ALLOWED_TRANSITIONS: dict[str, set[str]] = {
+    "submit": {"draft"},
+    "approve": {"review"},
+    "reject": {"review"},
+    "implement": {"approved"},
+    "close": {"implemented"},
+}
+
+
+async def _next_approval_order(db: AsyncSession, eco_id: int) -> int:
+    count_result = await db.execute(
+        select(func.count()).select_from(EcoApproval).where(EcoApproval.eco_id == eco_id)
+    )
+    return (count_result.scalar() or 0) + 1
 
 
 async def _log_audit(
@@ -184,13 +204,54 @@ async def perform_eco_action(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid action. Must be one of: {valid_actions}",
         )
+    # R8 guardrail: reject illegal state transitions (e.g. approving an ECO
+    # that isn't in review/submitted status).
+    allowed_source = ECO_ALLOWED_TRANSITIONS[action]
+    if eco.status not in allowed_source:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Cannot {action} ECO from status '{eco.status}'. "
+                f"ECO must be in one of: {sorted(allowed_source)}"
+            ),
+        )
     now = datetime.now(UTC)
     if action == "submit":
         eco.status = "review"
     elif action == "approve":
+        # R8 guardrail: forbid self-approval — the acting user must not be
+        # the ECO creator/requester.
+        if eco.requested_by == current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="ECO creator/requester cannot approve their own ECO",
+            )
+        # R8 guardrail: designated-approver RBAC — the general
+        # `require_engineering` gate on the endpoint is not sufficient here;
+        # any engineer can create/submit an ECO, but only a designated
+        # approver (admin-level role) may approve one.
+        if not await user_has_any_role(db, current_user, ECO_APPROVER_ROLES):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User lacks the designated ECO-approver role",
+            )
         eco.status = "approved"
         eco.approved_by = current_user.id
         eco.approved_at = now
+        # R8 guardrail: record the approval on EcoApproval (not just the
+        # header) — approval_order derived from existing approvals, never
+        # hardcoded.
+        approval = EcoApproval(
+            eco_id=eco.id,
+            approver_id=current_user.id,
+            approval_order=await _next_approval_order(db, eco.id),
+            status="approved",
+            comments=comments,
+            signed_at=now,
+            digital_signature=digital_signature,
+            tenantId=tid,
+        )
+        db.add(approval)
     elif action == "reject":
         eco.status = "draft"
     elif action == "implement":

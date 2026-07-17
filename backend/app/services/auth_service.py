@@ -10,6 +10,7 @@ from typing import Optional
 import pyotp
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import blacklist_token
@@ -215,6 +216,48 @@ async def refresh_user_token(db: AsyncSession, refresh_token_str: str) -> dict:
     return make_tokens(user)
 
 
+async def _get_or_create_admin_role(db: AsyncSession, tenant_id: int):
+    """Find-or-create the "admin" Role for opt-in tenant self-signup.
+
+    `Role.name` is GLOBALLY unique (a known deferred quirk -- roles aren't
+    yet fully tenant-scoped), so an "admin" role created for any tenant is
+    found and reused by name rather than duplicated.
+
+    Registration is unauthenticated, so there is normally no tenant context
+    and this SELECT runs unfiltered. But it can still run inside a tenant
+    context (e.g. tests that set one globally), in which case the tenant
+    ORM event filter (app.core.tenant_events) may append a `tenantId`
+    predicate and hide an existing global "admin" row, racing us into
+    trying to create a second one. Guard that with a SAVEPOINT: create the
+    role in a nested transaction so that a unique-constraint violation only
+    rolls back the savepoint (not the caller's pending tenant/user rows),
+    then re-query for the row the concurrent registration created.
+    """
+    from app.models.role import Role
+
+    result = await db.execute(select(Role).where(Role.name == "admin"))
+    admin_role = result.scalar_one_or_none()
+    if admin_role:
+        return admin_role
+
+    try:
+        async with db.begin_nested():
+            admin_role = Role(
+                name="admin",
+                description="Tenant administrator",
+                tenantId=tenant_id,
+            )
+            db.add(admin_role)
+            await db.flush()
+    except IntegrityError:
+        result = await db.execute(select(Role).where(Role.name == "admin"))
+        admin_role = result.scalar_one_or_none()
+        if admin_role is None:
+            raise
+
+    return admin_role
+
+
 async def register_new_user(
     db: AsyncSession,
     email: str,
@@ -235,27 +278,65 @@ async def register_new_user(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username already taken")
 
+    from app.models.role import Role, user_roles
     from app.models.tenant import Tenant
 
-    result = await db.execute(select(Tenant).limit(1))
-    default_tenant = result.scalar_one_or_none()
-    if not default_tenant:
-        default_tenant = Tenant(
-            tenant_name=f"{username}'s Organization",
-            tenant_code=f"org_{username}",
+    # Secure local-first default: self-registration must never let an anonymous
+    # signer-upper join an EXISTING tenant (that would be a cross-tenant breach —
+    # the old `select(Tenant).limit(1)` behavior). If no tenant exists yet, the
+    # first registration bootstraps a brand-new tenant and becomes its admin.
+    # If a tenant already exists, open self-registration is rejected; new members
+    # must be invited by an admin instead (unless explicitly opted in via
+    # ALLOW_TENANT_SELF_SIGNUP, which always creates a fresh tenant per signup).
+    result = await db.execute(select(func.count()).select_from(Tenant))
+    tenant_count = result.scalar_one()
+
+    is_bootstrap = tenant_count == 0
+    if not is_bootstrap and not settings.ALLOW_TENANT_SELF_SIGNUP:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Self-registration is disabled. Ask your organization admin "
+                "to invite you."
+            ),
         )
-        db.add(default_tenant)
-        await db.flush()
-        await db.refresh(default_tenant)
+
+    new_tenant = Tenant(
+        tenant_name=f"{username}'s Organization",
+        tenant_code=f"org_{username}_{secrets.token_hex(4)}",
+    )
+    db.add(new_tenant)
+    await db.flush()
+    await db.refresh(new_tenant)
 
     db_user = User(
         email=email,
         username=username,
         hashedPassword=get_password_hash(password),
         fullName=full_name,
-        tenantId=default_tenant.id,
+        tenantId=new_tenant.id,
+        # SECURITY: isSuperuser is a GLOBAL tenant-bypass (see
+        # models/user.py::effective_tenant_id, which returns None -- i.e. no
+        # tenant filtering at all -- for superusers; core/rbac.py also lets
+        # superusers bypass every role/tenant check). Only the very first-ever
+        # registration (tenant_count == 0, the single-tenant on-prem bootstrap)
+        # may become a global superuser -- that's acceptable for the sole
+        # admin of a fresh install. Every subsequent self-signup (opt-in via
+        # ALLOW_TENANT_SELF_SIGNUP) must NOT get global superuser, or every
+        # anonymous signup would become a cross-tenant superuser, reopening
+        # the breach this workstream closes -- it gets a tenant-scoped
+        # "admin" role instead (below).
+        isSuperuser=is_bootstrap,
     )
     db.add(db_user)
+    await db.flush()  # assigns db_user.id, needed for the role association insert
+
+    if not is_bootstrap:
+        admin_role = await _get_or_create_admin_role(db, new_tenant.id)
+        await db.execute(
+            user_roles.insert().values(user_id=db_user.id, role_id=admin_role.id)
+        )
+
     await db.commit()
     await db.refresh(db_user)
 

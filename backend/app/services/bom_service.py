@@ -16,14 +16,16 @@ from app.models.bom_template import BomTemplate
 from app.models.bom_variant import BomVariant, BomVariantItem
 from app.models.part import Part
 
-# Module-level part cache for explosion trees
-_part_cache: dict[int, tuple[str, str]] = {}
+# Module-level part cache for explosion trees.
+# Keyed by (tenant_id, part_id) — NEVER by part_id alone — so a cache hit can
+# never resolve to a different tenant's part number/name.
+_part_cache: dict[tuple[Any, int], tuple[str, str]] = {}
 _MAX_PART_CACHE = 10000
 
 
-def _cache_part(pid: int, pn: str, name: str):
+def _cache_part(tid: Optional[int], pid: int, pn: str, name: str):
     if len(_part_cache) < _MAX_PART_CACHE:
-        _part_cache[pid] = (pn, name)
+        _part_cache[(tid, pid)] = (pn, name)
 
 
 # ============ Basic CRUD ============
@@ -99,11 +101,21 @@ async def create_bom(db: AsyncSession, data: dict) -> BOM:
 
 
 async def _build_explosion_tree(
-    db: AsyncSession, parent_item_id: Optional[int], current_level: int, max_level: int
+    db: AsyncSession,
+    bom_id: int,
+    parent_item_id: Optional[int],
+    current_level: int,
+    max_level: int,
+    tid: Optional[int],
 ) -> list[dict]:
     if current_level > max_level:
         return []
-    result = await db.execute(select(BOMItem).where(BOMItem.parent_item_id == parent_item_id))
+    stmt = select(BOMItem).where(
+        BOMItem.bom_id == bom_id, BOMItem.parent_item_id == parent_item_id
+    )
+    if tid is not None:
+        stmt = stmt.where(BOMItem.tenantId == tid)
+    result = await db.execute(stmt)
     items = result.scalars().all()
     if not items:
         return []
@@ -111,20 +123,26 @@ async def _build_explosion_tree(
     part_ids = [item.part_id for item in items if item.part_id]
     parts_map: dict[int, tuple[str, str]] = {}
     if part_ids:
-        need_fetch = [pid for pid in part_ids if pid not in _part_cache]
+        need_fetch = [pid for pid in part_ids if (tid, pid) not in _part_cache]
         if need_fetch:
-            pr = await db.execute(select(Part).where(Part.id.in_(need_fetch)))
+            pr_stmt = select(Part).where(Part.id.in_(need_fetch))
+            if tid is not None:
+                # Never let a lookup resolve to another tenant's part.
+                pr_stmt = pr_stmt.where(Part.tenantId == tid)
+            pr = await db.execute(pr_stmt)
             for p in pr.scalars().all():
-                _cache_part(p.id, p.pn, p.name)
+                _cache_part(tid, p.id, p.pn, p.name)
         for pid in part_ids:
-            entry = _part_cache.get(pid)
+            entry = _part_cache.get((tid, pid))
             if entry:
                 parts_map[pid] = entry
 
     tree = []
     for item in items:
         pn, desc = parts_map.get(item.part_id, ("", "")) if item.part_id else ("", "")
-        children = await _build_explosion_tree(db, item.id, current_level + 1, max_level)
+        children = await _build_explosion_tree(
+            db, bom_id, item.id, current_level + 1, max_level, tid
+        )
         tree.append(
             {
                 "part_id": item.part_id or 0,
@@ -140,12 +158,14 @@ async def _build_explosion_tree(
 
 
 async def get_bom_explosion(db: AsyncSession, bom_id: int, level: int = 10) -> list[dict]:
-    await get_bom_or_404(db, bom_id)
+    bom = await get_bom_or_404(db, bom_id)
     cache_key = f"bom:explosion:{bom_id}:{level}"
     cached = await cache_get(cache_key)
     if cached is not None:
         return cached
-    result = await _build_explosion_tree(db, None, 0, level)
+    # Scope traversal to THIS BOM and its own tenant (not the ambient request
+    # tenant context) so the tree can never mix in another BOM's or tenant's items.
+    result = await _build_explosion_tree(db, bom.id, None, 0, level, bom.tenantId)
     await cache_set(cache_key, result, ttl=300)
     return result
 
@@ -153,32 +173,81 @@ async def get_bom_explosion(db: AsyncSession, bom_id: int, level: int = 10) -> l
 # ============ Quantity Rollup ============
 
 
+def _compute_levels_and_effective_qty(
+    items: list[BOMItem],
+) -> tuple[dict[int, int], dict[int, float]]:
+    """Compute, for every BOMItem in a single BOM's tree, its depth level (root
+    items are level 1) and its EFFECTIVE quantity — the quantity actually
+    consumed per one unit of the top-level assembly, i.e. its own line quantity
+    multiplied by every ancestor's line quantity down from the root.
+    """
+    id_map = {item.id: item for item in items}
+    levels: dict[int, int] = {}
+    effective: dict[int, float] = {}
+
+    def resolve(item_id: int, visiting: set[int]) -> None:
+        if item_id in effective:
+            return
+        item = id_map[item_id]
+        parent_id = item.parent_item_id
+        if parent_id is None or parent_id not in id_map or item_id in visiting:
+            # Root item, or parent isn't part of this BOM's item set (shouldn't
+            # happen for well-formed data), or a cycle — treat as a root so we
+            # never recurse forever.
+            levels[item_id] = 1
+            effective[item_id] = item.quantity or 0
+            return
+        visiting.add(item_id)
+        resolve(parent_id, visiting)
+        visiting.discard(item_id)
+        levels[item_id] = levels[parent_id] + 1
+        effective[item_id] = (item.quantity or 0) * effective[parent_id]
+
+    for item in items:
+        resolve(item.id, set())
+    return levels, effective
+
+
 async def get_quantity_rollup(db: AsyncSession, bom_id: int) -> dict:
     await get_bom_or_404(db, bom_id)
-    items = await db.execute(select(BOMItem).where(BOMItem.bom_id == bom_id))
-    item_list = items.scalars().all()
+    tid = get_tenant_id()
+    items_stmt = select(BOMItem).where(BOMItem.bom_id == bom_id)
+    if tid is not None:
+        items_stmt = items_stmt.where(BOMItem.tenantId == tid)
+    items = (await db.execute(items_stmt)).scalars().all()
 
-    part_ids = {i.part_id for i in item_list if i.part_id}
+    part_ids = {i.part_id for i in items if i.part_id}
     parts = {}
     if part_ids:
-        pr = await db.execute(select(Part).where(Part.id.in_(part_ids)))
+        pr_stmt = select(Part).where(Part.id.in_(part_ids))
+        if tid is not None:
+            pr_stmt = pr_stmt.where(Part.tenantId == tid)
+        pr = await db.execute(pr_stmt)
         for p in pr.scalars().all():
             parts[p.id] = p
 
-    total_quantity_map = {}
-    for item in item_list:
+    levels, effective_qty = _compute_levels_and_effective_qty(items)
+
+    total_quantity_map: dict[str, float] = {}
+    levels_by_part: dict[str, set[int]] = {}
+    for item in items:
         if item.part_id:
             pid = item.part_id
             pn = parts[pid].pn if pid in parts else f"ID:{pid}"
-            total_quantity_map[pn] = total_quantity_map.get(pn, 0) + item.quantity
+            total_quantity_map[pn] = total_quantity_map.get(pn, 0) + effective_qty[item.id]
+            levels_by_part.setdefault(pn, set()).add(levels[item.id])
 
     rollup = [
-        {"part_number": pn, "total_quantity": qty, "levels": [1]}
+        {
+            "part_number": pn,
+            "total_quantity": qty,
+            "levels": sorted(levels_by_part.get(pn, {1})),
+        }
         for pn, qty in sorted(total_quantity_map.items(), key=lambda x: -x[1])
     ]
     return {
         "bom_id": bom_id,
-        "total_items": len(item_list),
+        "total_items": len(items),
         "unique_parts": len(part_ids),
         "rollup": rollup,
     }
@@ -194,13 +263,20 @@ async def get_cost_rollup(db: AsyncSession, bom_id: int) -> dict:
         return cached
 
     await get_bom_or_404(db, bom_id)
-    items_result = await db.execute(select(BOMItem).where(BOMItem.bom_id == bom_id))
+    tid = get_tenant_id()
+    items_stmt = select(BOMItem).where(BOMItem.bom_id == bom_id)
+    if tid is not None:
+        items_stmt = items_stmt.where(BOMItem.tenantId == tid)
+    items_result = await db.execute(items_stmt)
     items = items_result.scalars().all()
 
     part_ids = [item.part_id for item in items if item.part_id]
     parts_map: dict[int, Any] = {}
     if part_ids:
-        pr = await db.execute(select(Part).where(Part.id.in_(set(part_ids))))
+        pr_stmt = select(Part).where(Part.id.in_(set(part_ids)))
+        if tid is not None:
+            pr_stmt = pr_stmt.where(Part.tenantId == tid)
+        pr = await db.execute(pr_stmt)
         for p in pr.scalars().all():
             parts_map[p.id] = p
 
@@ -208,33 +284,15 @@ async def get_cost_rollup(db: AsyncSession, bom_id: int) -> dict:
     cost_by_level: dict[int, float] = {}
     cost_by_category: dict[str, float] = {}
 
-    parent_item_ids = {item.parent_item_id for item in items if item.parent_item_id}
-    parent_levels: dict[int, int] = {}
-    if parent_item_ids:
-        ancestors = await db.execute(
-            select(BOMItem.id, BOMItem.parent_item_id).where(BOMItem.id.in_(parent_item_ids))
-        )
-        ancestor_map: dict[int, Optional[int]] = {}
-        for row in ancestors:
-            ancestor_map[row.id] = row.parent_item_id
-        for pid in parent_item_ids:
-            lvl = 2
-            cur = pid
-            while cur:
-                nxt = ancestor_map.get(cur)
-                if nxt is None:
-                    break
-                lvl += 1
-                cur = nxt
-            parent_levels[pid] = lvl
+    levels, effective_qty = _compute_levels_and_effective_qty(items)
 
     for item in items:
         if item.part_id and item.part_id in parts_map:
             part = parts_map[item.part_id]
             unit_cost = float(item.unit_cost_snapshot or (part.cost or 0))
-            extended = unit_cost * item.quantity
+            extended = unit_cost * effective_qty[item.id]
             total_cost += extended
-            level = parent_levels.get(item.parent_item_id, 1) if item.parent_item_id else 1
+            level = levels[item.id]
             cost_by_level[level] = cost_by_level.get(level, 0) + extended
             cat = part.category or "uncategorized"
             cost_by_category[cat] = cost_by_category.get(cat, 0) + extended
@@ -916,44 +974,3 @@ async def apply_template(
     await db.commit()
     await db.refresh(bom)
     return {"bom_id": bom.id, "template_id": template_id, "items_created": items_created}
-
-
-async def explode_bom(db: AsyncSession, bom_id: int) -> list[dict]:
-    bom = await get_bom_or_404(db, bom_id)
-    items_result = await db.execute(select(BOMItem).where(BOMItem.bom_id == bom_id))
-    items = items_result.scalars().all()
-
-    flat: list[dict] = []
-    seen: set = set()
-
-    async def _walk(parent_id: int, item, depth: int = 0):
-        key = f"{item.part_id or ''}:{depth}"
-        if key in seen and depth > 5:
-            return
-        seen.add(key)
-        part = None
-        if item.part_id:
-            pr = await db.execute(select(Part).where(Part.id == item.part_id))
-            part = pr.scalar_one_or_none()
-        flat.append(
-            {
-                "part_id": item.part_id,
-                "part_number": part.partNumber if part else "N/A",
-                "part_name": part.name if part else "N/A",
-                "quantity": item.quantity,
-                "reference_designator": item.reference_designator,
-                "depth": depth,
-                "has_children": False,
-            }
-        )
-        child_result = await db.execute(
-            select(BOMItem).where(BOMItem.parent_bom_item_id == item.id)
-        )
-        children = child_result.scalars().all()
-        for child in children:
-            flat[-1]["has_children"] = True
-            await _walk(item.id, child, depth + 1)
-
-    for item in items:
-        await _walk(bom.id, item)
-    return flat

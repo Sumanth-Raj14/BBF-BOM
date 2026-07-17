@@ -97,7 +97,9 @@ async def test_sync_erp_connector(client, auth_headers):
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["status"] == "completed"
+    # Honest status (R10): no real ERP integration exists, so the sync must
+    # NOT claim "completed" — see test_erp_honesty.py for the dedicated tests.
+    assert data["status"] != "completed"
     assert data["connectorId"] == connector_id
 
 
@@ -123,4 +125,6 @@ async def test_test_connection(client, auth_headers):
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["status"] == "success"
+    # Honest status (R10): no real network call is made — see
+    # test_erp_honesty.py for the dedicated tests.
+    assert data["status"] != "success"
