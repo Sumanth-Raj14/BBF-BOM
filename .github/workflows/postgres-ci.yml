@@ -1,0 +1,178 @@
+name: Postgres CI (Fresh Install + Migration Head)
+
+# Why this workflow exists (separate from ci.yml's test-backend job):
+# ci.yml's test-backend job runs `alembic upgrade head` directly against a brand-new
+# Postgres service container. That fails on a truly empty database: migrations 004+
+# reference tables (po_headers and ~73 others) that only ever existed via
+# Base.metadata.create_all() and weren't formalized into migrations until revision 022 —
+# see backend/scripts/init_db.py's docstring. This workflow is the regression guard for
+# that whole class of bug: it proves the actual documented bootstrap path
+# (`python -m scripts.init_db`) brings up a schema-matching, head-stamped Postgres
+# database from nothing, on every push/PR, on real Postgres (not SQLite, which silently
+# tolerates things Postgres does not: enum types, JSONB, NUMERIC precision, RLS/session
+# variables, asyncpg-only driver behavior, etc).
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  fresh-install-postgres:
+    name: Fresh Install on Postgres (init_db bootstrap)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bom_user
+          POSTGRES_PASSWORD: ci_postgres_pw_9f3a7c1e
+          POSTGRES_DB: bom_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      POSTGRES_SERVER: 127.0.0.1
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: bom_user
+      POSTGRES_PASSWORD: ci_postgres_pw_9f3a7c1e
+      POSTGRES_DB: bom_db
+      DATABASE_URL: postgresql+asyncpg://bom_user:ci_postgres_pw_9f3a7c1e@127.0.0.1:5432/bom_db
+      SECRET_KEY: ci-postgres-track-secret-key-do-not-use-in-prod-9f3a7c1e4b2d
+      ENCRYPTION_KEY: ci-postgres-track-encryption-key-do-not-use-in-prod-4b2d9f3a
+      S3_SECRET_KEY: ci-postgres-track-s3-secret-key-do-not-use-in-prod-7c1e4b2d
+      ADMIN_EMAIL: ci@blackbox-bom.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-test.txt
+
+      - name: Wait for Postgres to accept connections
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h 127.0.0.1 -p 5432 -U bom_user && break
+            echo "Waiting for postgres... ($i)"
+            sleep 2
+          done
+
+      - name: Sanity check - app imports cleanly with these env vars
+        run: python -c "import app.main; print('app.main imported OK')"
+
+      - name: Fresh install bootstrap against EMPTY Postgres (scripts/init_db)
+        run: python -m scripts.init_db
+
+      - name: Verify alembic_version is stamped at head (041_compliance_pack_tables)
+        run: |
+          python -c "
+          import asyncio
+          from sqlalchemy import text
+          from sqlalchemy.ext.asyncio import create_async_engine
+
+          EXPECTED_HEAD = '041_compliance_pack_tables'
+
+          async def main():
+              engine = create_async_engine('${{ env.DATABASE_URL }}')
+              async with engine.connect() as conn:
+                  result = await conn.execute(text('SELECT version_num FROM alembic_version'))
+                  row = result.fetchone()
+                  assert row is not None, 'alembic_version table is empty after init_db bootstrap'
+                  version = row[0]
+                  print(f'alembic_version.version_num = {version}')
+                  assert version == EXPECTED_HEAD, (
+                      f'Expected head revision {EXPECTED_HEAD!r}, got {version!r}. '
+                      'Update EXPECTED_HEAD in this workflow if a new head migration was added.'
+                  )
+              await engine.dispose()
+
+          asyncio.run(main())
+          "
+
+      - name: Verify alembic CLI agrees the DB is at head
+        run: |
+          python -m alembic current
+          CURRENT=$(python -m alembic current 2>/dev/null | head -n1)
+          echo "alembic current: $CURRENT"
+          echo "$CURRENT" | grep -q '041_compliance_pack_tables' || (echo "::error::alembic current does not report head 041_compliance_pack_tables" && exit 1)
+
+      - name: Re-run init_db against an already-migrated DB (idempotency check)
+        run: python -m scripts.init_db
+
+      - name: Confirm core tables exist (spot check, real Postgres types/constraints)
+        run: |
+          python -c "
+          import asyncio
+          from sqlalchemy import text
+          from sqlalchemy.ext.asyncio import create_async_engine
+
+          TABLES = ['tenants', 'users', 'parts', 'boms', 'po_headers']
+
+          async def main():
+              engine = create_async_engine('${{ env.DATABASE_URL }}')
+              async with engine.connect() as conn:
+                  for t in TABLES:
+                      result = await conn.execute(
+                          text('SELECT to_regclass(:t)'), {'t': t}
+                      )
+                      exists = result.scalar()
+                      assert exists is not None, f'Expected table {t!r} to exist after bootstrap'
+                      print(f'table {t!r} OK')
+              await engine.dispose()
+
+          asyncio.run(main())
+          "
+
+  sqlite-test-suite:
+    name: Existing Test Suite (SQLite track)
+    runs-on: ubuntu-latest
+    # Non-blocking: this job mirrors the day-to-day SQLite-backed suite for fast
+    # feedback, but the repo has known pre-existing failures on this track (tracked
+    # separately) that must not block the Postgres-focused signal above.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TEST_DATABASE_URL: sqlite+aiosqlite:///./ci.db
+      SECRET_KEY: ci-sqlite-track-secret-key-do-not-use-in-prod-1a2b3c4d5e6f
+      ENCRYPTION_KEY: ci-sqlite-track-encryption-key-do-not-use-in-prod-6f5e4d3c2b1a
+      S3_SECRET_KEY: ci-sqlite-track-s3-secret-key-do-not-use-in-prod-2b1a6f5e4d3c
+      POSTGRES_PASSWORD: ci-sqlite-track-postgres-placeholder-3c4d5e6f1a2b
+      ADMIN_EMAIL: ci@blackbox-bom.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-test.txt
+
+      - name: Run pytest (SQLite) - known pre-existing failures allowed, non-blocking
+        run: python -m pytest -p no:cacheprovider -q

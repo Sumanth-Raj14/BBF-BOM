@@ -228,6 +228,12 @@ a backup — ask for help / open an issue with the log output instead.
 | `backend`  | FastAPI app — runs migrations automatically on start, then serves the API |
 | `frontend` | nginx serving the built React app, proxying `/api` and `/ws` to `backend` |
 
+The backend's startup bootstrap (`python -m scripts.init_db`) is what "runs
+migrations automatically" above: on a brand-new database it builds the schema
+directly and stamps it current (since the historical migration chain can't
+run from empty), while on an existing database it just applies any new
+migrations in order — either way, no manual step is required.
+
 All persistent data (database, uploaded files, RSA keys, WAL archive) lives
 in named Docker volumes (`pgdata`, `backend_uploads`, `rsa_keys`,
 `wal_archive`, `backend_backups`), which survive `docker compose down` and

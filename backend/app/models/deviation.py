@@ -69,10 +69,10 @@ class Deviation(Base, TenantAwareMixin):
         UniqueConstraint("tenantId", "deviationNumber", name="uq_deviations_tenant_deviationNumber"),
         CheckConstraint("type IN ('Deviation', 'Waiver', 'Concession')", name="ck_deviations_type"),
         CheckConstraint(
-            "riskLevel IN ('Low', 'Medium', 'High', 'Critical')", name="ck_deviations_risk_level"
+            "\"riskLevel\" IN ('Low', 'Medium', 'High', 'Critical')", name="ck_deviations_risk_level"
         ),
         CheckConstraint(
-            "requestType IN ('One-time', 'Permanent', 'Temporary')",
+            "\"requestType\" IN ('One-time', 'Permanent', 'Temporary')",
             name="ck_deviations_request_type",
         ),
         CheckConstraint(

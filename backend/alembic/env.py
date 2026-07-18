@@ -15,6 +15,17 @@ config = context.config
 import os
 
 db_url = os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_URI")
+if not db_url:
+    # Fall back to the application's own configured URL so migrations use the
+    # same credentials as the running app. Without this, alembic.ini's stub
+    # (bom_user:@localhost, empty password) is used and migrations cannot
+    # authenticate unless DATABASE_URL is exported explicitly.
+    try:
+        from app.core.config import settings
+
+        db_url = settings.DATABASE_URI
+    except Exception:
+        db_url = None
 if db_url:
     config.set_main_option("sqlalchemy.url", db_url)
 
@@ -61,6 +72,23 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    # Postgres enforces VARCHAR length. Alembic's default alembic_version.version_num
+    # column is VARCHAR(32), but some revision ids exceed 32 chars (e.g.
+    # 036_role_permission_tenant_scoped = 33), which truncates/fails on a fresh
+    # Postgres at that migration. Ensure the version table column is wide enough
+    # before migrating. No-op on SQLite (which ignores VARCHAR length).
+    if connection.dialect.name == "postgresql":
+        with connection.begin():
+            connection.exec_driver_sql(
+                "CREATE TABLE IF NOT EXISTS alembic_version ("
+                "version_num VARCHAR(255) NOT NULL, "
+                "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
+            )
+            connection.exec_driver_sql(
+                "ALTER TABLE alembic_version "
+                "ALTER COLUMN version_num TYPE VARCHAR(255)"
+            )
+
     context.configure(connection=connection, target_metadata=target_metadata)
 
     with context.begin_transaction():

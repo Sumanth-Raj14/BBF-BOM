@@ -36,7 +36,8 @@ class Document(Base, TenantAwareMixin):
     accessLevel = Column(String, default="private")  # public, private, restricted
     __table_args__ = (
         CheckConstraint(
-            "accessLevel IN ('public', 'private', 'restricted')", name="ck_documents_access_level"
+            '"accessLevel" IN (\'public\', \'private\', \'restricted\')',
+            name="ck_documents_access_level",
         ),
         CheckConstraint(
             "storage_type IN ('s3', 'local', 'azure_blob', 'gcs', 'other')",

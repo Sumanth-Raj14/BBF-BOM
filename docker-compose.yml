@@ -75,7 +75,9 @@ services:
       BACKUP_DIR: /backups
       ENABLE_RLS: ${ENABLE_RLS:-false}
       SEED_RBAC_ON_START: ${SEED_RBAC_ON_START:-true}
-      # Alembic (run by the entrypoint) is now the sole schema owner.
+      # The entrypoint's bootstrap (python -m scripts.init_db) is now the sole
+      # schema owner: greenfield DBs get Base.metadata.create_all + alembic
+      # stamp head, existing DBs get alembic upgrade head.
       SKIP_CREATE_ALL: "true"
     volumes:
       - backend_backups:/backups

@@ -13,7 +13,8 @@
 #   make backup    # snapshot DB + uploads + RSA keys to backups/<timestamp>/
 #   make restore DIR=backups/20260718-120000
 #   make build     # rebuild images without starting
-#   make migrate   # run alembic migrations manually (normally automatic on start)
+#   make migrate   # run the DB bootstrap manually (normally automatic on start);
+#                  # greenfield DBs use create_all+stamp, existing DBs use alembic upgrade head
 
 .PHONY: up down stop uninstall logs ps backup restore build migrate
 
@@ -51,4 +52,4 @@ build:
 	docker compose build
 
 migrate:
-	docker compose exec backend alembic upgrade head
+	docker compose exec backend python -m scripts.init_db

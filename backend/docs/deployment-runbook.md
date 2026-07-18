@@ -42,8 +42,11 @@ cp .env.example .env
 docker run -d --name bom-postgres -e POSTGRES_USER=bom_user -e POSTGRES_PASSWORD=<strong-password> -e POSTGRES_DB=bom_db -p 5432:5432 postgres:16
 docker run -d --name bom-redis -p 6379:6379 redis:7
 
-# 6. Run database migrations
-alembic upgrade head
+# 6. Run database migrations (bootstrap: greenfield DBs get
+#    Base.metadata.create_all() + `alembic stamp head` since the historical
+#    migration chain cannot build from an empty DB; existing DBs just get
+#    `alembic upgrade head`)
+python -m scripts.init_db
 
 # 7. Create initial admin user
 python -m app.scripts.create_admin
@@ -88,8 +91,14 @@ docker compose up -d --build
 ### Step 3: Run migrations
 
 ```bash
-docker compose exec api alembic upgrade head
+docker compose exec api python -m scripts.init_db
 ```
+
+This is the idempotent bootstrap: a greenfield database (no `alembic_version`
+table) is built from `Base.metadata.create_all()` and stamped at `head`
+(the historical migration chain cannot replay from an empty DB), while an
+already-managed database just runs `alembic upgrade head` to apply pending
+migrations.
 
 ### Step 4: Create admin user
 
@@ -125,8 +134,9 @@ docker compose -f docker-compose.monitoring.yml up -d
 ### Applying migrations
 
 ```bash
-# Apply all pending
-alembic upgrade head
+# Apply all pending (idempotent bootstrap — handles both a greenfield DB via
+# create_all + stamp head, and an existing managed DB via alembic upgrade head)
+python -m scripts.init_db
 
 # Apply specific migration
 alembic upgrade <revision_id>
@@ -146,7 +156,7 @@ alembic revision --autogenerate -m "description of change"
 
 # Review the generated migration in alembic/versions/
 # Then apply
-alembic upgrade head
+python -m scripts.init_db
 ```
 
 ### Production migration checklist
@@ -287,7 +297,7 @@ Configure Prometheus alerting rules in `monitoring/prometheus.yml` or via the Al
 |-------|---------|-----|
 | DB connection refused | `500` errors, health check shows `database.status = error` | Check PostgreSQL is running, verify credentials in `.env`, check firewall |
 | Redis connection refused | Session errors, rate limiting broken | Check Redis is running, verify `REDIS_URL` in `.env` |
-| Migration fails | `alembic upgrade head` errors | Check DB permissions, review migration file, ensure DB exists |
+| Migration fails | `python -m scripts.init_db` errors | Check DB permissions, review migration file, ensure DB exists |
 | Permission denied (403) | API returns forbidden | Check user roles, verify RBAC configuration |
 | File upload fails | S3/MinIO connection errors | Check `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` |
 | High latency | Slow API responses | Check DB query performance, verify indexing, check connection pool |

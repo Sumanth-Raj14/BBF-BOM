@@ -5,7 +5,11 @@
 #   1. Wait for Postgres to accept connections (pg_isready poll, bounded retries).
 #   2. Export DATABASE_URL (built from POSTGRES_* env vars) so both `alembic`
 #      and `seed_rbac.py` connect to the same database the app itself uses.
-#   3. Run `alembic upgrade head` — idempotent, safe to run on every start.
+#   3. Run `python -m scripts.init_db` — idempotent, safe to run on every start.
+#      Greenfield DBs (no alembic_version table) are bootstrapped via
+#      Base.metadata.create_all() + `alembic stamp head`, because the historical
+#      migration chain cannot build from base; existing managed DBs just run
+#      `alembic upgrade head` to apply pending migrations.
 #   4. On a genuinely empty database only (roles table has 0 rows), seed the
 #      default RBAC catalog via seed_rbac.py. This is a ONE-TIME bootstrap:
 #      seed_rbac.py deletes and recreates role/permission rows (and the
@@ -45,8 +49,8 @@ until pg_isready -h "${POSTGRES_SERVER}" -p "${POSTGRES_PORT}" -U "${POSTGRES_US
 done
 echo "[entrypoint] postgres is ready."
 
-echo "[entrypoint] running database migrations (alembic upgrade head)..."
-alembic upgrade head
+echo "[entrypoint] running database bootstrap (python -m scripts.init_db)..."
+python -m scripts.init_db
 
 if [ "${SEED_RBAC_ON_START}" = "true" ]; then
   role_count=$(psql -h "${POSTGRES_SERVER}" -p "${POSTGRES_PORT}" -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -tAc "SELECT COUNT(*) FROM roles;" 2>/dev/null || true)

@@ -79,7 +79,7 @@ class CAPA(Base, TenantAwareMixin):
             name="ck_capas_status",
         ),
         CheckConstraint(
-            "verificationResult IN ('Effective', 'Not Effective', 'Pending')",
+            "\"verificationResult\" IN ('Effective', 'Not Effective', 'Pending')",
             name="ck_capas_verification_result",
         ),
     )

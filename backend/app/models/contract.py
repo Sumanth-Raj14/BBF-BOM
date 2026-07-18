@@ -81,7 +81,7 @@ class Contract(Base, TenantAwareMixin):
             name="ck_contracts_status",
         ),
         CheckConstraint(
-            "contractType IN ('blanket_po', 'volume_discount', 'annual', 'fixed_price', 'other')",
+            "\"contractType\" IN ('blanket_po', 'volume_discount', 'annual', 'fixed_price', 'other')",
             name="ck_contracts_contract_type",
         ),
     )
