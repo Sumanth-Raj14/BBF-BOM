@@ -2,10 +2,305 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { DropdownButton, Modal } from "../../globals";
+import { Icon } from "../../globals";
+import {
+  Modal,
+  Button,
+  Field,
+  Input,
+  Select,
+  Textarea,
+  Menu,
+  StatusPill,
+  Card,
+  DataTable,
+} from "../ui";
+
 // ============ WORKSPACE SETTINGS ============
+
+const boolCell = (value) => (
+  <span aria-label={value ? "Yes" : "No"}>
+    {value ? (
+      <Icon.Check size={12} aria-hidden="true" />
+    ) : (
+      <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>
+        —
+      </span>
+    )}
+  </span>
+);
+
 export default function SettingsModal({ open, onClose }) {
   const [tab, setTab] = React.useState("general");
+  const navRefs = React.useRef([]);
+
+  const sections = [
+    {
+      id: "general",
+      label: __t("workspace.general") || "General",
+      icon: Icon.Settings,
+    },
+    {
+      id: "members",
+      label: __t("workspace.members") || "Members",
+      icon: Icon.User,
+    },
+    {
+      id: "roles",
+      label: __t("workspace.rolesPermissions") || "Roles & permissions",
+      icon: Icon.Key,
+    },
+    {
+      id: "integrations",
+      label: __t("workspace.integrations") || "Integrations",
+      icon: Icon.Link,
+    },
+    {
+      id: "billing",
+      label: __t("workspace.billing") || "Billing",
+      icon: Icon.Cart,
+    },
+    {
+      id: "danger",
+      label: __t("workspace.dangerZone") || "Danger zone",
+      icon: Icon.Trash,
+      danger: true,
+    },
+  ];
+
+  const focusNav = (idx) => {
+    const el = navRefs.current[idx];
+    if (el) el.focus();
+  };
+
+  const onNavKeyDown = (e, idx) => {
+    let next = null;
+    if (e.key === "ArrowDown") next = (idx + 1) % sections.length;
+    else if (e.key === "ArrowUp")
+      next = (idx - 1 + sections.length) % sections.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = sections.length - 1;
+    if (next !== null) {
+      e.preventDefault();
+      setTab(sections[next].id);
+      focusNav(next);
+    }
+  };
+
+  const members = [
+    {
+      name: "E. Chen",
+      email: "elena@blackboxfactories.com",
+      role: "Admin",
+      initials: "EC",
+    },
+    {
+      name: "M. Park",
+      email: "marie@blackboxfactories.com",
+      role: "Engineering",
+      initials: "MP",
+    },
+    {
+      name: "K. Singh",
+      email: "karan@blackboxfactories.com",
+      role: "Procurement",
+      initials: "KS",
+    },
+    {
+      name: "R. Sato",
+      email: "ryo@blackboxfactories.com",
+      role: "Engineering",
+      initials: "RS",
+    },
+    {
+      name: "T. Reyes",
+      email: "tom@blackboxfactories.com",
+      role: "Finance",
+      initials: "TR",
+    },
+  ];
+
+  const memberColumns = [
+    {
+      key: "member",
+      header: __t("workspace.member") || "Member",
+      render: (m) => (
+        <div className="flex items-center gap-8">
+          <span className="avatar" aria-hidden="true">
+            {m.initials}
+          </span>
+          <div>
+            <div className="fw-500 fs-12">{m.name}</div>
+            <div className="font-mono fs-10 fg-3">{m.email}</div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "role",
+      header: __t("workspace.role") || "Role",
+      render: (m) => (
+        <Select
+          name="memberRole"
+          defaultValue={m.role}
+          aria-label={
+            (__t("workspace.changeRole") || "Change role") + " – " + m.name
+          }
+        >
+          <option>Admin</option>
+          <option>Engineering</option>
+          <option>Procurement</option>
+          <option>Finance</option>
+          <option>Viewer</option>
+        </Select>
+      ),
+    },
+    {
+      key: "status",
+      header: __t("workspace.status") || "Status",
+      render: () => (
+        <StatusPill status="active" label={__t("workspace.active") || "Active"} />
+      ),
+    },
+    {
+      key: "actions",
+      header: <span className="sr-only">{__t("common.actions") || "Actions"}</span>,
+      align: "right",
+      render: (m) => (
+        <Menu
+          align="right"
+          ariaLabel={
+            (__t("workspace.moreOptions") || "More options") + " – " + m.name
+          }
+          trigger={
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              aria-label={__t("workspace.moreOptions") || "More options"}
+            >
+              <Icon.Dots size={12} />
+            </Button>
+          }
+          items={[
+            {
+              icon: <Icon.Edit size={11} />,
+              label: __t("workspace.changeRole") || "Change role",
+              onSelect: () =>
+                toast(
+                  (__t("workspace.roleUpdatedFor") || "Role updated for ") +
+                    m.name,
+                ),
+            },
+            {
+              icon: <Icon.Trash size={11} />,
+              label: __t("workspace.remove") || "Remove",
+              danger: true,
+              onSelect: () =>
+                toast(
+                  m.name + (__t("workspace.removedSuffix") || " removed"),
+                  { kind: "warn" },
+                ),
+            },
+          ]}
+        />
+      ),
+    },
+  ];
+
+  const roleRows = [
+    {
+      action: __t("workspace.createEditBoms") || "Create/edit BOMs",
+      admin: true,
+      eng: true,
+      proc: false,
+      fin: false,
+      view: false,
+    },
+    {
+      action: __t("workspace.approveRevisions") || "Approve revisions",
+      admin: true,
+      eng: true,
+      proc: true,
+      fin: true,
+      view: false,
+    },
+    {
+      action: __t("workspace.createPos") || "Create POs",
+      admin: true,
+      eng: false,
+      proc: true,
+      fin: false,
+      view: false,
+    },
+    {
+      action: __t("workspace.viewCosts") || "View costs",
+      admin: true,
+      eng: true,
+      proc: true,
+      fin: true,
+      view: true,
+    },
+    {
+      action: __t("workspace.manageVendors") || "Manage vendors",
+      admin: true,
+      eng: false,
+      proc: true,
+      fin: false,
+      view: false,
+    },
+    {
+      action: __t("workspace.deleteData") || "Delete data",
+      admin: true,
+      eng: false,
+      proc: false,
+      fin: false,
+      view: false,
+    },
+  ];
+
+  const roleColumns = [
+    { key: "action", header: __t("workspace.action") || "Action" },
+    { key: "admin", header: "Admin", align: "num", render: (r) => boolCell(r.admin) },
+    { key: "eng", header: "Eng", align: "num", render: (r) => boolCell(r.eng) },
+    { key: "proc", header: "Proc", align: "num", render: (r) => boolCell(r.proc) },
+    { key: "fin", header: "Fin", align: "num", render: (r) => boolCell(r.fin) },
+    { key: "view", header: "View", align: "num", render: (r) => boolCell(r.view) },
+  ];
+
+  const integrations = [
+    {
+      name: "SolidWorks",
+      desc: __t("workspace.cadAssemblySync") || "CAD assembly sync",
+      connected: true,
+      glyph: "⌬",
+    },
+    {
+      name: "NetSuite",
+      desc: __t("workspace.erpFinance") || "ERP & finance",
+      connected: false,
+      glyph: "$",
+    },
+    {
+      name: "Slack",
+      desc: __t("workspace.notifications") || "Notifications",
+      connected: true,
+      glyph: "≡",
+    },
+    {
+      name: "Google Drive",
+      desc: __t("workspace.documentStorage") || "Document storage",
+      connected: false,
+      glyph: "▤",
+    },
+    {
+      name: "Jira",
+      desc: __t("workspace.issueTracking") || "Issue tracking",
+      connected: false,
+      glyph: "▦",
+    },
+  ];
+
   return (
     <Modal
       open={open}
@@ -16,14 +311,15 @@ export default function SettingsModal({ open, onClose }) {
         __t("workspace.settingsSubtitle") ||
         "Blackbox · 24 members · 4 projects"
       }
-      wide
+      size="lg"
+      closeLabel={__t("workspace.closeSettingsDialog") || "Close settings dialog"}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.close") || "Close"}
-          </button>
-          <button
-            className="btn primary"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => {
               onClose();
               toast(__t("workspace.settingsSaved") || "Settings saved", {
@@ -32,218 +328,137 @@ export default function SettingsModal({ open, onClose }) {
             }}
           >
             {__t("workspace.saveChanges") || "Save changes"}
-          </button>
+          </Button>
         </>
       }
     >
       <div
         className="d-grid"
-        style={{ gridTemplateColumns: "160px 1fr", gap: 18, minHeight: 420 }}
+        style={{ gridTemplateColumns: "180px 1fr", gap: 18, minHeight: 420 }}
       >
-        <div className="bri-1 pr-16">
-          {[
-            ["general", __t("workspace.general") || "General"],
-            ["members", __t("workspace.members") || "Members"],
-            [
-              "roles",
-              __t("workspace.rolesPermissions") || "Roles & permissions",
-            ],
-            ["integrations", __t("workspace.integrations") || "Integrations"],
-            ["billing", __t("workspace.billing") || "Billing"],
-            ["danger", __t("workspace.dangerZone") || "Danger zone"],
-          ].map(([id, label]) => (
-            <button key={id} onClick={() => setTab(id)} className="d-block">
-              {label}
-            </button>
-          ))}
+        <div
+          role="tablist"
+          aria-orientation="vertical"
+          aria-label={__t("workspace.settingsSections") || "Settings sections"}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--sp-1)",
+            borderRight: "1px solid var(--border-subtle)",
+            paddingRight: "var(--sp-3)",
+          }}
+        >
+          {sections.map((s, idx) => {
+            const selected = tab === s.id;
+            return (
+              <button
+                key={s.id}
+                ref={(el) => (navRefs.current[idx] = el)}
+                type="button"
+                role="tab"
+                id={"settings-tab-" + s.id}
+                aria-selected={selected}
+                aria-controls={"settings-panel-" + s.id}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => setTab(s.id)}
+                onKeyDown={(e) => onNavKeyDown(e, idx)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--sp-2)",
+                  padding: "var(--sp-2) var(--sp-2)",
+                  borderRadius: "var(--radius-sm)",
+                  border: "none",
+                  background: selected ? "var(--accent-subtle)" : "transparent",
+                  color: selected
+                    ? "var(--accent-text)"
+                    : s.danger
+                      ? "var(--status-danger-text)"
+                      : "var(--text-secondary)",
+                  fontWeight: selected ? 600 : 500,
+                  fontSize: "var(--fs-100)",
+                  textAlign: "left",
+                  cursor: "pointer",
+                }}
+              >
+                <s.icon size={13} aria-hidden="true" />
+                {s.label}
+              </button>
+            );
+          })}
         </div>
-        <div>
+        <div
+          role="tabpanel"
+          id={"settings-panel-" + tab}
+          aria-labelledby={"settings-tab-" + tab}
+          tabIndex={0}
+        >
           {tab === "general" && (
             <>
               <h3 className="fs-14" style={{ margin: "0 0 14px" }}>
                 {__t("workspace.general") || "General"}
               </h3>
-              <div className="field">
-                <label htmlFor="settings-name">
-                  {__t("workspace.workspaceName") || "Workspace name"}
-                </label>
-                <input
-                  id="settings-name"
-                  name="workspaceName"
-                  className="input"
-                  defaultValue="Blackbox Factories"
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="settings-url">
-                  {__t("workspace.workspaceUrl") || "Workspace URL"}
-                </label>
-                <input
-                  id="settings-url"
-                  name="workspaceUrl"
-                  className="input mono"
-                  defaultValue="blackbox.bom.dev"
-                />
-              </div>
+              <Field label={__t("workspace.workspaceName") || "Workspace name"}>
+                <Input name="workspaceName" defaultValue="Blackbox Factories" />
+              </Field>
+              <Field label={__t("workspace.workspaceUrl") || "Workspace URL"}>
+                <Input mono name="workspaceUrl" defaultValue="blackbox.bom.dev" />
+              </Field>
               <div className="field-row">
-                <div className="field">
-                  <label htmlFor="settings-currency">
-                    {__t("workspace.defaultCurrency") || "Default currency"}
-                  </label>
-                  <select
-                    id="settings-currency"
-                    name="defaultCurrency"
-                    className="select"
-                  >
+                <Field
+                  label={__t("workspace.defaultCurrency") || "Default currency"}
+                >
+                  <Select name="defaultCurrency" defaultValue="USD">
                     <option>USD</option>
                     <option>EUR</option>
                     <option>JPY</option>
                     <option>CNY</option>
-                  </select>
-                </div>
-                <div className="field">
-                  <label htmlFor="settings-datefmt">
-                    {__t("workspace.dateFormat") || "Date format"}
-                  </label>
-                  <select
-                    id="settings-datefmt"
-                    name="dateFormat"
-                    className="select"
-                  >
+                  </Select>
+                </Field>
+                <Field label={__t("workspace.dateFormat") || "Date format"}>
+                  <Select name="dateFormat" defaultValue="YYYY-MM-DD (ISO)">
                     <option>YYYY-MM-DD (ISO)</option>
                     <option>MM/DD/YYYY</option>
                     <option>DD/MM/YYYY</option>
-                  </select>
-                </div>
+                  </Select>
+                </Field>
               </div>
-              <div className="field">
-                <label htmlFor="settings-desc">
-                  {__t("workspace.description") || "Description"}
-                </label>
-                <textarea
-                  id="settings-desc"
+              <Field label={__t("workspace.description") || "Description"}>
+                <Textarea
                   name="workspaceDesc"
-                  className="input"
+                  rows={3}
                   defaultValue="Internal BOM, procurement, and vendor management for Blackbox internal product dev."
                 />
-              </div>
+              </Field>
             </>
           )}
           {tab === "members" && (
             <>
-              <div className="flex justify-between items-center mb-14">
-                <h3 className="fs-14" className="m-0">
+              <div
+                className="flex justify-between items-center"
+                style={{ marginBottom: "var(--sp-4)" }}
+              >
+                <h3 className="fs-14 m-0">
                   {__t("workspace.members") || "Members"}{" "}
                   <span className="fg-3">(24)</span>
                 </h3>
-                <button
-                  className="btn small"
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() =>
                     toast(__t("workspace.inviteSent") || "Invite sent")
                   }
                 >
                   <Icon.Plus size={11} /> {__t("workspace.invite") || "Invite"}
-                </button>
+                </Button>
               </div>
-              {[
-                ["E. Chen", "elena@blackboxfactories.com", "Admin", "EC", ""],
-                [
-                  "M. Park",
-                  "marie@blackboxfactories.com",
-                  "Engineering",
-                  "MP",
-                  "user-2",
-                ],
-                [
-                  "K. Singh",
-                  "karan@blackboxfactories.com",
-                  "Procurement",
-                  "KS",
-                  "user-4",
-                ],
-                [
-                  "R. Sato",
-                  "ryo@blackboxfactories.com",
-                  "Engineering",
-                  "RS",
-                  "user-3",
-                ],
-                [
-                  "T. Reyes",
-                  "tom@blackboxfactories.com",
-                  "Finance",
-                  "TR",
-                  "user-2",
-                ],
-              ].map((m) => (
-                <div
-                  key={m[0]}
-                  className="d-grid gap-12 items-center"
-                  style={{
-                    gridTemplateColumns: "30px 1fr 130px 80px 24px",
-                    padding: "10px 0",
-                    borderBottom: "1px solid var(--line-soft)",
-                  }}
-                >
-                  <span className={("ava " + m[4] + " w-26 h-26 fs-10").trim()}>
-                    {m[3]}
-                  </span>
-                  <div>
-                    <div className="fw-500 fs-12">{m[0]}</div>
-                    <div className="font-mono fs-10 fg-3">{m[1]}</div>
-                  </div>
-                  <select
-                    id={"member-role-" + m[3]}
-                    name="memberRole"
-                    className="select h-26 fs-11"
-                    defaultValue={m[2]}
-                  >
-                    <option>Admin</option>
-                    <option>Engineering</option>
-                    <option>Procurement</option>
-                    <option>Finance</option>
-                    <option>Viewer</option>
-                  </select>
-                  <span className="font-mono fs-10 fg-3">
-                    {__t("workspace.active") || "active"}
-                  </span>
-                  <DropdownButton
-                    width={160}
-                    trigger={
-                      <button
-                        className="icon-btn w-22 h-22"
-                        aria-label={
-                          __t("workspace.moreOptions") || "More options"
-                        }
-                      >
-                        <Icon.Dots size={11} />
-                      </button>
-                    }
-                    items={[
-                      {
-                        icon: <Icon.Edit size={11} />,
-                        label: __t("workspace.changeRole") || "Change role",
-                        onClick: () =>
-                          toast(
-                            (__t("workspace.roleUpdatedFor") ||
-                              "Role updated for ") + m[0],
-                          ),
-                      },
-                      {
-                        icon: <Icon.Trash size={11} />,
-                        label: __t("workspace.remove") || "Remove",
-                        danger: true,
-                        onClick: () =>
-                          toast(
-                            m[0] +
-                              (__t("workspace.removedSuffix") || " removed"),
-                            { kind: "warn" },
-                          ),
-                      },
-                    ]}
-                  />
-                </div>
-              ))}
+              <DataTable
+                ariaLabel={__t("workspace.members") || "Members"}
+                columns={memberColumns}
+                rows={members}
+                getRowKey={(m) => m.email}
+                dense
+              />
             </>
           )}
           {tab === "roles" && (
@@ -251,88 +466,14 @@ export default function SettingsModal({ open, onClose }) {
               <h3 className="fs-14" style={{ margin: "0 0 14px" }}>
                 {__t("workspace.rolesPermissions") || "Roles & Permissions"}
               </h3>
-              <div className="border-line rounded-r2 overflow-h">
-                <table className="bom-table table-auto">
-                  <thead>
-                    <tr>
-                      <th className="pl-12">
-                        {__t("workspace.action") || "Action"}
-                      </th>
-                      <th>Admin</th>
-                      <th>Eng</th>
-                      <th>Proc</th>
-                      <th>Fin</th>
-                      <th>View</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      [
-                        __t("workspace.createEditBoms") || "Create/edit BOMs",
-                        true,
-                        true,
-                        false,
-                        false,
-                        false,
-                      ],
-                      [
-                        __t("workspace.approveRevisions") ||
-                          "Approve revisions",
-                        true,
-                        true,
-                        true,
-                        true,
-                        false,
-                      ],
-                      [
-                        __t("workspace.createPos") || "Create POs",
-                        true,
-                        false,
-                        true,
-                        false,
-                        false,
-                      ],
-                      [
-                        __t("workspace.viewCosts") || "View costs",
-                        true,
-                        true,
-                        true,
-                        true,
-                        true,
-                      ],
-                      [
-                        __t("workspace.manageVendors") || "Manage vendors",
-                        true,
-                        false,
-                        true,
-                        false,
-                        false,
-                      ],
-                      [
-                        __t("workspace.deleteData") || "Delete data",
-                        true,
-                        false,
-                        false,
-                        false,
-                        false,
-                      ],
-                    ].map((r) => (
-                      <tr key={r[0]}>
-                        <td className="pl-12 fs-11">{r[0]}</td>
-                        {r.slice(1).map((v, j) => (
-                          <td key={j}>
-                            {v ? (
-                              <Icon.Check size={12} />
-                            ) : (
-                              <span className="fg-4">—</span>
-                            )}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                ariaLabel={__t("workspace.rolesPermissions") || "Roles & Permissions"}
+                columns={roleColumns}
+                rows={roleRows}
+                getRowKey={(r) => r.action}
+                dense
+                zebra
+              />
             </>
           )}
           {tab === "integrations" && (
@@ -340,83 +481,50 @@ export default function SettingsModal({ open, onClose }) {
               <h3 className="fs-14" style={{ margin: "0 0 14px" }}>
                 {__t("workspace.integrations") || "Integrations"}
               </h3>
-              {[
-                [
-                  "SolidWorks",
-                  __t("workspace.cadAssemblySync") || "CAD assembly sync",
-                  true,
-                  "⌬",
-                ],
-                [
-                  "NetSuite",
-                  __t("workspace.erpFinance") || "ERP & finance",
-                  false,
-                  "$",
-                ],
-                [
-                  "Slack",
-                  __t("workspace.notifications") || "Notifications",
-                  true,
-                  "≡",
-                ],
-                [
-                  "Google Drive",
-                  __t("workspace.documentStorage") || "Document storage",
-                  false,
-                  "▤",
-                ],
-                [
-                  "Jira",
-                  __t("workspace.issueTracking") || "Issue tracking",
-                  false,
-                  "▦",
-                ],
-              ].map((i, idx) => (
+              {integrations.map((i) => (
                 <div
-                  key={idx}
-                  className="flex items-center gap-12 border-line rounded-r2 mb-8"
-                  style={{ padding: 12 }}
+                  key={i.name}
+                  className="flex items-center gap-12 border-line rounded-r2"
+                  style={{ padding: 12, marginBottom: "var(--sp-2)" }}
                 >
-                  <span className="w-32 h-32 rounded-r2 bg-sunk inline-flex items-center justify-center font-mono fs-16 fg-2">
-                    {i[3]}
+                  <span
+                    className="w-32 h-32 rounded-r2 bg-sunk inline-flex items-center justify-center font-mono fs-16 fg-2"
+                    aria-hidden="true"
+                  >
+                    {i.glyph}
                   </span>
                   <div className="flex-1">
-                    <div className="fw-600 fs-12">{i[0]}</div>
-                    <div className="font-mono fs-10 fg-3">{i[1]}</div>
+                    <div className="fw-600 fs-12">{i.name}</div>
+                    <div className="font-mono fs-10 fg-3">{i.desc}</div>
                   </div>
-                  <button
-                    className="btn small"
-                    style={
-                      i[2]
-                        ? {
-                            background: "var(--ok)",
-                            color: "white",
-                            borderColor: "var(--ok)",
-                          }
-                        : {}
+                  <StatusPill
+                    tone={i.connected ? "success" : "neutral"}
+                    label={
+                      i.connected
+                        ? __t("workspace.connected") || "Connected"
+                        : __t("workspace.notConnected") || "Not connected"
                     }
+                  />
+                  <Button
+                    variant={i.connected ? "secondary" : "primary"}
+                    size="sm"
                     onClick={() =>
                       toast(
-                        i[2]
-                          ? i[0] +
+                        i.connected
+                          ? i.name +
                               (__t("workspace.disconnectedSuffix") ||
                                 " disconnected")
-                          : i[0] +
+                          : i.name +
                               (__t("workspace.connectedSuffix") ||
                                 " connected"),
-                        { kind: i[2] ? "warn" : "success" },
+                        { kind: i.connected ? "warn" : "success" },
                       )
                     }
                   >
-                    {i[2] ? (
-                      <>
-                        <Icon.Check size={11} />{" "}
-                        {__t("workspace.connected") || "Connected"}
-                      </>
-                    ) : (
-                      __t("workspace.connect") || "Connect"
-                    )}
-                  </button>
+                    {i.connected
+                      ? __t("workspace.disconnect") || "Disconnect"
+                      : __t("workspace.connect") || "Connect"}
+                  </Button>
                 </div>
               ))}
             </>
@@ -426,14 +534,14 @@ export default function SettingsModal({ open, onClose }) {
               <h3 className="fs-14" style={{ margin: "0 0 14px" }}>
                 {__t("workspace.billing") || "Billing"}
               </h3>
-              <div
-                className="bg-sunk border-line rounded-r2 mb-14"
-                style={{ padding: 16 }}
+              <Card
+                title={__t("workspace.currentPlan") || "Current plan"}
+                className="mb-12"
               >
-                <div className="font-mono fs-10 fg-3 letter-sp-6 uppercase">
-                  {__t("workspace.currentPlan") || "CURRENT PLAN"}
-                </div>
-                <div className="flex items-baseline gap-10 mt-4">
+                <div
+                  className="flex items-baseline"
+                  style={{ gap: "var(--sp-2)" }}
+                >
                   <span className="fs-22 fw-700">
                     {__t("workspace.teamPlan") || "Team"}
                   </span>
@@ -442,88 +550,98 @@ export default function SettingsModal({ open, onClose }) {
                       "₹19,920/mo · 24 seats"}
                   </span>
                 </div>
-                <div className="font-mono fs-11 fg-3 mt-6">
+                <div className="font-mono fs-11 fg-3" style={{ marginTop: 6 }}>
                   {__t("workspace.nextInvoice") ||
                     "Next invoice: 2026-06-12 · Visa **** 4242"}
                 </div>
+              </Card>
+              <div className="flex gap-8">
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    toast(
+                      __t("workspace.openingBillingPortal") ||
+                        "Opening billing portal…",
+                    )
+                  }
+                >
+                  {__t("workspace.manageSubscription") || "Manage subscription"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    toast(
+                      __t("workspace.openingInvoices") ||
+                        "12 invoices · opening…",
+                    )
+                  }
+                >
+                  {__t("workspace.viewInvoices") || "View invoices"}
+                </Button>
               </div>
-              <button
-                className="btn"
-                onClick={() =>
-                  toast(
-                    __t("workspace.openingBillingPortal") ||
-                      "Opening billing portal…",
-                  )
-                }
-              >
-                {__t("workspace.manageSubscription") || "Manage subscription"}
-              </button>
-              <button
-                className="btn ml-8"
-                onClick={() =>
-                  toast(
-                    __t("workspace.openingInvoices") ||
-                      "12 invoices · opening…",
-                  )
-                }
-              >
-                {__t("workspace.viewInvoices") || "View invoices"}
-              </button>
             </>
           )}
           {tab === "danger" && (
             <>
-              <h3 className="fs-14 fg-danger" style={{ margin: "0 0 14px" }}>
+              <h3
+                className="fs-14"
+                style={{ margin: "0 0 14px", color: "var(--status-danger-text)" }}
+              >
                 {__t("workspace.dangerZone") || "Danger zone"}
               </h3>
-              <div
-                className="rounded-r2 mb-12"
-                style={{ padding: 14, border: "1px solid var(--danger)" }}
+              <Card
+                title={__t("workspace.exportAllData") || "Export all data"}
+                className="mb-12"
+                style={{ borderColor: "var(--status-danger)" }}
+                footer={
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() =>
+                      toast(
+                        __t("workspace.preparingExport") ||
+                          "Preparing full export · email link when ready",
+                        { kind: "success" },
+                      )
+                    }
+                  >
+                    {__t("common.export") || "Export"}
+                  </Button>
+                }
               >
-                <div className="fw-600 fs-13">
-                  {__t("workspace.exportAllData") || "Export all data"}
-                </div>
-                <div className="fs-11 fg-3 mt-4 mb-8">
+                <p className="fs-11" style={{ color: "var(--text-muted)", margin: 0 }}>
                   {__t("workspace.exportAllDataDesc") ||
                     "Download an archive of BOMs, vendors, documents, and audit logs."}
-                </div>
-                <button
-                  className="btn small"
-                  onClick={() =>
-                    toast(
-                      __t("workspace.preparingExport") ||
-                        "Preparing full export · email link when ready",
-                      { kind: "success" },
-                    )
-                  }
-                >
-                  {__t("common.export") || "Export"}
-                </button>
-              </div>
-              <div
-                className="rounded-r2"
-                style={{ padding: 14, border: "1px solid var(--danger)" }}
+                </p>
+              </Card>
+              <Card
+                title={
+                  <span style={{ color: "var(--status-danger-text)" }}>
+                    {__t("workspace.deleteWorkspace") || "Delete workspace"}
+                  </span>
+                }
+                style={{ borderColor: "var(--status-danger)" }}
+                footer={
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() =>
+                      toast(
+                        __t("workspace.confirmDeletionToast") ||
+                          "Type the workspace name to confirm deletion",
+                        { kind: "warn" },
+                      )
+                    }
+                  >
+                    {__t("workspace.deleteWorkspace") || "Delete workspace"}
+                  </Button>
+                }
               >
-                <div className="fw-600 fs-13 fg-danger">
-                  {__t("workspace.deleteWorkspace") || "Delete workspace"}
-                </div>
-                <div className="fs-11 fg-3 mt-4 mb-8">
+                <p className="fs-11" style={{ color: "var(--text-muted)", margin: 0 }}>
                   {__t("workspace.deleteWorkspaceDesc") ||
                     "This action cannot be undone. All data will be permanently deleted."}
-                </div>
-                <button
-                  className="btn small bg-danger border-color-danger fg-white"
-                  onClick={() =>
-                    toast(
-                      __t("workspace.confirmDeletionToast") ||
-                        "Type the workspace name to confirm deletion",
-                      { kind: "warn" },
-                    )
-                  }
-                >
-                  {__t("workspace.deleteWorkspace") || "Delete workspace"}
-                </button>
-              </div>
+                </p>
+              </Card>
             </>
           )}
         </div>
