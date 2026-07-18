@@ -215,6 +215,11 @@ api_router.include_router(
     tags=["eco"],
 )
 api_router.include_router(
+    endpoints.esignature_api.router,
+    prefix="/esignatures",
+    tags=["esignatures"],
+)
+api_router.include_router(
     endpoints.work_order_api.router,
     prefix="/work-orders",
     tags=["work-orders"],

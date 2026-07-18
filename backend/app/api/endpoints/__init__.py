@@ -25,6 +25,7 @@ from app.api.endpoints import (
     eco_api,
     enterprise_ext_api,
     erp_connectors,
+    esignature_api,
     export_report,
     fai,
     integrations,

@@ -46,6 +46,7 @@ from app.models.enterprise_extensions import (
     ExchangeRate,
 )
 from app.models.erp_connector import ERPConnector, ERPSyncLog
+from app.models.esignature import ESignature
 from app.models.fai import FaiAttachment, FaiCharacteristic, FAIReport
 from app.models.inventory import (
     BinLocation,

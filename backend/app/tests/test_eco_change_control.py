@@ -158,7 +158,7 @@ async def test_self_approval_is_rejected(client, creator_headers, creator):
     resp = await client.post(
         f"/api/v1/eco/{eco_id}/action",
         headers=creator_headers,
-        json={"action": "approve", "comments": "self-approving"},
+        json={"action": "approve", "comments": "self-approving", "password": "testpass123"},
     )
     assert resp.status_code in (403, 422), resp.text
 
@@ -174,7 +174,7 @@ async def test_approve_from_invalid_source_state_is_rejected(
     resp = await client.post(
         f"/api/v1/eco/{eco_id}/action",
         headers=approver_headers,
-        json={"action": "approve", "comments": "approving from draft"},
+        json={"action": "approve", "comments": "approving from draft", "password": "testpass123"},
     )
     assert resp.status_code in (409, 422), resp.text
 
@@ -194,7 +194,11 @@ async def test_non_approver_engineer_cannot_approve(
     resp = await client.post(
         f"/api/v1/eco/{eco_id}/action",
         headers=non_approver_headers,
-        json={"action": "approve", "comments": "I'll just approve this myself"},
+        json={
+            "action": "approve",
+            "comments": "I'll just approve this myself",
+            "password": "testpass123",
+        },
     )
     assert resp.status_code == 403, resp.text
 
@@ -217,7 +221,7 @@ async def test_authorized_user_can_approve_submitted_eco(
     resp = await client.post(
         f"/api/v1/eco/{eco_id}/action",
         headers=approver_headers,
-        json={"action": "approve", "comments": "looks good"},
+        json={"action": "approve", "comments": "looks good", "password": "testpass123"},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "approved"

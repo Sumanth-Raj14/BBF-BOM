@@ -65,6 +65,12 @@ class EcoActionRequest(BaseModel):
     action: str
     comments: Optional[str] = None
     digital_signature: Optional[str] = None
+    # 21 CFR Part 11: required (password re-authentication) for "approve" and
+    # "implement" — perform_eco_action rejects those two actions with 401 if
+    # missing/invalid, before any state transition. Not required for the
+    # other actions (submit/reject/close).
+    password: Optional[str] = None
+    signature_meaning: Optional[str] = None
 
 
 @router.post("/")
@@ -156,6 +162,8 @@ async def eco_action(
             action=request.action,
             comments=request.comments,
             digital_signature=request.digital_signature,
+            password=request.password,
+            signature_meaning=request.signature_meaning,
         )
     except ValueError as e:
         raise HTTPException(status_code=404 if "not found" in str(e) else 400, detail=str(e))
@@ -167,6 +175,7 @@ async def approve_eco(
     approver_id: int,
     comments: Optional[str] = None,
     digital_signature: Optional[str] = None,
+    password: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
@@ -194,6 +203,7 @@ async def approve_eco(
             action="approve",
             comments=comments,
             digital_signature=digital_signature,
+            password=password,
         )
     except ValueError as e:
         raise HTTPException(status_code=404 if "not found" in str(e) else 400, detail=str(e))
@@ -210,6 +220,7 @@ async def approve_eco(
 async def implement_eco(
     eco_id: int,
     notes: Optional[str] = None,
+    password: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_engineering),
 ):
@@ -227,6 +238,7 @@ async def implement_eco(
             eco_id=eco_id,
             action="implement",
             comments=notes,
+            password=password,
         )
     except ValueError as e:
         raise HTTPException(status_code=404 if "not found" in str(e) else 400, detail=str(e))
