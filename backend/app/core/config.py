@@ -216,6 +216,17 @@ class Settings(BaseSettings):
     # client-spoofable headers cannot defeat IP lockout / rate limiting.
     BEHIND_PROXY: bool = False
 
+    # Postgres Row-Level Security: OPT-IN defense-in-depth layered ON TOP of the
+    # existing app-layer tenant isolation (app.core.tenant_events — auto-filter
+    # SELECT, guard UPDATE/DELETE, auto-populate tenantId on INSERT), which
+    # remains the primary enforcement mechanism and is unaffected by this flag.
+    # When True AND the active DB dialect is postgresql, the request/session
+    # layer issues `SET LOCAL app.current_tenant` per-transaction and alembic
+    # migration 040 enables RLS + a tenant_isolation policy on every
+    # TenantAwareMixin table. Default False: no behavior change, and a complete
+    # no-op on SQLite (the default test/dev path) regardless of this flag.
+    ENABLE_RLS: bool = False
+
     # Environment
     ENVIRONMENT: str = "development"
     IS_PRODUCTION: bool = False

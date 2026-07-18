@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.security import verify_password, verify_token_with_blacklist
 from app.core.tenant_context import set_tenant_id
+from app.db.rls import apply_rls_tenant_context
 from app.db.session import get_db
 from app.models.api_key import ApiKey
 from app.models.digital_signature import UserMfa
@@ -117,6 +118,9 @@ async def _authenticate_by_api_key(request: Request, db: AsyncSession) -> Option
             return None
 
     set_tenant_id(user.effective_tenant_id)
+    # Postgres RLS defense-in-depth (opt-in, no-op unless ENABLE_RLS + postgresql):
+    # see app.db.rls for details. App-layer isolation above is unaffected either way.
+    await apply_rls_tenant_context(db, user.effective_tenant_id)
     return user
 
 
@@ -195,6 +199,9 @@ async def get_current_user(
 
     # Set tenant context for multi-tenancy
     set_tenant_id(user.effective_tenant_id)
+    # Postgres RLS defense-in-depth (opt-in, no-op unless ENABLE_RLS + postgresql):
+    # see app.db.rls for details. App-layer isolation above is unaffected either way.
+    await apply_rls_tenant_context(db, user.effective_tenant_id)
 
     return user
 
