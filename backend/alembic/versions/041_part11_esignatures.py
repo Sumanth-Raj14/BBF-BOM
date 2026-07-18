@@ -50,7 +50,9 @@ from alembic import op
 from app.core.config import settings
 
 revision: str = "041_part11_esignatures"
-down_revision: str | None = "040_postgres_rls_tenant_isolation"
+# Relinked during merge to master: chains after 041_compliance_pack_tables
+# (which also descends from 040) to keep a single linear Alembic head.
+down_revision: str | None = "041_compliance_pack_tables"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
