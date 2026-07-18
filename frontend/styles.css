@@ -2985,6 +2985,16 @@ body.file-dragover::after {
   justify-content: space-between;
   align-items: center;
 }
+.ai-panel__mark {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--accent-olive), var(--accent-interactive));
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
 .ai-body {
   flex: 1;
   overflow-y: auto;
@@ -2998,7 +3008,7 @@ body.file-dragover::after {
 .ai-msg-ico {
   width: 22px; height: 22px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent), oklch(0.55 0.18 30));
+  background: linear-gradient(135deg, var(--accent-olive), var(--accent-interactive));
   color: white;
   display: inline-flex;
   align-items: center;
@@ -3014,7 +3024,8 @@ body.file-dragover::after {
   max-width: 280px;
 }
 .ai-msg.assistant .ai-msg-bub { background: var(--bg-sunk); color: var(--fg); border-bottom-left-radius: 4px; }
-.ai-msg.user .ai-msg-bub { background: var(--accent); color: white; border-bottom-right-radius: 4px; }
+/* accent-strong (not accent-interactive) so white text clears 4.5:1 AA */
+.ai-msg.user .ai-msg-bub { background: var(--accent-strong); color: var(--accent-fg); border-bottom-right-radius: 4px; }
 .ai-foot {
   padding: 10px;
   border-top: 1px solid var(--line);
@@ -3022,6 +3033,16 @@ body.file-dragover::after {
   gap: 8px;
   align-items: flex-end;
 }
+.ai-foot__input.ui-textarea {
+  flex: 1;
+  min-height: 38px;
+  max-height: 100px;
+  resize: none;
+  font-size: var(--fs-100, 12px);
+}
+.ai-foot__send.ui-btn { height: 38px; }
+.ai-panel:focus-visible,
+.ai-foot__input.ui-textarea:focus-visible { outline: 2px solid var(--accent-interactive); outline-offset: 2px; }
 .locked {
   opacity: 0.45;
   cursor: not-allowed !important;

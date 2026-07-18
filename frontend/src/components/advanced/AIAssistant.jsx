@@ -1,4 +1,6 @@
 import PropTypes from "prop-types";
+import { Icon } from "../../globals";
+import { Button, Textarea } from "../ui";
 
 function AIAssistant({ open, onClose }) {
   const [messages, setMessages] = React.useState([
@@ -10,10 +12,24 @@ function AIAssistant({ open, onClose }) {
   const [input, setInput] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const bodyRef = React.useRef(null);
+  const inputRef = React.useRef(null);
+  const restoreFocusRef = React.useRef(null);
+  const titleId = React.useId();
+
   React.useEffect(() => {
     if (bodyRef.current)
       bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
   }, [messages, loading]);
+
+  React.useEffect(() => {
+    if (open) {
+      restoreFocusRef.current = document.activeElement;
+      if (inputRef.current) inputRef.current.focus();
+    } else if (restoreFocusRef.current?.focus) {
+      restoreFocusRef.current.focus();
+    }
+  }, [open]);
+
   const send = async (text) => {
     if (!text.trim()) return;
     setMessages((m) => [...m, { role: "user", text }]);
@@ -43,35 +59,54 @@ function AIAssistant({ open, onClose }) {
     }
     setLoading(false);
   };
+
   if (!open) return null;
+
   return (
-    <div className="ai-panel">
+    <div
+      className="ai-panel"
+      role="dialog"
+      aria-labelledby={titleId}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onClose?.();
+        }
+      }}
+    >
       <div className="ai-head">
         <div className="flex items-center gap-10">
-          <span
-            className="w-28 h-28 br-6 inline-flex items-center justify-center"
-            style={{
-              background:
-                "linear-gradient(135deg, var(--accent), oklch(0.55 0.18 30))",
-              color: "white",
-            }}
-          >
+          <span className="ai-panel__mark" aria-hidden="true">
             <Icon.Sparkles size={14} />
           </span>
           <div>
-            <div className="fw-700 fs-13">BOM Copilot</div>
+            <div id={titleId} className="fw-700 fs-13">
+              BOM Copilot
+            </div>
             <div className="font-mono fs-10 fg-3">AI · context-aware</div>
           </div>
         </div>
-        <button className="icon-btn w-26 h-26" onClick={onClose}>
+        <Button
+          variant="ghost"
+          size="sm"
+          iconOnly
+          aria-label="Close AI assistant"
+          onClick={onClose}
+        >
           <Icon.X size={13} />
-        </button>
+        </Button>
       </div>
-      <div className="ai-body" ref={bodyRef}>
+      <div
+        className="ai-body"
+        ref={bodyRef}
+        role="log"
+        aria-live="polite"
+        aria-label="Conversation with BOM Copilot"
+      >
         {messages.map((m, i) => (
           <div key={i} className={"ai-msg " + m.role}>
             {m.role === "assistant" && (
-              <span className="ai-msg-ico">
+              <span className="ai-msg-ico" aria-hidden="true">
                 <Icon.Sparkles size={11} />
               </span>
             )}
@@ -80,17 +115,22 @@ function AIAssistant({ open, onClose }) {
         ))}
         {loading && (
           <div className="ai-msg assistant">
-            <span className="ai-msg-ico">
+            <span className="ai-msg-ico" aria-hidden="true">
               <Icon.Sparkles size={11} />
             </span>
             <div className="ai-msg-bub">
-              <span className="spinner" /> Thinking\u2026
+              <span className="spinner" aria-hidden="true" /> Thinking…
             </div>
           </div>
         )}
       </div>
       <div className="ai-foot">
-        <textarea
+        <label htmlFor={`${titleId}-input`} className="sr-only">
+          Message BOM Copilot
+        </label>
+        <Textarea
+          id={`${titleId}-input`}
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
@@ -99,18 +139,19 @@ function AIAssistant({ open, onClose }) {
               send(input);
             }
           }}
-          placeholder="Ask about parts, costs, vendors, risks\u2026"
-          className="flex-1 border-line rounded-r2 bg-canvas fg fs-12 font-sans"
-          style={{ minHeight: 38, maxHeight: 100, padding: 8, resize: "none" }}
+          placeholder="Ask about parts, costs, vendors, risks…"
+          rows={1}
+          className="ai-foot__input"
         />
-        <button
-          className="btn primary"
-          disabled={!input.trim() || loading}
+        <Button
+          variant="primary"
+          loading={loading}
+          disabled={!input.trim()}
           onClick={() => send(input)}
-          style={{ height: 38 }}
+          className="ai-foot__send"
         >
           Send
-        </button>
+        </Button>
       </div>
     </div>
   );
