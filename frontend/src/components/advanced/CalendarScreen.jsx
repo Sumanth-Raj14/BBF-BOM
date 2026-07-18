@@ -1,6 +1,31 @@
 import { storage } from "../../utils/storage.js";
 
 import { toast } from "../../utils/toast";
+import { Icon } from "../../globals";
+import {
+  Button,
+  Card,
+  Field,
+  Input,
+  ScreenHeader,
+  Select,
+} from "../ui";
+
+const TYPE_COLOR = {
+  "po-eta": "var(--accent)",
+  rfq: "var(--status-info)",
+  compliance: "var(--status-warning)",
+  milestone: "var(--status-success)",
+  approval: "var(--status-danger)",
+};
+const TYPE_LABEL = {
+  "po-eta": "PO Delivery",
+  rfq: "RFQ",
+  compliance: "Compliance",
+  milestone: "Milestone",
+  approval: "Approval",
+};
+
 function CalendarScreen() {
   const [showForm, setShowForm] = React.useState(false);
   const [events, setEvents] = React.useState(() => {
@@ -64,145 +89,130 @@ function CalendarScreen() {
     d.setDate(d.getDate() + i);
     return d;
   });
-  const typeColor = {
-    "po-eta": "var(--accent)",
-    rfq: "var(--info)",
-    compliance: "var(--warn)",
-    milestone: "var(--ok)",
-    approval: "var(--danger)",
+
+  const addEvent = () => {
+    if (!newEvent.date || !newEvent.label) {
+      toast("Date and description required", { kind: "warn" });
+      return;
+    }
+    const entry = {
+      date: newEvent.date,
+      type: newEvent.type,
+      label: newEvent.label,
+      value: newEvent.value ? Number(newEvent.value) : null,
+    };
+    const next = [...events, entry];
+    setEvents(next);
+    storage.calendarEvents.set(next);
+    setNewEvent({ date: "", type: "milestone", label: "", value: "" });
+    setShowForm(false);
   };
-  const typeLabel = {
-    "po-eta": "PO Delivery",
-    rfq: "RFQ",
-    compliance: "Compliance",
-    milestone: "Milestone",
-    approval: "Approval",
-  };
+
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>Calendar & Timeline</h1>
-          <div className="sub">
-            {events.length} upcoming events · Next 8 weeks
-          </div>
-        </div>
-        <div className="flex gap-8">
-          <button
-            className="btn primary"
+      <ScreenHeader
+        title="Calendar & Timeline"
+        description={`${events.length} upcoming events · Next 8 weeks`}
+        actions={
+          <Button
+            variant="primary"
+            size="sm"
             onClick={() => setShowForm(!showForm)}
+            aria-expanded={showForm}
           >
-            Add event
-          </button>
-        </div>
-      </div>
+            <Icon.Plus size={12} /> Add event
+          </Button>
+        }
+      />
+
       {showForm && (
-        <div className="card mb-12" style={{ padding: 16 }}>
-          <div className="fw-600 fs-13 mb-12">Add Calendar Event</div>
+        <Card
+          className="mb-14"
+          title="Add Calendar Event"
+          footer={
+            <div className="flex gap-8 justify-end">
+              <Button variant="secondary" onClick={() => setShowForm(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={addEvent}>
+                Add Event
+              </Button>
+            </div>
+          }
+        >
           <div
             className="d-grid gap-10"
             style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}
           >
-            <div className="field">
-              <label>Date *</label>
-              <input
-                className="input"
+            <Field label="Date" required htmlFor="cal-form-date">
+              <Input
+                id="cal-form-date"
                 type="date"
                 value={newEvent.date}
                 onChange={(e) =>
                   setNewEvent({ ...newEvent, date: e.target.value })
                 }
               />
-            </div>
-            <div className="field">
-              <label>Event Type</label>
-              <select
-                className="select"
+            </Field>
+            <Field label="Event Type" htmlFor="cal-form-type">
+              <Select
+                id="cal-form-type"
                 value={newEvent.type}
                 onChange={(e) =>
                   setNewEvent({ ...newEvent, type: e.target.value })
                 }
               >
-                {Object.entries(typeLabel).map(([k, v]) => (
+                {Object.entries(TYPE_LABEL).map(([k, v]) => (
                   <option key={k} value={k}>
                     {v}
                   </option>
                 ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>Description *</label>
-              <input
-                className="input"
+              </Select>
+            </Field>
+            <Field label="Description" required htmlFor="cal-form-label">
+              <Input
+                id="cal-form-label"
                 value={newEvent.label}
                 onChange={(e) =>
                   setNewEvent({ ...newEvent, label: e.target.value })
                 }
                 placeholder="Event description"
               />
-            </div>
-            <div className="field">
-              <label>Quantity</label>
-              <input
-                className="input"
+            </Field>
+            <Field label="Quantity" htmlFor="cal-form-value">
+              <Input
+                id="cal-form-value"
                 type="number"
+                mono
                 value={newEvent.value}
                 onChange={(e) =>
                   setNewEvent({ ...newEvent, value: e.target.value })
                 }
                 placeholder="Qty"
               />
-            </div>
+            </Field>
           </div>
-          <div className="flex gap-8 mt-12 justify-end">
-            <button className="btn" onClick={() => setShowForm(false)}>
-              Cancel
-            </button>
-            <button
-              className="btn primary"
-              onClick={() => {
-                if (!newEvent.date || !newEvent.label) {
-                  toast("Date and description required", { kind: "warn" });
-                  return;
-                }
-                const entry = {
-                  date: newEvent.date,
-                  type: newEvent.type,
-                  label: newEvent.label,
-                  value: newEvent.value ? Number(newEvent.value) : null,
-                };
-                const next = [...events, entry];
-                setEvents(next);
-                storage.calendarEvents.set(next);
-                setNewEvent({
-                  date: "",
-                  type: "milestone",
-                  label: "",
-                  value: "",
-                });
-                setShowForm(false);
-              }}
-            >
-              Add Event
-            </button>
-          </div>
-        </div>
+        </Card>
       )}
-      <div
-        className="flex gap-10 mb-14 font-mono fs-11 items-center"
-        style={{ flexWrap: "wrap" }}
+
+      <ul
+        className="flex gap-10 mb-14 font-mono fs-11 items-center p-0 m-0"
+        style={{ flexWrap: "wrap", listStyle: "none" }}
+        aria-label="Event type legend"
       >
-        {Object.entries(typeColor).map(([k, c]) => (
-          <span key={k} className="inline-flex items-center gap-6">
+        {Object.entries(TYPE_COLOR).map(([k, c]) => (
+          <li key={k} className="inline-flex items-center gap-6">
             <span
               className="br-2"
+              aria-hidden="true"
               style={{ width: 10, height: 10, background: c }}
-            />{" "}
-            {typeLabel[k]}
-          </span>
+            />
+            {TYPE_LABEL[k]}
+          </li>
         ))}
-      </div>
-      <div className="card overflow-h">
+      </ul>
+
+      <Card flush bodyClassName="p-0" className="overflow-h">
         <div
           className="d-grid border-bottom bg-sunk"
           style={{ gridTemplateColumns: "repeat(7, 1fr)" }}
@@ -252,9 +262,10 @@ function CalendarScreen() {
                   <div
                     key={j}
                     className="mb-2 br-2 font-mono fs-9 c-pointer overflow-h ws-nowrap"
+                    title={e.label + (e.value ? " ×" + e.value : "")}
                     style={{
                       padding: "2px 4px",
-                      background: typeColor[e.type],
+                      background: TYPE_COLOR[e.type],
                       color: "white",
                       textOverflow: "ellipsis",
                     }}
@@ -267,7 +278,7 @@ function CalendarScreen() {
             );
           })}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }
