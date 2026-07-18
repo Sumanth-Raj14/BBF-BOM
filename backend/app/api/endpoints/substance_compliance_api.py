@@ -156,9 +156,14 @@ async def delete_part_composition(
 
 @router.get("/parts/{part_id}/compliance")
 async def get_part_compliance(part_id: int, db: AsyncSession = Depends(get_db)):
-    return await svc.evaluate_part_compliance(db, part_id)
+    # persist=False: a GET computes and returns the compliance view without
+    # writing ComplianceEvaluation/ReachObligation rows. Two concurrent
+    # identical GETs (e.g. React StrictMode double-mount, or a part opened
+    # while a BOM rollup runs) must never race a write-on-read into a 500.
+    return await svc.evaluate_part_compliance(db, part_id, persist=False)
 
 
 @router.get("/bom/{bom_id}/compliance")
 async def get_bom_compliance(bom_id: int, db: AsyncSession = Depends(get_db)):
-    return await svc.evaluate_bom_compliance(db, bom_id)
+    # persist=False — see get_part_compliance above.
+    return await svc.evaluate_bom_compliance(db, bom_id, persist=False)

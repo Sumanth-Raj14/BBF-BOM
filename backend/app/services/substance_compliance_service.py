@@ -34,17 +34,28 @@ Design notes (no new migration — reuses migrations 042/043/044 verbatim):
   — it is meaningful mainly on top-level assemblies and inherited at rollup);
   when NULL, exemption category-scoping is not evaluated against it (benefit
   of the doubt) rather than incorrectly rejecting the exemption.
-* Persists a SELF ``ComplianceEvaluation`` row per (tenant, part,
-  regulation_version) on every part evaluation, and additionally a ROLLUP row
-  per (tenant, part, regulation_version, bom) whenever that part is evaluated
-  in a BOM context — both upserted against the partial-unique indexes defined
-  on migration 044. Per the ``compliance_evaluation.py`` model docstring,
-  REACH Art. 33/SCIP obligations union upward independent of the RoHS status
-  lattice, so each SVHC substance found over threshold is additionally
-  upserted into ``reach_obligations`` (part_id == article_part_id at this
-  part-evaluation granularity — carrier/leaf distinction across the tree is
-  out of scope here since the UI only needs the flat per-part + BOM-union
-  view, not a per-carrier obligation ledger).
+* When called with ``persist=True`` (the default on the service functions,
+  but NOT what the read-only GET endpoints pass — see
+  ``substance_compliance_api.py``), persists a SELF ``ComplianceEvaluation``
+  row per (tenant, part, regulation_version) on every part evaluation, and
+  additionally a ROLLUP row per (tenant, part, regulation_version, bom)
+  whenever that part is evaluated in a BOM context — both upserted against
+  the partial-unique indexes defined on migration 044. Per the
+  ``compliance_evaluation.py`` model docstring, REACH Art. 33/SCIP
+  obligations union upward independent of the RoHS status lattice, so each
+  SVHC substance found over threshold is additionally upserted into
+  ``reach_obligations`` (part_id == article_part_id at this part-evaluation
+  granularity — carrier/leaf distinction across the tree is out of scope
+  here since the UI only needs the flat per-part + BOM-union view, not a
+  per-carrier obligation ledger). The two GET endpoints (part compliance,
+  BOM compliance) always call with ``persist=False``: a GET must be
+  side-effect-free and must never write, so it can never race a concurrent
+  identical GET into an ``IntegrityError``/500 on the SELF/ROLLUP
+  partial-unique index. The upsert helpers (``_upsert_evaluation`` /
+  ``_upsert_reach_obligation``) are additionally race-safe in their own
+  right — a lost SELECT-then-INSERT race against a concurrent
+  ``persist=True`` writer is caught and reconciled via re-select rather than
+  bubbling an ``IntegrityError`` — for any future non-GET caller.
 """
 
 from __future__ import annotations
@@ -54,6 +65,7 @@ from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.tenant_context import get_tenant_id
@@ -659,23 +671,30 @@ async def _upsert_evaluation(
     applied_exemption_id: Optional[int],
     data_fidelity: Optional[str],
 ) -> None:
+    """Upsert a ComplianceEvaluation row, race-safe against a concurrent writer
+    (e.g. another explicit persisting evaluation for the same part/version/basis
+    in flight at the same time) hitting the same SELF/ROLLUP partial-unique
+    index between our SELECT and INSERT. Never used on a GET path — GETs call
+    the evaluator with persist=False and never reach this function.
+    """
     tid = get_tenant_id()
     basis = "ROLLUP" if bom_id is not None else "SELF"
-    stmt = select(ComplianceEvaluation).where(
-        ComplianceEvaluation.part_id == part_id,
-        ComplianceEvaluation.regulation_version_id == regulation_version_id,
-        ComplianceEvaluation.basis == basis,
-    )
-    if basis == "SELF":
-        stmt = stmt.where(ComplianceEvaluation.bom_id.is_(None))
-    else:
-        stmt = stmt.where(ComplianceEvaluation.bom_id == bom_id)
-    if tid is not None:
-        stmt = stmt.where(ComplianceEvaluation.tenantId == tid)
-    existing = (await db.execute(stmt)).scalar_one_or_none()
 
-    now = datetime.now(UTC)
-    if existing is not None:
+    def _select_stmt():
+        stmt = select(ComplianceEvaluation).where(
+            ComplianceEvaluation.part_id == part_id,
+            ComplianceEvaluation.regulation_version_id == regulation_version_id,
+            ComplianceEvaluation.basis == basis,
+        )
+        if basis == "SELF":
+            stmt = stmt.where(ComplianceEvaluation.bom_id.is_(None))
+        else:
+            stmt = stmt.where(ComplianceEvaluation.bom_id == bom_id)
+        if tid is not None:
+            stmt = stmt.where(ComplianceEvaluation.tenantId == tid)
+        return stmt
+
+    def _apply(existing: ComplianceEvaluation, now: datetime) -> None:
         existing.status = status
         existing.exceedance = exceedance
         existing.driving_substance_id = driving_substance_id
@@ -683,22 +702,41 @@ async def _upsert_evaluation(
         existing.data_fidelity = data_fidelity
         existing.evaluated_at = now
         existing.is_stale = False
-    else:
-        row = ComplianceEvaluation(
-            part_id=part_id,
-            regulation_version_id=regulation_version_id,
-            bom_id=bom_id,
-            status=status,
-            basis=basis,
-            exceedance=exceedance,
-            data_fidelity=data_fidelity,
-            driving_substance_id=driving_substance_id,
-            applied_exemption_id=applied_exemption_id,
-            evaluated_at=now,
-            is_stale=False,
-        )
-        db.add(row)
-    await db.flush()
+
+    now = datetime.now(UTC)
+    existing = (await db.execute(_select_stmt())).scalar_one_or_none()
+    if existing is not None:
+        _apply(existing, now)
+        await db.flush()
+        return
+
+    row = ComplianceEvaluation(
+        part_id=part_id,
+        regulation_version_id=regulation_version_id,
+        bom_id=bom_id,
+        status=status,
+        basis=basis,
+        exceedance=exceedance,
+        data_fidelity=data_fidelity,
+        driving_substance_id=driving_substance_id,
+        applied_exemption_id=applied_exemption_id,
+        evaluated_at=now,
+        is_stale=False,
+    )
+    try:
+        async with db.begin_nested():
+            db.add(row)
+            await db.flush()
+    except IntegrityError:
+        # Lost an insert race against the partial-unique index (a concurrent
+        # writer inserted the same SELF/ROLLUP row between our SELECT and
+        # INSERT). Re-select and update it instead of raising a 500 for a
+        # benign duplicate.
+        existing = (await db.execute(_select_stmt())).scalar_one_or_none()
+        if existing is None:
+            raise
+        _apply(existing, now)
+        await db.flush()
 
 
 async def _upsert_reach_obligation(
@@ -711,36 +749,52 @@ async def _upsert_reach_obligation(
     bom_id: Optional[int],
     concentration_ppm: Optional[float],
 ) -> None:
+    """Upsert a ReachObligation row, race-safe against a concurrent writer
+    hitting the same unique combination between our SELECT and INSERT (see
+    ``_upsert_evaluation`` docstring — never reached from a GET path).
+    """
     tid = get_tenant_id()
-    stmt = select(ReachObligation).where(
-        ReachObligation.part_id == part_id,
-        ReachObligation.article_part_id == article_part_id,
-        ReachObligation.substance_id == substance_id,
-        ReachObligation.regulation_version_id == regulation_version_id,
-    )
-    stmt = (
-        stmt.where(ReachObligation.bom_id == bom_id)
-        if bom_id is not None
-        else stmt.where(ReachObligation.bom_id.is_(None))
-    )
-    if tid is not None:
-        stmt = stmt.where(ReachObligation.tenantId == tid)
-    existing = (await db.execute(stmt)).scalar_one_or_none()
 
+    def _select_stmt():
+        stmt = select(ReachObligation).where(
+            ReachObligation.part_id == part_id,
+            ReachObligation.article_part_id == article_part_id,
+            ReachObligation.substance_id == substance_id,
+            ReachObligation.regulation_version_id == regulation_version_id,
+        )
+        stmt = (
+            stmt.where(ReachObligation.bom_id == bom_id)
+            if bom_id is not None
+            else stmt.where(ReachObligation.bom_id.is_(None))
+        )
+        if tid is not None:
+            stmt = stmt.where(ReachObligation.tenantId == tid)
+        return stmt
+
+    existing = (await db.execute(_select_stmt())).scalar_one_or_none()
     if existing is not None:
         existing.concentration_ppm = concentration_ppm
-    else:
-        db.add(
-            ReachObligation(
-                part_id=part_id,
-                article_part_id=article_part_id,
-                substance_id=substance_id,
-                regulation_version_id=regulation_version_id,
-                bom_id=bom_id,
-                concentration_ppm=concentration_ppm,
-            )
-        )
-    await db.flush()
+        await db.flush()
+        return
+
+    row = ReachObligation(
+        part_id=part_id,
+        article_part_id=article_part_id,
+        substance_id=substance_id,
+        regulation_version_id=regulation_version_id,
+        bom_id=bom_id,
+        concentration_ppm=concentration_ppm,
+    )
+    try:
+        async with db.begin_nested():
+            db.add(row)
+            await db.flush()
+    except IntegrityError:
+        existing = (await db.execute(_select_stmt())).scalar_one_or_none()
+        if existing is None:
+            raise
+        existing.concentration_ppm = concentration_ppm
+        await db.flush()
 
 
 # =====================================================================
@@ -759,7 +813,9 @@ async def _get_bom_or_404(db: AsyncSession, bom_id: int) -> BOM:
     return bom
 
 
-async def evaluate_bom_compliance(db: AsyncSession, bom_id: int) -> dict:
+async def evaluate_bom_compliance(
+    db: AsyncSession, bom_id: int, *, persist: bool = True
+) -> dict:
     bom = await _get_bom_or_404(db, bom_id)
     tid = get_tenant_id()
 
@@ -780,7 +836,7 @@ async def evaluate_bom_compliance(db: AsyncSession, bom_id: int) -> dict:
     parts_out: list[dict] = []
     for pid in part_ids:
         result = await evaluate_part_compliance(
-            db, pid, versions=versions, entries=entries, bom_id=bom_id, persist=True
+            db, pid, versions=versions, entries=entries, bom_id=bom_id, persist=persist
         )
         parts_out.append(result)
 

@@ -7,14 +7,21 @@ Covers (per the transformation-progress task brief):
   (c) a multi-level BOM rolls up NON_COMPLIANT if any descendant part is,
       and unions SVHC substances across the tree.
   (d) tenant-scoped — no cross-tenant leakage on parts/composition/compliance.
+  (e) the two compliance GET endpoints are read-only and idempotent: a GET
+      must never write a ComplianceEvaluation/ReachObligation row, and two
+      back-to-back identical GETs must both succeed rather than racing a
+      write-on-read into an IntegrityError/500 (see
+      substance_compliance_api.py / substance_compliance_service.py).
 """
 
+import asyncio
 from datetime import date, timedelta
 
 import pytest
 import pytest_asyncio
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.tenant_context import TenantContext
 from app.models.bom import BOM, BOMItem
@@ -413,3 +420,162 @@ async def test_bom_compliance_is_tenant_isolated(
         assert getattr(exc_info.value, "status_code", None) == 404
     finally:
         TenantContext.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# (e) GET compliance endpoints are read-only + idempotent (no write-on-read
+#     500 from a racy select-then-insert upsert against the SELF/ROLLUP
+#     partial-unique index)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_part_compliance_endpoint_does_not_persist_evaluation_rows(
+    db_session, client, auth_headers, test_tenant, reg_data, part_factory
+):
+    part = await part_factory()
+    await svc.add_part_composition(
+        db_session, part.id, {"substance_id": reg_data["lead"].id, "mass_ppm": 5000}
+    )
+
+    before = (await db_session.execute(select(ComplianceEvaluation))).scalars().all()
+    assert before == []
+
+    resp = await client.get(
+        f"/api/v1/substance-compliance/parts/{part.id}/compliance", headers=auth_headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["rohs_status"] == "non_compliant"
+
+    after = (await db_session.execute(select(ComplianceEvaluation))).scalars().all()
+    assert after == [], "a GET must be side-effect-free: it must not write ComplianceEvaluation rows"
+
+
+@pytest.mark.asyncio
+async def test_get_bom_compliance_endpoint_does_not_persist_evaluation_or_obligation_rows(
+    db_session, client, auth_headers, test_tenant, reg_data, part_factory
+):
+    part = await part_factory()
+    await svc.add_part_composition(
+        db_session, part.id, {"substance_id": reg_data["lead"].id, "mass_ppm": 5000}
+    )
+    await svc.add_part_composition(
+        db_session, part.id, {"substance_id": reg_data["dehp"].id, "mass_ppm": 2000}
+    )
+
+    bom = BOM(bom_number="BOM-GET-RO", name="GET read-only test BOM")
+    db_session.add(bom)
+    await db_session.commit()
+    await db_session.refresh(bom)
+    item = BOMItem(bom_id=bom.id, part_id=part.id, quantity=1)
+    db_session.add(item)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/v1/substance-compliance/bom/{bom.id}/compliance", headers=auth_headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["rohs_status"] == "non_compliant"
+
+    evals = (await db_session.execute(select(ComplianceEvaluation))).scalars().all()
+    obligations = (await db_session.execute(select(ReachObligation))).scalars().all()
+    assert evals == [], "a GET must not write ComplianceEvaluation rows"
+    assert obligations == [], "a GET must not write ReachObligation rows"
+
+
+@pytest.mark.asyncio
+async def test_two_back_to_back_identical_get_part_compliance_calls_both_succeed(
+    db_session, client, auth_headers, test_tenant, reg_data, part_factory
+):
+    """Regression for the write-on-read race: two identical GETs (e.g. React
+    StrictMode double-mount) used to both hit the racy select-then-insert
+    upsert and could 500 on the uq_eval_self partial-unique index. Now that
+    GET calls persist=False, neither write happens at all, so both must
+    simply succeed with identical results.
+    """
+    part = await part_factory()
+    await svc.add_part_composition(
+        db_session, part.id, {"substance_id": reg_data["lead"].id, "mass_ppm": 5000}
+    )
+
+    resp1 = await client.get(
+        f"/api/v1/substance-compliance/parts/{part.id}/compliance", headers=auth_headers
+    )
+    resp2 = await client.get(
+        f"/api/v1/substance-compliance/parts/{part.id}/compliance", headers=auth_headers
+    )
+
+    assert resp1.status_code == 200
+    assert resp2.status_code == 200
+    assert resp1.json() == resp2.json()
+
+    rows = (await db_session.execute(select(ComplianceEvaluation))).scalars().all()
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_two_back_to_back_identical_get_bom_compliance_calls_both_succeed(
+    db_session, client, auth_headers, test_tenant, reg_data, part_factory
+):
+    part = await part_factory()
+    await svc.add_part_composition(
+        db_session, part.id, {"substance_id": reg_data["lead"].id, "mass_ppm": 5000}
+    )
+    bom = BOM(bom_number="BOM-GET-IDEMPOTENT", name="GET idempotency test BOM")
+    db_session.add(bom)
+    await db_session.commit()
+    await db_session.refresh(bom)
+    item = BOMItem(bom_id=bom.id, part_id=part.id, quantity=1)
+    db_session.add(item)
+    await db_session.commit()
+
+    resp1 = await client.get(
+        f"/api/v1/substance-compliance/bom/{bom.id}/compliance", headers=auth_headers
+    )
+    resp2 = await client.get(
+        f"/api/v1/substance-compliance/bom/{bom.id}/compliance", headers=auth_headers
+    )
+
+    assert resp1.status_code == 200
+    assert resp2.status_code == 200
+    assert resp1.json() == resp2.json()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_persisted_evaluations_do_not_race_into_an_integrity_error(
+    test_engine, test_tenant, reg_data, part_factory, db_session
+):
+    """The upsert helpers must be race-safe in their own right (defense in
+    depth for any future explicit non-GET persist=True caller): two
+    concurrent evaluate_part_compliance(..., persist=True) calls for the SAME
+    part/regulation-version can both SELECT-miss the SELF row and then both
+    attempt to INSERT it, tripping the uq_eval_self partial-unique index. The
+    upsert must catch that IntegrityError and reconcile via re-select rather
+    than letting it propagate.
+    """
+    part = await part_factory()
+    await svc.add_part_composition(
+        db_session, part.id, {"substance_id": reg_data["lead"].id, "mass_ppm": 5000}
+    )
+
+    session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def _run():
+        async with session_factory() as session:
+            return await svc.evaluate_part_compliance(session, part.id, persist=True)
+
+    results = await asyncio.gather(_run(), _run(), return_exceptions=True)
+    for r in results:
+        if isinstance(r, BaseException):
+            raise r
+        assert r["rohs_status"] == "non_compliant"
+
+    rows = (
+        await db_session.execute(
+            select(ComplianceEvaluation).where(
+                ComplianceEvaluation.part_id == part.id,
+                ComplianceEvaluation.basis == "SELF",
+            )
+        )
+    ).scalars().all()
+    assert len(rows) == 1, "concurrent identical evaluations must reconcile to one SELF row, not 500"
