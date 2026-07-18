@@ -2,7 +2,8 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { INR, Modal, api } from "../../globals";
+import { INR, Icon, api } from "../../globals";
+import { Modal, Button, StatusPill, Card, DataTable } from "../ui";
 // ============ PO DETAIL ============
 export default function PODetailModal({ open, onClose, item }) {
   const [advancing, setAdvancing] = React.useState(false);
@@ -20,6 +21,8 @@ export default function PODetailModal({ open, onClose, item }) {
     "Closed",
   ];
   const currentStatusIdx = allStatuses.indexOf(item.status || "Ordered");
+  const currentStatus =
+    currentStatusIdx >= 0 ? allStatuses[currentStatusIdx] : item.status || "Ordered";
   const lineCost = (item.qty || 0) * (item.cost || 12);
   const tax = lineCost * 0.08;
   const ship = 12.5;
@@ -54,46 +57,71 @@ export default function PODetailModal({ open, onClose, item }) {
     item.poNumber ||
     `PO-2026-${String(item.pn ? item.pn.charCodeAt(item.pn.length - 1) * 7 : 481).padStart(4, "0")}`;
 
+  const lineColumns = [
+    {
+      key: "pn",
+      header: __t("part.partNumber") || "Part No.",
+      render: (r) => <span className="font-mono">{r.pn}</span>,
+    },
+    { key: "name", header: __t("part.name") || "Name" },
+    { key: "qty", header: __t("part.quantity") || "Qty", align: "num" },
+    {
+      key: "cost",
+      header: __t("part.unitCost") || "Unit",
+      align: "num",
+      render: (r) => INR(r.cost, 2),
+    },
+    {
+      key: "ext",
+      header: __t("part.extCost") || "Ext.",
+      align: "num",
+      render: (r) => <span className="fw-600">{INR(r.ext, 2)}</span>,
+    },
+  ];
+  const lineRows = [
+    {
+      pn: item.pn,
+      name: item.name,
+      qty: item.qty,
+      cost: item.cost || 12,
+      ext: lineCost,
+    },
+  ];
+
   return (
     <Modal
       open={open}
       onClose={onClose}
       icon={<Icon.Cart size={16} />}
-      title={`${poNumber} \u00B7 ${item.pn}`}
-      subtitle={`${item.vendor || "Mean Well"} \u00B7 ${item.qty} units \u00B7 ETA ${item.eta || "\u2014"}`}
-      wide
+      title={`${poNumber} · ${item.pn}`}
+      subtitle={`${item.vendor || "Mean Well"} · ${item.qty} units · ETA ${item.eta || "—"}`}
+      size="lg"
+      closeLabel={__t("modals.poDetail.closeDialog") || "Close PO detail dialog"}
       footer={
         <>
-          <span className="left">
+          <span
+            className="font-mono fs-11 fg-3"
+            style={{ marginRight: "auto" }}
+          >
             {__t("modals.poDetail.total") || "Total"}:{" "}
             <strong>{INR(total, 2)}</strong>
           </span>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.close") || "Close"}
-          </button>
-          <button
-            className="btn"
+          </Button>
+          <Button
+            variant="secondary"
             onClick={() => window.printPO(item, { country: "TW" })}
           >
             <Icon.Doc size={12} />{" "}
             {__t("modals.poDetail.printPdf") || "Print PDF"}
-          </button>
+          </Button>
           {currentStatusIdx >= 0 &&
             currentStatusIdx < allStatuses.length - 1 &&
-            allStatuses[currentStatusIdx] !== "Rejected" && (
-              <button
-                className="btn primary"
-                disabled={advancing}
-                onClick={advance}
-              >
+            currentStatus !== "Rejected" && (
+              <Button variant="primary" loading={advancing} onClick={advance}>
                 {advancing ? (
-                  <>
-                    <span
-                      className="spinner"
-                      style={{ width: 10, height: 10 }}
-                    />{" "}
-                    {__t("modals.poDetail.advancing") || "Advancing\u2026"}
-                  </>
+                  __t("modals.poDetail.advancing") || "Advancing…"
                 ) : (
                   <>
                     <Icon.Check size={12} />{" "}
@@ -101,164 +129,133 @@ export default function PODetailModal({ open, onClose, item }) {
                     {allStatuses[currentStatusIdx + 1]}
                   </>
                 )}
-              </button>
+              </Button>
             )}
         </>
       }
     >
       {/* Status timeline */}
       <div style={{ marginBottom: 18 }}>
-        <div className="font-mono fs-10 uppercase letter-sp-6 fg-3 mb-10">
-          {__t("modals.poDetail.status") || "Status"}
+        <div className="flex items-center justify-between mb-8">
+          <span className="font-mono fs-10 uppercase letter-sp-6 fg-3">
+            {__t("modals.poDetail.status") || "Status"}
+          </span>
+          <StatusPill status={currentStatus} />
         </div>
-        <div className="flex items-center ox-auto" style={{ gap: 0 }}>
-          {allStatuses.map((s, i) => (
-            <React.Fragment key={s}>
-              <div
-                className="flex-1 text-center pos-relative"
-                style={{ minWidth: 60 }}
-              >
-                <span
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: 99,
-                    background:
-                      i === currentStatusIdx
+        <ol
+          className="flex items-center ox-auto"
+          style={{ gap: 0, listStyle: "none", margin: 0, padding: 0 }}
+          aria-label={__t("modals.poDetail.status") || "Status"}
+        >
+          {allStatuses.map((s, i) => {
+            const isCurrent = i === currentStatusIdx;
+            const isDone = i < currentStatusIdx && currentStatus !== "Rejected";
+            return (
+              <React.Fragment key={s}>
+                <li
+                  className="flex-1 text-center pos-relative"
+                  style={{ minWidth: 60 }}
+                  aria-current={isCurrent ? "step" : undefined}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 99,
+                      background: isCurrent
                         ? "var(--accent-strong)"
-                        : i < currentStatusIdx &&
-                            allStatuses[currentStatusIdx] !== "Rejected"
+                        : isDone
                           ? "var(--ok)"
                           : "var(--bg-sunk)",
-                    border:
-                      i === currentStatusIdx
-                        ? "none"
-                        : i < currentStatusIdx &&
-                            allStatuses[currentStatusIdx] !== "Rejected"
-                          ? "none"
-                          : "1px solid var(--line)",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "white",
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 9,
-                    fontWeight: 700,
-                    position: "relative",
-                    zIndex: 1,
-                  }}
-                >
-                  {i < currentStatusIdx &&
-                  allStatuses[currentStatusIdx] !== "Rejected" ? (
-                    <Icon.Check size={9} />
-                  ) : (
-                    i + 1
-                  )}
-                </span>
-                <div
-                  className="font-mono letter-sp-4 ws-nowrap"
-                  style={{
-                    fontSize: 8,
-                    marginTop: 3,
-                    color:
-                      i === currentStatusIdx ? "var(--accent-text)" : "var(--fg-3)",
-                    fontWeight: i === currentStatusIdx ? 700 : 400,
-                  }}
-                >
-                  {s.toUpperCase()}
-                </div>
-              </div>
-              {i < allStatuses.length - 1 && (
-                <div
-                  className="h-1"
-                  style={{
-                    flex: 0.3,
-                    background:
-                      i < currentStatusIdx &&
-                      allStatuses[currentStatusIdx] !== "Rejected"
-                        ? "var(--accent)"
-                        : "var(--line)",
-                    marginBottom: 18,
-                  }}
-                />
-              )}
-            </React.Fragment>
-          ))}
-        </div>
+                      border:
+                        isCurrent || isDone ? "none" : "1px solid var(--line)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "white",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 9,
+                      fontWeight: 700,
+                      position: "relative",
+                      zIndex: 1,
+                    }}
+                  >
+                    {isDone ? <Icon.Check size={9} /> : i + 1}
+                  </span>
+                  <div
+                    className="font-mono letter-sp-4 ws-nowrap"
+                    style={{
+                      fontSize: 8,
+                      marginTop: 3,
+                      color: isCurrent ? "var(--accent-text)" : "var(--fg-3)",
+                      fontWeight: isCurrent ? 700 : 400,
+                    }}
+                  >
+                    {s.toUpperCase()}
+                  </div>
+                </li>
+                {i < allStatuses.length - 1 && (
+                  <div
+                    aria-hidden="true"
+                    className="h-1"
+                    style={{
+                      flex: 0.3,
+                      background: isDone ? "var(--accent)" : "var(--line)",
+                      marginBottom: 18,
+                    }}
+                  />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </ol>
       </div>
 
       {/* Two-column metadata */}
       <div
-        className="d-grid gap-24 mb-20"
+        className="d-grid gap-16 mb-20"
         style={{ gridTemplateColumns: "1fr 1fr" }}
       >
-        <div>
-          <div className="font-mono fs-10 uppercase letter-sp-6 fg-3 mb-8">
-            {__t("vendor.title") || "Vendor"}
+        <Card title={__t("vendor.title") || "Vendor"}>
+          <div className="fw-600 fs-13 mb-4">{item.vendor || "Mean Well"}</div>
+          <div className="font-mono fs-11 fg-3 mb-4">
+            orders@meanwell.tw · +886-2-2917-6666
           </div>
-          <div
-            className="border-line rounded-r2 bg-canvas"
-            style={{ padding: 12 }}
-          >
-            <div className="fw-600 fs-13 mb-4">
-              {item.vendor || "Mean Well"}
-            </div>
-            <div className="font-mono fs-11 fg-3 mb-2">
-              orders@meanwell.tw · +886-2-2917-6666
-            </div>
-            <div className="font-mono fs-11 fg-3">Net 30 · TW · ★ 4.6</div>
+          <div className="font-mono fs-11 fg-3">Net 30 · TW · ★ 4.6</div>
+        </Card>
+        <Card title={__t("modals.poDetail.shipping") || "Shipping"}>
+          <div className="fw-600 fs-13 mb-4">
+            Blackbox Factories · Receiving
           </div>
-        </div>
-        <div>
-          <div className="font-mono fs-10 uppercase letter-sp-6 fg-3 mb-8">
-            {__t("modals.poDetail.shipping") || "Shipping"}
+          <div className="font-mono fs-11 fg-3 mb-4">
+            2451 Engineering Way
           </div>
-          <div
-            className="border-line rounded-r2 bg-canvas"
-            style={{ padding: 12 }}
-          >
-            <div className="fw-600 fs-13 mb-4">
-              Blackbox Factories · Receiving
-            </div>
-            <div className="font-mono fs-11 fg-3 mb-2">
-              2451 Engineering Way
-            </div>
-            <div className="font-mono fs-11 fg-3">
-              Mountain View, CA 94043 · USA
-            </div>
+          <div className="font-mono fs-11 fg-3">
+            Mountain View, CA 94043 · USA
           </div>
-        </div>
+        </Card>
       </div>
 
       {/* Line items */}
-      <div className="font-mono fs-10 uppercase letter-sp-6 fg-3 mb-8">
+      <h3
+        className="font-mono fs-10 uppercase letter-sp-6 fg-3 mb-8"
+        style={{ margin: "0 0 8px", fontWeight: 400 }}
+      >
         {__t("modals.poDetail.lineItems") || "Line items"}
-      </div>
-      <div className="border-line rounded-r2 overflow-h mb-14">
-        <table className="bom-table table-auto">
-          <thead>
-            <tr>
-              <th className="pl-12">{__t("part.partNumber") || "Part No."}</th>
-              <th>{__t("part.name") || "Name"}</th>
-              <th className="num">{__t("part.quantity") || "Qty"}</th>
-              <th className="num">{__t("part.unitCost") || "Unit"}</th>
-              <th className="num">{__t("part.extCost") || "Ext."}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td className="mono pl-12">{item.pn}</td>
-              <td className="fw-500">{item.name}</td>
-              <td className="num mono">{item.qty}</td>
-              <td className="num mono">{INR(item.cost || 12, 2)}</td>
-              <td className="num mono fw-600">{INR(lineCost, 2)}</td>
-            </tr>
-          </tbody>
-        </table>
+      </h3>
+      <div style={{ marginBottom: 14 }}>
+        <DataTable
+          ariaLabel={__t("modals.poDetail.lineItems") || "Line items"}
+          columns={lineColumns}
+          rows={lineRows}
+          getRowKey={(r) => r.pn}
+          dense
+        />
       </div>
 
       {/* Totals */}
-      <div className="flex justify-end mb-14">
+      <div className="flex justify-end" style={{ marginBottom: 14 }}>
         <div className="font-mono fs-12" style={{ width: 260 }}>
           <div className="flex justify-between" style={{ padding: "4px 0" }}>
             <span className="fg-3">
@@ -289,40 +286,46 @@ export default function PODetailModal({ open, onClose, item }) {
       </div>
 
       {/* Activity */}
-      <div className="font-mono fs-10 uppercase letter-sp-6 fg-3 mb-8">
+      <h3
+        className="font-mono fs-10 uppercase letter-sp-6 fg-3 mb-8"
+        style={{ margin: "0 0 8px", fontWeight: 400 }}
+      >
         {__t("modals.poDetail.activity") || "Activity"}
-      </div>
-      <div className="fs-11 font-mono fg-2">
-        <div
+      </h3>
+      <ul
+        className="fs-11 font-mono fg-2"
+        style={{ listStyle: "none", margin: 0, padding: 0 }}
+      >
+        <li
           style={{
             padding: "4px 0",
             borderBottom: "1px solid var(--line-soft)",
           }}
         >
           2026-05-22 · E. Chen · Draft created
-        </div>
-        <div
+        </li>
+        <li
           style={{
             padding: "4px 0",
             borderBottom: "1px solid var(--line-soft)",
           }}
         >
           2026-05-23 · K. Singh · Approved · ₹1,74,300 · Net 30
-        </div>
-        <div
+        </li>
+        <li
           style={{
             padding: "4px 0",
             borderBottom: "1px solid var(--line-soft)",
           }}
         >
           2026-05-23 · System · PO sent to {item.vendor || "Mean Well"}
-        </div>
+        </li>
         {currentStatusIdx >= 2 && (
-          <div style={{ padding: "4px 0" }}>
+          <li style={{ padding: "4px 0" }}>
             2026-05-24 · System · Order confirmed · ETA {item.eta}
-          </div>
+          </li>
         )}
-      </div>
+      </ul>
     </Modal>
   );
 }
