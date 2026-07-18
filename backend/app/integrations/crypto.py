@@ -23,3 +23,29 @@ def decrypt_secret(token: str) -> str:
     if not token:
         return token
     return _fernet().decrypt(token.encode()).decode()
+
+
+def _integration_fernet() -> Fernet:
+    # Prefer a DEDICATED key for integration credential blobs (e.g. the Zoho
+    # OAuth refresh-token blob) so rotating SECRET_KEY (JWT signing) never
+    # orphans stored refresh tokens -> mass silent disconnect. When
+    # INTEGRATION_ENCRYPTION_KEY is unset this falls back to exactly the
+    # SECRET_KEY-derived key used by _fernet(), so any blob written under the
+    # old scheme keeps decrypting and existing deployments are unaffected.
+    key_material = settings.INTEGRATION_ENCRYPTION_KEY or settings.SECRET_KEY
+    digest = hashlib.sha256(key_material.encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def encrypt_integration_secret(plaintext: str) -> str | None:
+    """Encrypt an integration credential blob under INTEGRATION_ENCRYPTION_KEY
+    (falling back to the SECRET_KEY-derived key when unset)."""
+    if plaintext is None:
+        return None
+    return _integration_fernet().encrypt(plaintext.encode()).decode()
+
+
+def decrypt_integration_secret(token: str) -> str:
+    if not token:
+        return token
+    return _integration_fernet().decrypt(token.encode()).decode()

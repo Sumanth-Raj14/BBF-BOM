@@ -22,7 +22,7 @@ from app.models.user import User
 
 router = APIRouter()
 
-_PROVIDERS = {"clickup", "cliq"}
+_PROVIDERS = {"clickup", "cliq", "zoho_books"}
 
 
 class ConnectionUpsert(BaseModel):

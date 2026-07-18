@@ -8,6 +8,7 @@ from sqlalchemy import or_, select
 from app.integrations.cliq_client import CliqClient
 from app.integrations.clickup_client import ClickUpClient
 from app.integrations.crypto import decrypt_secret
+from app.integrations.zoho_client import ZohoBooksClient
 from app.models.integration import (
     IntegrationConnection, IntegrationExternalLink, IntegrationOutbox,
 )
@@ -67,6 +68,11 @@ async def _connection(db, tenant_id, provider):
 def _build_client(conn, provider):
     if provider == "clickup":
         return ClickUpClient(decrypt_secret(conn.auth) if conn.auth else "")
+    if provider == "zoho_books":
+        # Decrypts the OAuth blob + reads region/api_domain/org from config.
+        # Used by the /integrations test-connection dispatch; the outbound
+        # deliver path for zoho_books lands in the next increment.
+        return ZohoBooksClient.from_connection(conn)
     return CliqClient(decrypt_secret(conn.auth) if conn.auth else "")
 
 

@@ -203,6 +203,15 @@ class Settings(BaseSettings):
     # Encryption
     ENCRYPTION_KEY: str = ""
 
+    # Dedicated key for INTEGRATION credential blobs (e.g. the Zoho Books OAuth
+    # refresh-token blob stored in IntegrationConnection.auth). When set, that
+    # blob is encrypted under this key instead of the SECRET_KEY-derived key, so
+    # rotating SECRET_KEY (a routine JWT/signing action) does NOT make every
+    # tenant's permanent refresh token undecryptable (mass silent disconnect).
+    # Left unset it FALLS BACK to the SECRET_KEY-derived key, so existing
+    # deployments and ciphertext keep working unchanged (spec §2 / §10-J).
+    INTEGRATION_ENCRYPTION_KEY: str = ""
+
     # JWT
     RSA_KEY_DIR: str = "./rsa_keys"
     RSA_PRIVATE_KEY_PATH: str = ""
