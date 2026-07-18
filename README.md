@@ -34,15 +34,29 @@ npm run dev                 # Vite dev server on port 3001
 npm run build               # Production build to dist/
 ```
 
-### Docker (Local, one-command — recommended for a new machine)
+### Docker (Local, one-click — recommended for a new machine)
 
 Local-first: the whole stack (Postgres, Redis, backend, frontend) runs on
 this machine, migrated and seeded automatically. No cloud dependency.
 
+**Windows, one click:** double-click `install.bat` (or run `.\install.ps1`
+in PowerShell). It checks for Docker Desktop, creates `.env` with generated
+secrets on first run, builds and starts everything, waits for it to become
+healthy, and opens your browser. Re-running it later (e.g. after
+`git pull`) safely rebuilds and restarts without touching your data. Stop
+with `.\stop.ps1` / `stop.bat`; fully remove with `.\uninstall.ps1`. See
+**[INSTALL.md](INSTALL.md)** for the full non-expert walkthrough, including
+moving the app + its data to a new PC.
+
+**Any OS, manual:**
 ```bash
 cp .env.example .env    # fill in the secrets — see comments in the file
 docker compose up --build
 ```
+
+**Or with `make`** (optional shortcuts around the same Compose commands —
+see `Makefile`): `make up`, `make down`, `make logs`, `make backup`,
+`make restore DIR=backups/<timestamp>`.
 
 Then open **http://localhost** — nginx (the `frontend` container) serves the
 built React SPA and reverse-proxies `/api/` and `/ws/` to the backend
@@ -144,6 +158,7 @@ Client (React + Vite) → FastAPI → PostgreSQL + Redis
 
 | File | Description |
 |------|-------------|
+| `INSTALL.md` | One-click Windows install, backup/restore, moving to a new PC, troubleshooting |
 | `ENTERPRISE_AUDIT_REPORT.md` | Full-spectrum enterprise audit with scores |
 | `DISASTER_RECOVERY_RUNBOOK.md` | DR procedures and runbook |
 | `BOM and PRD/RELEASE_NOTES.md` | Frontend release notes |
