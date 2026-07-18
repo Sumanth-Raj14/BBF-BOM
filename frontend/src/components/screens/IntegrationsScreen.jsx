@@ -18,10 +18,29 @@ const PROVIDERS = [
   { id: "cliq", name: "Zoho Cliq", credLabel: "Incoming webhook URL", cfgLabel: "Default channel", cfgKey: "default_channel" },
 ];
 
+// Maps the honest /test-connection result to a StatusPill tone + label.
+// Never claims "Connected" unless the backend actually verified credentials;
+// a missing credential reports "Not configured", any other failure reports
+// "Failed" alongside the backend's safe (pre-sanitized) detail text.
+function checkTone(check) {
+  if (!check) return "neutral";
+  if (check.ok) return "success";
+  if (check.reason === "not_configured") return "neutral";
+  return "danger";
+}
+function checkLabel(check) {
+  if (!check) return "Not configured";
+  if (check.ok) return "Connected";
+  if (check.reason === "not_configured") return "Not configured";
+  return "Failed";
+}
+
 export default function IntegrationsScreen() {
   const [conns, setConns] = React.useState({});
   const [deliveries, setDeliveries] = React.useState([]);
   const [draft, setDraft] = React.useState({});
+  const [checks, setChecks] = React.useState({});
+  const [checking, setChecking] = React.useState({});
 
   const load = React.useCallback(async () => {
     try {
@@ -62,6 +81,26 @@ export default function IntegrationsScreen() {
       load();
     } catch (e) {
       toast("Test failed: " + (e.message || ""), { kind: "error" });
+    }
+  };
+
+  // Live credential check — separate from `test()` above (which sends a real
+  // delivery through the outbox for observability). This makes one lightweight
+  // authenticated call and reports an honest ok/fail result immediately,
+  // without enqueuing anything or requiring the connection to be enabled.
+  const testConnection = async (p) => {
+    setChecking((s) => ({ ...s, [p.id]: true }));
+    try {
+      const r = await apiRequest(`/integrations/${p.id}/test-connection`, {
+        method: "POST",
+      });
+      setChecks((s) => ({ ...s, [p.id]: r }));
+      toast(`${p.name}: ${r.detail}`, { kind: r.ok ? "success" : "error" });
+      load();
+    } catch (e) {
+      toast("Test connection failed: " + (e.message || ""), { kind: "error" });
+    } finally {
+      setChecking((s) => ({ ...s, [p.id]: false }));
     }
   };
 
@@ -163,6 +202,14 @@ export default function IntegrationsScreen() {
                   <Button
                     variant="secondary"
                     size="md"
+                    onClick={() => testConnection(p)}
+                    disabled={!c.has_credentials || checking[p.id]}
+                  >
+                    {checking[p.id] ? "Checking…" : "Test connection"}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="md"
                     onClick={() => test(p)}
                     disabled={!c.is_enabled}
                   >
@@ -170,6 +217,34 @@ export default function IntegrationsScreen() {
                   </Button>
                 </div>
               </div>
+              {checks[p.id] && (
+                <div
+                  className="flex gap-8"
+                  style={{
+                    marginTop: "var(--sp-2, 8px)",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <StatusPill
+                    tone={checkTone(checks[p.id])}
+                    label={checkLabel(checks[p.id])}
+                  />
+                  <span
+                    style={{
+                      fontSize: "var(--fs-sm, 13px)",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    {checks[p.id].detail}
+                    {checks[p.id].checked_at
+                      ? ` (checked ${new Date(
+                          checks[p.id].checked_at,
+                        ).toLocaleTimeString()})`
+                      : ""}
+                  </span>
+                </div>
+              )}
             </Card>
           );
         })}
