@@ -10,8 +10,19 @@ import {
   EmptyState,
   DataTable,
   Tabs,
+  TabPanel,
 } from "../components/ui/index.js";
 // Component Library — full catalog with facets, search, grid/list, dups.
+// Keyboard operability for the active-filter removal chips (role="button"
+// spans): mirror the click handler on Enter/Space, same as a native button.
+function chipKeyDown(handler) {
+  return (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handler();
+    }
+  };
+}
 // Flatten BOM tree into unique parts list with where-used count
 function buildCatalog(data) {
   const map = new Map();
@@ -278,6 +289,7 @@ function detectDuplicates(parts) {
     });
   return groups;
 }
+const PARTS_VIEW_TABS_ID = "parts-view-tabs";
 function PartsScreen({ openModal, onOpenDetail }) {
   PartsScreen.propTypes = {
     openModal: PropTypes.func,
@@ -507,6 +519,7 @@ function PartsScreen({ openModal, onOpenDetail }) {
           )}
         </div>
         <Tabs
+          id={PARTS_VIEW_TABS_ID}
           ariaLabel={__t("parts.viewMode") || "View mode"}
           value={view}
           onChange={setView}
@@ -872,7 +885,16 @@ function PartsScreen({ openModal, onOpenDetail }) {
           {totalFilters > 0 && (
             <div className="active-filters">
               {search && (
-                <span className="chip active" onClick={() => setSearch("")}>
+                <span
+                  className="chip active"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={
+                    (__t("parts.removeFilter") || "Remove filter") + ": " + search
+                  }
+                  onClick={() => setSearch("")}
+                  onKeyDown={chipKeyDown(() => setSearch(""))}
+                >
                   “{search}” <Icon.X size={9} />
                 </span>
               )}
@@ -880,7 +902,15 @@ function PartsScreen({ openModal, onOpenDetail }) {
                 <span
                   key={c}
                   className="chip active"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={
+                    (__t("parts.removeFilter") || "Remove filter") + ": " + c
+                  }
                   onClick={() => toggleSet(selectedCats, c, setSelectedCats)}
+                  onKeyDown={chipKeyDown(() =>
+                    toggleSet(selectedCats, c, setSelectedCats),
+                  )}
                 >
                   {c} <Icon.X size={9} />
                 </span>
@@ -889,9 +919,17 @@ function PartsScreen({ openModal, onOpenDetail }) {
                 <span
                   key={s}
                   className="chip active"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={
+                    (__t("parts.removeFilter") || "Remove filter") + ": " + s
+                  }
                   onClick={() =>
                     toggleSet(selectedStatus, s, setSelectedStatus)
                   }
+                  onKeyDown={chipKeyDown(() =>
+                    toggleSet(selectedStatus, s, setSelectedStatus),
+                  )}
                 >
                   {s} <Icon.X size={9} />
                 </span>
@@ -900,9 +938,17 @@ function PartsScreen({ openModal, onOpenDetail }) {
                 <span
                   key={o}
                   className="chip active"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={
+                    (__t("parts.removeFilter") || "Remove filter") + ": " + o
+                  }
                   onClick={() =>
                     toggleSet(selectedOrigins, o, setSelectedOrigins)
                   }
+                  onKeyDown={chipKeyDown(() =>
+                    toggleSet(selectedOrigins, o, setSelectedOrigins),
+                  )}
                 >
                   {o} <Icon.X size={9} />
                 </span>
@@ -911,9 +957,17 @@ function PartsScreen({ openModal, onOpenDetail }) {
                 <span
                   key={v}
                   className="chip active"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={
+                    (__t("parts.removeFilter") || "Remove filter") + ": " + v
+                  }
                   onClick={() =>
                     toggleSet(selectedVendors, v, setSelectedVendors)
                   }
+                  onKeyDown={chipKeyDown(() =>
+                    toggleSet(selectedVendors, v, setSelectedVendors),
+                  )}
                 >
                   {v} <Icon.X size={9} />
                 </span>
@@ -921,7 +975,15 @@ function PartsScreen({ openModal, onOpenDetail }) {
               {showOnlyUnused && (
                 <span
                   className="chip active"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={
+                    (__t("parts.removeFilter") || "Remove filter") +
+                    ": " +
+                    (__t("parts.unusedParts") || "Unused parts")
+                  }
                   onClick={() => setShowOnlyUnused(false)}
+                  onKeyDown={chipKeyDown(() => setShowOnlyUnused(false))}
                 >
                   {__t("parts.unusedParts") || "Unused parts"}{" "}
                   <Icon.X size={9} />
@@ -946,25 +1008,38 @@ function PartsScreen({ openModal, onOpenDetail }) {
                 </Button>
               }
             />
-          ) : view === "grid" ? (
-            <PartsGrid
-              parts={filtered}
-              selectedIds={selectedIds}
-              setSelectedIds={setSelectedIds}
-              onOpenDetail={onOpenDetail}
-              dupGroups={dupGroups}
-              addPartToBom={addPartToBom}
-            />
           ) : (
-            <PartsList
-              parts={filtered}
-              selectedIds={selectedIds}
-              setSelectedIds={setSelectedIds}
-              onOpenDetail={onOpenDetail}
-              toggleSelectAll={toggleSelectAll}
-              dupGroups={dupGroups}
-              addPartToBom={addPartToBom}
-            />
+            <>
+              <TabPanel
+                id={PARTS_VIEW_TABS_ID}
+                value="grid"
+                active={view === "grid"}
+              >
+                <PartsGrid
+                  parts={filtered}
+                  selectedIds={selectedIds}
+                  setSelectedIds={setSelectedIds}
+                  onOpenDetail={onOpenDetail}
+                  dupGroups={dupGroups}
+                  addPartToBom={addPartToBom}
+                />
+              </TabPanel>
+              <TabPanel
+                id={PARTS_VIEW_TABS_ID}
+                value="list"
+                active={view === "list"}
+              >
+                <PartsList
+                  parts={filtered}
+                  selectedIds={selectedIds}
+                  setSelectedIds={setSelectedIds}
+                  onOpenDetail={onOpenDetail}
+                  toggleSelectAll={toggleSelectAll}
+                  dupGroups={dupGroups}
+                  addPartToBom={addPartToBom}
+                />
+              </TabPanel>
+            </>
           )}
         </main>
       </div>

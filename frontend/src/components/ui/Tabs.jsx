@@ -6,9 +6,16 @@ import { useId, useRef } from "react";
  * aria-selected + aria-controls wiring. Controlled via `value`/`onChange`.
  *
  * items: [{ value, label, count? }]
+ *
+ * Pass `id` to get a stable, caller-known base id so a matching `<TabPanel
+ * id={id} .../>` rendered elsewhere in the tree can wire its own
+ * aria-labelledby / id back to these tabs (aria-controls). When `id` is
+ * omitted, Tabs generates one internally — behavior for existing callers
+ * that render tabs without a separate TabPanel is unchanged.
  */
-export function Tabs({ items = [], value, onChange, ariaLabel, className = "" }) {
-  const baseId = useId();
+export function Tabs({ items = [], value, onChange, ariaLabel, id, className = "" }) {
+  const autoId = useId();
+  const baseId = id || autoId;
   const refs = useRef([]);
 
   const focusTab = (idx) => {
@@ -70,11 +77,16 @@ Tabs.propTypes = {
   value: PropTypes.string,
   onChange: PropTypes.func,
   ariaLabel: PropTypes.string,
+  id: PropTypes.string,
   className: PropTypes.string,
 };
 
-/** TabPanel — pairs with a Tabs item; provide the same `id` base and `value`. */
-export function TabPanel({ id, value, active, children }) {
+/**
+ * TabPanel — pairs with a Tabs item; pass the same `id` you gave the
+ * corresponding `<Tabs id=.../>` plus the panel's `value`, and the
+ * aria-controls/aria-labelledby pair resolves for real (no dangling refs).
+ */
+export function TabPanel({ id, value, active, className = "", children }) {
   if (!active) return null;
   return (
     <div
@@ -82,6 +94,7 @@ export function TabPanel({ id, value, active, children }) {
       id={`${id}-panel-${value}`}
       aria-labelledby={`${id}-tab-${value}`}
       tabIndex={0}
+      className={className || undefined}
     >
       {children}
     </div>
@@ -91,5 +104,6 @@ TabPanel.propTypes = {
   id: PropTypes.string,
   value: PropTypes.string,
   active: PropTypes.bool,
+  className: PropTypes.string,
   children: PropTypes.node,
 };

@@ -6,6 +6,8 @@ import { Switch } from "../Choice.jsx";
 import { Menu } from "../Menu.jsx";
 import { ScreenHeader, ContentFrame } from "../ScreenHeader.jsx";
 import { Breadcrumb } from "../Navigation.jsx";
+import { Tabs, TabPanel } from "../Tabs.jsx";
+import { DataTable } from "../DataTable.jsx";
 
 describe("Button", () => {
   it("applies variant + size token classes", () => {
@@ -170,6 +172,70 @@ describe("ScreenHeader", () => {
     const crumbs = heading.closest(".screen-header").querySelector(".screen-header__crumbs");
     expect(crumbs).toBeTruthy();
     expect(crumbs.querySelector("nav.ui-breadcrumb")).toBeTruthy();
+  });
+});
+
+describe("Tabs / TabPanel", () => {
+  it("wires aria-controls/aria-labelledby to a real element via a caller-supplied stable id", () => {
+    render(
+      <div>
+        <Tabs
+          id="qms-tabs"
+          ariaLabel="QMS record types"
+          value="NCR"
+          onChange={() => {}}
+          items={[
+            { value: "NCR", label: "NCR" },
+            { value: "CAPA", label: "CAPA" },
+          ]}
+        />
+        <TabPanel id="qms-tabs" value="NCR" active>
+          panel body
+        </TabPanel>
+      </div>,
+    );
+    const tab = screen.getByRole("tab", { name: "NCR" });
+    const panel = screen.getByRole("tabpanel");
+    expect(tab).toHaveAttribute("aria-controls", panel.id);
+    expect(panel).toHaveAttribute("aria-labelledby", tab.id);
+  });
+
+  it("still generates a working internal id when no id prop is passed (back-compat)", () => {
+    render(
+      <Tabs
+        ariaLabel="View mode"
+        value="grid"
+        onChange={() => {}}
+        items={[
+          { value: "grid", label: "Grid" },
+          { value: "list", label: "List" },
+        ]}
+      />,
+    );
+    const tab = screen.getByRole("tab", { name: "Grid" });
+    expect(tab).toHaveAttribute("aria-controls");
+    expect(tab.getAttribute("aria-controls")).toContain("grid");
+  });
+});
+
+describe("DataTable", () => {
+  const columns = [{ key: "name", header: "Name" }];
+  const rows = [{ id: "1", name: "Widget" }];
+
+  it("makes onRowClick rows keyboard-operable with a visible button affordance", () => {
+    const onRowClick = vi.fn();
+    render(<DataTable columns={columns} rows={rows} onRowClick={onRowClick} />);
+    const row = screen.getByRole("button", { name: /Widget/ });
+    expect(row).toHaveAttribute("tabIndex", "0");
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(onRowClick).toHaveBeenCalledWith(rows[0]);
+    fireEvent.keyDown(row, { key: " " });
+    expect(onRowClick).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not add row-button semantics when onRowClick is absent", () => {
+    render(<DataTable columns={columns} rows={rows} />);
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });
 

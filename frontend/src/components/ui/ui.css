@@ -221,6 +221,7 @@
 .ui-table tbody tr:hover td { background: var(--bg-hover); }
 .ui-table--zebra tbody tr:nth-child(even) td { background: var(--bg-subtle); }
 .ui-table tbody tr[aria-selected="true"] td { background: var(--bg-selected); }
+.ui-table__row--clickable:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .ui-table .ui-num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
 .ui-table__sort {

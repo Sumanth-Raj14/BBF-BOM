@@ -353,7 +353,7 @@ function InventoryScreen() {
               "\u20B9" +
               ((totals.value * (window.INR_RATE || 83)) / 100000).toFixed(1) +
               "L",
-            c: "var(--accent)",
+            c: "var(--accent-text)",
           },
         ].map((k) => (
           <div key={k.l} className="kpi">

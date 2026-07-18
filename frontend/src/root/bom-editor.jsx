@@ -57,6 +57,23 @@ function updateRow(rows, id, patch) {
     return r;
   });
 }
+// Remove a row (by local row id) anywhere in the tree.
+function removeRowById(rows, id) {
+  return rows
+    .filter((r) => r.id !== id)
+    .map((r) => (r.children ? { ...r, children: removeRowById(r.children, id) } : r));
+}
+// Find a row (by local row id) anywhere in the tree.
+function findRowById(rows, id) {
+  for (const r of rows) {
+    if (r.id === id) return r;
+    if (r.children) {
+      const found = findRowById(r.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
 // Compute ext-cost rollup by visiting all leaves
 function rollupExt(row) {
   if (!row.children) return (row.cost || 0) * (row.qty || 0);
@@ -242,6 +259,17 @@ export function BomEditor({
   const ctx = useAppStore();
   const rows = ctx?.rows || data.rows;
   const setRows = ctx?.setRows || (() => {});
+  // The canonical instance-BOM id that structural line CRUD (add/edit qty
+  // /refdes/find-number/delete/reorder) is scoped to. Neither the demo
+  // fixture nor the Parts-backed row source currently thread a real bom_id
+  // through, so fall back to a stable placeholder — same convention already
+  // used by CostRollupView for the same gap (`project_id || bomId || 1`).
+  const bomId =
+    ctx?.bomId ||
+    ctx?.project?.id ||
+    ctx?.project?.bomId ||
+    data?.project?.id ||
+    1;
   const [expanded, setExpanded] = React.useState(
     () => new Set(["r1", "r1.1", "r1.2", "r1.3", "r1.4"]),
   );
@@ -287,16 +315,40 @@ export function BomEditor({
       origin: "US",
       status: "Draft",
       assembly: false,
+      bomItemId: null,
     };
     const next = [...rows, newRow];
     setRows(next);
     markDirty();
-    toast(
-      __t("bom.itemAdded") ||
-        "New item added \u2014 double-click cells to edit",
-      { kind: "success" },
-    );
-  }, [rows, setRows, markDirty]);
+    // Structural op: persist the new BOM line to bom_items_master (NOT the
+    // global Part). Optimistic-add locally, then confirm/roll back on the
+    // real server response \u2014 a rejected create must not be reported as
+    // success, nor silently left as local-only state.
+    api.bomEnterprise.items
+      .create(bomId, {
+        quantity: newRow.qty,
+        unit: newRow.uom,
+        sort_order: next.length - 1,
+        notes: newRow.name,
+      })
+      .then((created) => {
+        setRows((cur) => updateRow(cur, newId, { bomItemId: created.id }));
+        toast(
+          __t("bom.itemAdded") ||
+            "New item added \u2014 double-click cells to edit",
+          { kind: "success" },
+        );
+      })
+      .catch((err) => {
+        setRows((cur) => removeRowById(cur, newId));
+        toast(
+          (__t("bom.itemAddFailed") || "Failed to add item to BOM") +
+            ": " +
+            (err?.message || "server error"),
+          { kind: "error" },
+        );
+      });
+  }, [rows, setRows, markDirty, bomId]);
   // Match filtering — show ancestors of any matching descendant
   const filterMatch = React.useMemo(() => {
     const hasFilter =
@@ -409,6 +461,11 @@ export function BomEditor({
     }
     const prev = JSON.parse(JSON.stringify(rows));
     const dragId_ = dragId;
+    // Structural op: reorder within the sibling group must persist to
+    // bom_items_master via sort_order — captured from inside the functional
+    // update (the only place we see the *post-move* sibling list) so it can
+    // be sent to the canonical reorder endpoint afterwards.
+    let siblingItemIds = null;
     setRows((current) => {
       const moveInSiblings = (rs) => {
         const ids = rs.map((r) => r.id);
@@ -418,6 +475,7 @@ export function BomEditor({
           const next = [...rs];
           const [moved] = next.splice(from, 1);
           next.splice(to, 0, moved);
+          siblingItemIds = next.map((r) => r.bomItemId).filter((v) => v != null);
           return next;
         }
         return rs.map((r) =>
@@ -433,6 +491,19 @@ export function BomEditor({
     markDirty();
     setDragId(null);
     setDropId(null);
+    // Only the siblings that are real canonical bom_items_master lines can be
+    // reordered server-side; a purely local/demo reorder has nothing to sync.
+    if (siblingItemIds && siblingItemIds.length > 0) {
+      api.bomEnterprise.items.reorder(bomId, siblingItemIds).catch((err) => {
+        setRows(JSON.parse(JSON.stringify(prev)));
+        toast(
+          (__t("bom.reorderFailed") || "Failed to save new row order") +
+            ": " +
+            (err?.message || "server error"),
+          { kind: "error" },
+        );
+      });
+    }
   };
   const syncToApi = React.useCallback((id, patch) => {
     if (id && id.startsWith("api-")) {
@@ -450,13 +521,36 @@ export function BomEditor({
   }, []);
   const inlineEdit = (id, patch) => {
     const prev = JSON.parse(JSON.stringify(rows));
+    const row = findRowById(rows, id);
     const next = updateRow(rows, id, patch);
     setRows(next);
-    syncToApi(id, patch);
+    markDirty();
+    // Structural fields (qty/refdes/find-number) on a row backed by a real
+    // bom_items_master line must persist there, not to the global Part —
+    // and a rejected write must roll back the optimistic edit and surface an
+    // error, never silently resolve as saved.
+    const structuralPatch = {};
+    if ("qty" in patch) structuralPatch.quantity = patch.qty;
+    if ("refDes" in patch) structuralPatch.reference_designator = patch.refDes;
+    if ("findNumber" in patch) structuralPatch.find_number = patch.findNumber;
+    if (row?.bomItemId != null && Object.keys(structuralPatch).length > 0) {
+      api.bomEnterprise.items
+        .update(bomId, row.bomItemId, structuralPatch)
+        .catch((err) => {
+          setRows(prev);
+          toast(
+            (__t("bom.itemUpdateFailed") || "Failed to save change to BOM") +
+              ": " +
+              (err?.message || "server error"),
+            { kind: "error" },
+          );
+        });
+    } else {
+      syncToApi(id, patch);
+    }
     recordUndo?.("edit " + (patch.name || patch.vendor || "field"), () =>
       setRows(prev),
     );
-    markDirty();
   };
   const cellQty = (row) => (
     <EditableCell
@@ -920,13 +1014,15 @@ export function BomEditor({
                                 label:
                                   __t("bom.duplicateRow") || "Duplicate row",
                                 onClick: () => {
+                                  const dupId = row.id + "-dup-" + Date.now();
                                   const dup = (rs) =>
                                     rs.map((r) => {
                                       if (r.id === row.id) {
                                         const copy = {
                                           ...r,
-                                          id: r.id + "-dup-" + Date.now(),
+                                          id: dupId,
                                           pn: r.pn + "-COPY",
+                                          bomItemId: null,
                                         };
                                         delete copy.children;
                                         return [r, copy];
@@ -941,12 +1037,45 @@ export function BomEditor({
                                   const next = dup(rows).flat();
                                   setRows(next);
                                   markDirty();
-                                  toast(
-                                    row.pn +
-                                      " " +
-                                      (__t("bom.duplicated") || "duplicated"),
-                                    { kind: "success" },
-                                  );
+                                  // Structural op: a duplicate is a new BOM
+                                  // line and must be created in
+                                  // bom_items_master, same as Add Item.
+                                  api.bomEnterprise.items
+                                    .create(bomId, {
+                                      part_id:
+                                        typeof row.partId === "number"
+                                          ? row.partId
+                                          : undefined,
+                                      quantity: row.qty,
+                                      unit: row.uom,
+                                      notes: row.name,
+                                    })
+                                    .then((created) => {
+                                      setRows((cur) =>
+                                        updateRow(cur, dupId, {
+                                          bomItemId: created.id,
+                                        }),
+                                      );
+                                      toast(
+                                        row.pn +
+                                          " " +
+                                          (__t("bom.duplicated") ||
+                                            "duplicated"),
+                                        { kind: "success" },
+                                      );
+                                    })
+                                    .catch((err) => {
+                                      setRows((cur) =>
+                                        removeRowById(cur, dupId),
+                                      );
+                                      toast(
+                                        (__t("bom.duplicateFailed") ||
+                                          "Failed to duplicate row") +
+                                          ": " +
+                                          (err?.message || "server error"),
+                                        { kind: "error" },
+                                      );
+                                    });
                                 },
                               },
                               {
@@ -955,6 +1084,9 @@ export function BomEditor({
                                   __t("bom.deleteFromBom") || "Delete from BOM",
                                 danger: true,
                                 onClick: () => {
+                                  const prevAll = JSON.parse(
+                                    JSON.stringify(rows),
+                                  );
                                   const remove = (rs) =>
                                     rs
                                       .filter((r) => r.id !== row.id)
@@ -969,24 +1101,46 @@ export function BomEditor({
                                   const next = remove(rows);
                                   setRows(next);
                                   markDirty();
-                                  toast(
-                                    row.pn +
-                                      " " +
-                                      (__t("bom.removedFromBom") ||
-                                        "removed from BOM"),
-                                    {
-                                      kind: "warn",
-                                      action: {
-                                        label: __t("common.undo") || "Undo",
-                                        onClick: () => {
-                                          setRows(data.rows);
-                                          toast(
-                                            __t("bom.restored") || "Restored",
-                                          );
+                                  const finishToast = () =>
+                                    toast(
+                                      row.pn +
+                                        " " +
+                                        (__t("bom.removedFromBom") ||
+                                          "removed from BOM"),
+                                      {
+                                        kind: "warn",
+                                        action: {
+                                          label: __t("common.undo") || "Undo",
+                                          onClick: () => {
+                                            setRows(prevAll);
+                                            toast(
+                                              __t("bom.restored") ||
+                                                "Restored",
+                                            );
+                                          },
                                         },
                                       },
-                                    },
-                                  );
+                                    );
+                                  // Structural op: only a row backed by a
+                                  // real bom_items_master line has anything
+                                  // to delete server-side.
+                                  if (row.bomItemId != null) {
+                                    api.bomEnterprise.items
+                                      .delete(bomId, row.bomItemId)
+                                      .then(finishToast)
+                                      .catch((err) => {
+                                        setRows(prevAll);
+                                        toast(
+                                          (__t("bom.deleteFailed") ||
+                                            "Failed to remove item from BOM") +
+                                            ": " +
+                                            (err?.message || "server error"),
+                                          { kind: "error" },
+                                        );
+                                      });
+                                  } else {
+                                    finishToast();
+                                  }
                                 },
                               },
                             ]}
@@ -1027,6 +1181,38 @@ export function BomEditor({
                         return r;
                       });
                     setRows(update(rows));
+                    markDirty();
+                    // Bulk-edit's fields (vendor/status/lead) are Part
+                    // attributes, not bom_items_master columns — sync each
+                    // affected Part-backed row individually (there is no
+                    // bulk endpoint for parts) and honestly report any
+                    // write that didn't make it to the server, instead of
+                    // silently leaving it as local-only.
+                    const targets = flat.filter(
+                      (r) => selected.has(r.id) && r.id?.startsWith("api-"),
+                    );
+                    if (targets.length === 0) return;
+                    Promise.allSettled(
+                      targets.map((r) => {
+                        const realId = parseInt(
+                          r.id.replace("api-", ""),
+                          10,
+                        );
+                        if (isNaN(realId))
+                          return Promise.reject(new Error("invalid row id"));
+                        return api.parts.update(realId, patch);
+                      }),
+                    ).then((results) => {
+                      const failed = results.filter(
+                        (x) => x.status === "rejected",
+                      ).length;
+                      if (failed > 0) {
+                        toast(
+                          `${failed} ${__t("bom.bulkEditPartialFail") || "of the bulk edits failed to save to the server"}`,
+                          { kind: "warn" },
+                        );
+                      }
+                    });
                   },
                 })
               }
@@ -1114,6 +1300,10 @@ export function BomEditor({
               size="sm"
               onClick={() => {
                 const n = selected.size;
+                const prevAll = JSON.parse(JSON.stringify(rows));
+                const deletedItemIds = flat
+                  .filter((r) => selected.has(r.id) && r.bomItemId != null)
+                  .map((r) => r.bomItemId);
                 const remove = (rs) =>
                   rs
                     .filter((r) => !selected.has(r.id))
@@ -1124,19 +1314,40 @@ export function BomEditor({
                 setRows(next);
                 markDirty();
                 setSelected(new Set());
-                toast(
-                  `${n} ${__t("bom.partsRemoved") || "parts removed from BOM"}`,
-                  {
-                    kind: "warn",
-                    action: {
-                      label: __t("common.undo") || "Undo",
-                      onClick: () => {
-                        setRows(data.rows);
-                        toast(__t("bom.restored") || "Restored");
+                const finishToast = (failedCount = 0) =>
+                  toast(
+                    `${n} ${__t("bom.partsRemoved") || "parts removed from BOM"}` +
+                      (failedCount
+                        ? ` — ${failedCount} ${__t("bom.deleteFailedSuffix") || "failed to delete on the server"}`
+                        : ""),
+                    {
+                      kind: failedCount ? "error" : "warn",
+                      action: {
+                        label: __t("common.undo") || "Undo",
+                        onClick: () => {
+                          setRows(prevAll);
+                          toast(__t("bom.restored") || "Restored");
+                        },
                       },
                     },
-                  },
-                );
+                  );
+                // Structural op: only rows backed by real bom_items_master
+                // lines have anything to delete server-side. A failed
+                // delete must be surfaced, not reported as a clean removal.
+                if (deletedItemIds.length === 0) {
+                  finishToast();
+                  return;
+                }
+                Promise.allSettled(
+                  deletedItemIds.map((itemId) =>
+                    api.bomEnterprise.items.delete(bomId, itemId),
+                  ),
+                ).then((results) => {
+                  const failed = results.filter(
+                    (x) => x.status === "rejected",
+                  ).length;
+                  finishToast(failed);
+                });
               }}
             >
               <Icon.Trash size={12} /> {__t("common.delete") || "Delete"}

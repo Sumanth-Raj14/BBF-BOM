@@ -904,6 +904,21 @@ export const bomEnterpriseAPI = {
   whereUsed: (partId) => apiRequest(`/bom/where-used/${partId}`),
   whereUsedTree: (partId) => apiRequest(`/bom/where-used/${partId}/tree`),
   compare: (bomId1, bomId2) => apiRequest('/bom/compare', { method: 'POST', body: JSON.stringify({ bom_id_1: bomId1, bom_id_2: bomId2 }) }),
+  // Canonical instance-BOM line CRUD (table `bom_items_master`, scoped by
+  // bom_id + tenant — see app/services/bom_service.py + app/api/endpoints/
+  // bom_enterprise.py). This is distinct from the older `/bom-items` client
+  // (`bomItemsAPI` below), which persists to the `bom_items` table tied to
+  // reusable BOM *templates*, not a specific instance BOM, and has no
+  // find_number field. Structural BOM-editor operations (add/edit qty-refdes-
+  // find-number/delete/reorder a line) must go through `items` here so they
+  // land in bom_items_master, not the global Part record.
+  items: {
+    list: (bomId) => apiRequest(`/bom/${bomId}/items`),
+    create: (bomId, data) => apiRequest(`/bom/${bomId}/items`, { method: 'POST', body: JSON.stringify(data) }),
+    update: (bomId, itemId, data) => apiRequest(`/bom/${bomId}/items/${itemId}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (bomId, itemId) => apiRequest(`/bom/${bomId}/items/${itemId}`, { method: 'DELETE' }),
+    reorder: (bomId, itemIds) => apiRequest(`/bom/${bomId}/items/reorder`, { method: 'POST', body: JSON.stringify({ item_ids: itemIds }) }),
+  },
   snapshots: {
     list: (bomId) => apiRequest(`/bom/${bomId}/snapshots`),
     create: (bomId, data) => apiRequest(`/bom/${bomId}/snapshots`, { method: 'POST', body: JSON.stringify(data) }),

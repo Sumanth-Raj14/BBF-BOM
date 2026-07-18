@@ -92,12 +92,40 @@ export function DataTable({
           ) : (
             rows.map((row, i) => {
               const selected = isRowSelected ? isRowSelected(row) : undefined;
+              const clickable = !!onRowClick;
+              // aria-selected is not a supported state on role="button" per
+              // ARIA — only mark a clickable row as role="button" when it
+              // has no selection state to report. A row that also carries
+              // aria-selected keeps its implicit role="row" (which DOES
+              // support aria-selected) and stays operable via tabIndex +
+              // the Enter/Space handler below, without the invalid
+              // button+aria-selected combination.
+              const selectable = isRowSelected != null;
               return (
                 <tr
                   key={rowKey(row, i)}
                   aria-selected={selected}
-                  onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  style={onRowClick ? { cursor: "pointer" } : undefined}
+                  role={clickable && !selectable ? "button" : undefined}
+                  tabIndex={clickable ? 0 : undefined}
+                  onClick={clickable ? () => onRowClick(row) : undefined}
+                  onKeyDown={
+                    clickable
+                      ? (e) => {
+                          // Only activate the row when the row itself is the
+                          // event target (i.e. it has focus). If a nested
+                          // interactive control (checkbox, button, menu
+                          // trigger) is focused, let it handle its own
+                          // keyboard activation instead of hijacking it here.
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onRowClick(row);
+                          }
+                        }
+                      : undefined
+                  }
+                  className={clickable ? "ui-table__row--clickable" : undefined}
+                  style={clickable ? { cursor: "pointer" } : undefined}
                 >
                   {columns.map((col) => {
                     const isNum =

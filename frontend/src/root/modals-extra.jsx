@@ -140,7 +140,7 @@ function AuditLogModal({ open, onClose }) {
   };
   const kindColor = {
     create: "var(--ok)",
-    edit: "var(--accent)",
+    edit: "var(--accent-text)",
     approve: "var(--ok)",
     release: "var(--info)",
     comment: "var(--fg-3)",
@@ -389,7 +389,9 @@ function APIKeysModal({ open, onClose }) {
                       borderColor:
                         k.scope === "read" ? "var(--info)" : "var(--accent)",
                       color:
-                        k.scope === "read" ? "var(--info)" : "var(--accent)",
+                        k.scope === "read"
+                          ? "var(--info)"
+                          : "var(--accent-text)",
                     }}
                   >
                     {k.scope}
