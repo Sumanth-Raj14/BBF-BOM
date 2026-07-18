@@ -60,7 +60,11 @@ Root: HKCU; Subkey: "Software\BlackboxBOM"; ValueType: string; ValueName: "ApiUr
 Root: HKCU; Subkey: "Software\BlackboxBOM"; ValueType: string; ValueName: "ApiKey"; ValueData: ""; Flags: uninsdeletekey
 
 [Icons]
-Name: "{group}\Settings"; Filename: "{app}\Settings.exe"
+; NOTE: there is no standalone "Settings.exe" — Settings is a WinForms dialog
+; (SettingsForm.cs) opened from *inside* SolidWorks via the add-in's "Settings"
+; toolbar/menu command (OpenSettings()), not a separate executable. A Start Menu
+; shortcut pointing at a nonexistent Settings.exe (as this used to) would be a
+; dead/broken shortcut on every install — removed.
 Name: "{group}\Documentation"; Filename: "{app}\Docs\SolidWorks_Integration_Guide.md"
 Name: "{group}\Uninstall"; Filename: "{uninstallexe}"
 

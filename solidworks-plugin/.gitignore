@@ -13,3 +13,6 @@ installer_output/
 
 # VS
 .vs/
+
+# Local/CI build logs (see .github/workflows/solidworks-plugin.yml)
+*.log

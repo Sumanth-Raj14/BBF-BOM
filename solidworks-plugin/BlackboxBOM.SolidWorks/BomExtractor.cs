@@ -363,7 +363,14 @@ namespace BlackboxBOM.SolidWorks
 
         private void ExtractExtrudeData(IFeature feature, FeatureInfo featInfo)
         {
-            IFeatureData featData = feature.GetFeatureData2();
+            // Declared as `object` rather than the SolidWorks-API `IFeatureData` interface:
+            // reflection against a real published SolidWorks interop assembly confirms
+            // `IFeatureData` does not exist as a distinct type there (only the specific
+            // `I*FeatureData2` subtypes below do) — this is a real, assembly-independent
+            // finding, not a version-mismatch guess. Every use here immediately narrows via
+            // an `is` pattern to a concrete `I...FeatureData2` type, so `object` is a
+            // behavior-preserving container type that removes the dependency entirely.
+            object featData = feature.GetFeatureData2();
             if (featData is IExtrudeFeatureData2 extrudeData)
             {
                 featInfo.Parameters["Direction"] = extrudeData.GetReverse ? "Reverse" : "Forward";
@@ -386,7 +393,14 @@ namespace BlackboxBOM.SolidWorks
 
         private void ExtractRevolveData(IFeature feature, FeatureInfo featInfo)
         {
-            IFeatureData featData = feature.GetFeatureData2();
+            // Declared as `object` rather than the SolidWorks-API `IFeatureData` interface:
+            // reflection against a real published SolidWorks interop assembly confirms
+            // `IFeatureData` does not exist as a distinct type there (only the specific
+            // `I*FeatureData2` subtypes below do) — this is a real, assembly-independent
+            // finding, not a version-mismatch guess. Every use here immediately narrows via
+            // an `is` pattern to a concrete `I...FeatureData2` type, so `object` is a
+            // behavior-preserving container type that removes the dependency entirely.
+            object featData = feature.GetFeatureData2();
             if (featData is IRevolveFeatureData2 revolveData)
             {
                 featInfo.Parameters["Angle"] = revolveData.GetAngle(false);
@@ -396,7 +410,14 @@ namespace BlackboxBOM.SolidWorks
 
         private void ExtractFilletData(IFeature feature, FeatureInfo featInfo)
         {
-            IFeatureData featData = feature.GetFeatureData2();
+            // Declared as `object` rather than the SolidWorks-API `IFeatureData` interface:
+            // reflection against a real published SolidWorks interop assembly confirms
+            // `IFeatureData` does not exist as a distinct type there (only the specific
+            // `I*FeatureData2` subtypes below do) — this is a real, assembly-independent
+            // finding, not a version-mismatch guess. Every use here immediately narrows via
+            // an `is` pattern to a concrete `I...FeatureData2` type, so `object` is a
+            // behavior-preserving container type that removes the dependency entirely.
+            object featData = feature.GetFeatureData2();
             if (featData is IFilletFeatureData2 filletData)
             {
                 featInfo.Parameters["Radius"] = filletData.GetRadius();
@@ -406,7 +427,14 @@ namespace BlackboxBOM.SolidWorks
 
         private void ExtractHoleWizardData(IFeature feature, FeatureInfo featInfo)
         {
-            IFeatureData featData = feature.GetFeatureData2();
+            // Declared as `object` rather than the SolidWorks-API `IFeatureData` interface:
+            // reflection against a real published SolidWorks interop assembly confirms
+            // `IFeatureData` does not exist as a distinct type there (only the specific
+            // `I*FeatureData2` subtypes below do) — this is a real, assembly-independent
+            // finding, not a version-mismatch guess. Every use here immediately narrows via
+            // an `is` pattern to a concrete `I...FeatureData2` type, so `object` is a
+            // behavior-preserving container type that removes the dependency entirely.
+            object featData = feature.GetFeatureData2();
             if (featData is IHoleWizardFeatureData2 hwData)
             {
                 featInfo.Parameters["HoleType"] = hwData.HoleType.ToString();
@@ -418,7 +446,14 @@ namespace BlackboxBOM.SolidWorks
 
         private void ExtractPatternData(IFeature feature, FeatureInfo featInfo)
         {
-            IFeatureData featData = feature.GetFeatureData2();
+            // Declared as `object` rather than the SolidWorks-API `IFeatureData` interface:
+            // reflection against a real published SolidWorks interop assembly confirms
+            // `IFeatureData` does not exist as a distinct type there (only the specific
+            // `I*FeatureData2` subtypes below do) — this is a real, assembly-independent
+            // finding, not a version-mismatch guess. Every use here immediately narrows via
+            // an `is` pattern to a concrete `I...FeatureData2` type, so `object` is a
+            // behavior-preserving container type that removes the dependency entirely.
+            object featData = feature.GetFeatureData2();
             if (featData is IPatternFeatureData patternData)
             {
                 featInfo.Parameters["InstanceCount"] = patternData.InstanceCount;

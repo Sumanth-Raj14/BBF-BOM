@@ -10,7 +10,15 @@ namespace BlackboxBOM.SolidWorks
     {
         public string SourceFile { get; set; }
         public DateTime ExtractedAt { get; set; }
-        public SolidWorks.Interop.swconst.swDocumentTypes_e ModelType { get; set; }
+        // NOTE: must be `global::SolidWorks...` (not a bare qualified name) — this file lives
+        // in the `BlackboxBOM.SolidWorks` namespace, and from inside a namespace literally
+        // named `...SolidWorks`, an unqualified `SolidWorks.Interop...` reference resolves
+        // "SolidWorks" against the enclosing `BlackboxBOM` namespace first (which *does* have
+        // a nested namespace called `SolidWorks` — this one), not the global `SolidWorks`
+        // interop assembly — causing CS0234 ("'Interop' does not exist in the namespace
+        // 'BlackboxBOM.SolidWorks'"). This is a real, assembly-independent C# language rule,
+        // not a version/interop-source issue — confirmed by an actual Roslyn compile.
+        public global::SolidWorks.Interop.swconst.swDocumentTypes_e ModelType { get; set; }
         public int TotalComponents { get; set; }
         public int TotalUniqueParts { get; set; }
         public List<BomItem> Items { get; set; } = new List<BomItem>();

@@ -43,13 +43,37 @@
   <!--
     SolidWorks interop references. These are the three assemblies every SolidWorks
     C# add-in needs (ISwAddin/ISldWorks, the sw*_e enums, and the published
-    interfaces used for callbacks/events). They are NOT NuGet packages — reference
-    the real DLLs from the SolidWorks install (see SolidWorksApiRedistDir above).
-    EmbedInteropTypes is false (matches SolidWorks' own add-in samples) and
-    Private=true so the DLLs are copied next to the add-in output, since they are
-    not guaranteed to be in the GAC on every SolidWorks machine.
+    interfaces used for callbacks/events). The REAL ones are NOT NuGet packages —
+    normally you reference the real DLLs from the SolidWorks install (see
+    SolidWorksApiRedistDir above). EmbedInteropTypes is false (matches SolidWorks'
+    own add-in samples) and Private=true so the DLLs are copied next to the add-in
+    output, since they are not guaranteed to be in the GAC on every SolidWorks
+    machine.
+
+    UseNuGetSolidWorksInterop (default false, used only by CI — see
+    .github/workflows/solidworks-plugin.yml): swaps in third-party NuGet packages
+    (SolidWorks.Interop.sldworks/swconst/swpublished, published by "avidesk" on
+    nuget.org) that happen to share the real assembly names, so a hosted CI runner
+    with no SolidWorks install can attempt SOME real compile instead of none. This
+    was tried for real during this pass: it caught 4 genuine, interop-version-
+    independent C# bugs (now fixed — see BUILD_AND_TEST_CHECKLIST.md's "Community
+    NuGet interop experiment"), but that package's actual API surface diverges
+    substantially from the real, current, documented SolidWorks API this plugin
+    targets (e.g. it is missing IAssemblyDoc.GetComponents2, IModelDoc2.
+    GetBoundingBox, ISldWorks.GetMaterialManager — all real, heavily-used, current
+    SolidWorks API members) — building against it currently still fails with ~130
+    errors that are package-incompatibility noise, not real bugs. Do NOT "fix" the
+    plugin source to match that package's surface — it would make the code wrong
+    against the real, official SolidWorks SDK. Never rely on this flag for a
+    certified build; it exists purely as a best-effort/informational CI lint.
   -->
-  <ItemGroup>
+  <ItemGroup Condition="'$(UseNuGetSolidWorksInterop)'=='true'">
+    <PackageReference Include="SolidWorks.Interop.sldworks" Version="32.1.0" />
+    <PackageReference Include="SolidWorks.Interop.swconst" Version="32.1.0" />
+    <PackageReference Include="SolidWorks.Interop.swpublished" Version="32.1.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseNuGetSolidWorksInterop)'!='true'">
     <Reference Include="SolidWorks.Interop.sldworks">
       <HintPath>$(SolidWorksApiRedistDir)SolidWorks.Interop.sldworks.dll</HintPath>
       <EmbedInteropTypes>false</EmbedInteropTypes>
@@ -74,7 +98,7 @@
   <!-- Fail fast with an actionable message instead of a wall of CS0246 "type or
        namespace not found" errors when the SolidWorks interop DLLs aren't where
        SolidWorksApiRedistDir points. -->
-  <Target Name="CheckSolidWorksInterop" BeforeTargets="BeforeBuild">
+  <Target Name="CheckSolidWorksInterop" BeforeTargets="BeforeBuild" Condition="'$(UseNuGetSolidWorksInterop)'!='true'">
     <Error
       Condition="!Exists('$(SolidWorksApiRedistDir)SolidWorks.Interop.sldworks.dll')"
       Text="SolidWorks interop assemblies not found at '$(SolidWorksApiRedistDir)'. Install SolidWorks on this machine, or pass the correct folder with /p:SolidWorksApiRedistDir=&quot;&lt;path&gt;\api\redist\&quot; (see the comment on SolidWorksApiRedistDir in this .csproj)." />

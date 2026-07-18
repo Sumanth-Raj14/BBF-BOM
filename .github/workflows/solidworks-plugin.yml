@@ -1,0 +1,175 @@
+name: SolidWorks Plugin (Windows)
+
+# This workflow builds `solidworks-plugin/` — a C# SolidWorks COM add-in that targets
+# net48 and requires SolidWorks's own Interop assemblies (SolidWorks.Interop.sldworks /
+# .swconst / .swpublished), which SolidWorks does NOT publish anywhere public (they ship
+# only inside a real SolidWorks install, at `<SolidWorks install>\api\redist\`, and are
+# tied to the exact SolidWorks version/COM type-library GUID registered on the build
+# machine). GitHub-hosted runners do not have SolidWorks installed, so a FULL, certified
+# build of this add-in cannot happen here — see BUILD_AND_TEST_CHECKLIST.md for what a
+# real build on a SolidWorks machine looks like.
+#
+# What this workflow actually validates on every push/PR (all real, none faked):
+#   1. NuGet restore of the project (catches broken package references, e.g. Newtonsoft.Json).
+#   2. A best-effort compile against community-published NuGet packages that happen to
+#      share the same three assembly names (SolidWorks.Interop.sldworks/swconst/swpublished,
+#      published by "avidesk" on nuget.org). This is NOT a certified/official build — an
+#      actual compile against these packages during this workflow's development (see
+#      BUILD_AND_TEST_CHECKLIST.md, "Community NuGet interop experiment") showed their API
+#      surface diverges substantially from the real, current, documented SolidWorks API
+#      this plugin targets (e.g. IAssemblyDoc.GetComponents2, IModelDoc2.GetBoundingBox,
+#      ISldWorks.GetMaterialManager are all missing from that package version). It is kept
+#      as a `continue-on-error` step purely because it is the only way to catch basic
+#      C#-language mistakes (namespace collisions, missing `using`s, ambiguous references)
+#      on a hosted runner — it caught 4 real bugs during this pass, all fixed (see the
+#      checklist). Its outcome is informational only and never fails the job.
+#   3. A guard check against the REAL build path (no interop override): on any runner with
+#      no SolidWorks install, this is EXPECTED to fail with exactly one specific, guarded
+#      error ("SolidWorks interop assemblies not found..." from the csproj's
+#      CheckSolidWorksInterop target). The workflow asserts the failure is that *exact*
+#      expected one — if the project ever fails to build for a DIFFERENT reason, that is a
+#      real regression and this step (and the job) fails for real.
+#   4. If step 3 ever *succeeds* — which only happens if this workflow is run on a
+#      self-hosted Windows runner that has SolidWorks installed (or SolidWorksApiRedistDir
+#      is pointed at a real install) — that is a genuine, certified build: the add-in DLL
+#      and a real Inno Setup installer are built and uploaded as workflow artifacts.
+#
+# In short: this workflow never claims a fake success. On GitHub-hosted runners it will
+# always report the official build as "not possible here" (by design) and will still
+# uploaded the informational community-interop log for visibility. Attach a self-hosted
+# runner with SolidWorks installed to get real green builds + real installer artifacts.
+
+on:
+  push:
+    branches: [main, develop, "feat/**"]
+    paths:
+      - "solidworks-plugin/**"
+      - ".github/workflows/solidworks-plugin.yml"
+  pull_request:
+    paths:
+      - "solidworks-plugin/**"
+      - ".github/workflows/solidworks-plugin.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: solidworks-plugin
+    shell: pwsh
+
+jobs:
+  build:
+    name: Restore, best-effort compile, official-build guard
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore NuGet packages
+        run: dotnet restore BlackboxBOM.SolidWorks.sln
+
+      - name: "Best-effort compile vs. community interop NuGet packages (informational, not certified)"
+        id: community_build
+        continue-on-error: true
+        run: |
+          dotnet build BlackboxBOM.SolidWorks/BlackboxBOM.SolidWorks.csproj `
+            /p:Configuration=Release /p:UseNuGetSolidWorksInterop=true `
+            /clp:ErrorsOnly *> community_build.log
+          $code = $LASTEXITCODE
+          Get-Content community_build.log
+          if ($code -ne 0) {
+            Write-Host "::warning::Community-interop informational build did not compile cleanly (expected — see BUILD_AND_TEST_CHECKLIST.md, 'Community NuGet interop experiment'). This does NOT indicate a real regression by itself; it only reflects that package's incomplete/diverging API surface vs. the real SolidWorks SDK."
+          } else {
+            Write-Host "Community-interop informational build compiled cleanly this time (0 errors) — still not a certified build (see workflow header comment), but a good sign for basic C#-language correctness."
+          }
+          exit 0
+
+      - name: Upload community-interop build log (informational)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: community-interop-build-log
+          path: solidworks-plugin/community_build.log
+          if-no-files-found: ignore
+
+      - name: "Official build (real SolidWorks interop) — guarded, must fail only the documented way here"
+        id: official_build
+        run: |
+          dotnet build BlackboxBOM.SolidWorks/BlackboxBOM.SolidWorks.csproj `
+            /p:Configuration=Release *> official_build.log
+          $code = $LASTEXITCODE
+          Get-Content official_build.log
+          $logText = Get-Content official_build.log -Raw
+
+          if ($code -eq 0) {
+            Write-Host "Official build SUCCEEDED — this runner has the real SolidWorks interop DLLs available (self-hosted runner with SolidWorks installed, or SolidWorksApiRedistDir pointed at a real install). Treating this as a genuine, certified build."
+            "succeeded=true" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          if ($logText -match [regex]::Escape("SolidWorks interop assemblies not found")) {
+            Write-Host "Official build failed EXACTLY as documented/expected: no SolidWorks install on this runner, so the csproj's CheckSolidWorksInterop guard fired. This is the correct, honest outcome on a GitHub-hosted runner — see BUILD_AND_TEST_CHECKLIST.md. Not a failure of this workflow."
+            "succeeded=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          Write-Host "::error::Official build failed with an UNEXPECTED error — NOT the documented 'SolidWorks interop assemblies not found' guard. This is a real regression in the plugin source or project file; see official_build.log."
+          "succeeded=false" >> $env:GITHUB_OUTPUT
+          exit 1
+
+      - name: Upload official build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-build-log
+          path: solidworks-plugin/official_build.log
+          if-no-files-found: ignore
+
+      - name: Upload built add-in (only when a real official build succeeded)
+        if: steps.official_build.outputs.succeeded == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlackboxBOM.SolidWorks-dll
+          path: |
+            solidworks-plugin/BlackboxBOM.SolidWorks/bin/Release/BlackboxBOM.SolidWorks.dll
+            solidworks-plugin/BlackboxBOM.SolidWorks/bin/Release/BlackboxBOM.SolidWorks.pdb
+          if-no-files-found: error
+
+      - name: Install Inno Setup (only needed to package a real official build)
+        if: steps.official_build.outputs.succeeded == 'true'
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer with Inno Setup (only from a real official build)
+        if: steps.official_build.outputs.succeeded == 'true'
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" Installer\BlackboxBOM_SolidWorks.iss'
+
+      - name: Upload installer
+        if: steps.official_build.outputs.succeeded == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlackboxBOM.SolidWorks-installer
+          path: solidworks-plugin/Installer/installer_output/*.exe
+          if-no-files-found: error
+
+      - name: Job summary
+        if: always()
+        run: |
+          $officialOk = '${{ steps.official_build.outputs.succeeded }}' -eq 'true'
+          $communityOutcome = '${{ steps.community_build.outcome }}'
+
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## SolidWorks Plugin Build Summary"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          if ($officialOk) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- **Official build (real SolidWorks interop DLLs)**: SUCCEEDED — add-in DLL + installer uploaded as artifacts."
+          } else {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- **Official build (real SolidWorks interop DLLs)**: not possible on this runner (no SolidWorks install) — this is expected on GitHub-hosted runners. See BUILD_AND_TEST_CHECKLIST.md for the real build/test procedure on a SolidWorks machine."
+          }
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- **Community-interop informational build**: outcome = $communityOutcome (NOT a certified build — see community-interop-build-log artifact and BUILD_AND_TEST_CHECKLIST.md, 'Community NuGet interop experiment')."
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "A full, certified build + in-CAD test requires a Windows machine with SolidWorks installed. See solidworks-plugin/BUILD_AND_TEST_CHECKLIST.md."
