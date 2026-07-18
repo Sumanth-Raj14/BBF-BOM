@@ -692,13 +692,24 @@ namespace BlackboxBOM.SolidWorks
         // interop-assembly guard — see BUILD_AND_TEST_CHECKLIST.md). Confirmed present,
         // unchanged, at the pre-existing base commit via a real Roslyn compile (the NuGet
         // interop diagnostic build) before this pass touched this file. Returning
-        // Task<HttpResponseMessage> instead (and awaiting internally) makes every existing
-        // call site's `.Result`/`.Wait()` usage correct, with no call-site changes needed.
-        private async Task<HttpResponseMessage> PostAsync(string endpoint, object payload)
+        // Task<HttpResponseMessage> instead makes every existing call site's `.Result`/
+        // `.Wait()` usage correct, with no call-site changes needed.
+        //
+        // Deliberately NOT `async`/`await` here: every call site above blocks synchronously
+        // on the returned Task via `.Result`/`.Wait()`, and several of them run on the
+        // SolidWorks main STA thread, which BlackboxBomAddin.ConnectToSW leaves carrying a
+        // WindowsFormsSynchronizationContext (installed when it forces creation of
+        // BomPanel's TaskpaneView handle). An `async` method's `await _httpClient.PostAsync(...)`
+        // would capture that context and try to resume the continuation on the same thread
+        // that `.Result`/`.Wait()` is blocking — a classic sync-over-async deadlock. Returning
+        // the HttpClient task directly (no async state machine, nothing to resume on a
+        // captured context) avoids the deadlock entirely while keeping every call site's
+        // synchronous usage safe.
+        private Task<HttpResponseMessage> PostAsync(string endpoint, object payload)
         {
             string json = JsonConvert.SerializeObject(payload, JsonSettings);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
-            return await _httpClient.PostAsync($"{_baseUrl}{endpoint}", content);
+            return _httpClient.PostAsync($"{_baseUrl}{endpoint}", content);
         }
 
         #endregion
