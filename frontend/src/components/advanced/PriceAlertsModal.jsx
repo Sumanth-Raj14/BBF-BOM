@@ -1,10 +1,60 @@
 import PropTypes from "prop-types";
+import { useState } from "react";
 
 import { __t } from "../../i18n";
-import { INR, Modal } from "../../globals";
+import { INR, Icon } from "../../globals";
+import { Modal } from "../ui/Modal.jsx";
+import { Button } from "../ui/Button.jsx";
+import { DataTable } from "../ui/DataTable.jsx";
+import { StatusPill } from "../ui/Badge.jsx";
+import { EmptyState } from "../ui/Feedback.jsx";
+
+const FILTERS = [
+  ["all", "All"],
+  ["active", "Active"],
+  ["resolved", "Resolved"],
+  ["up", "Up"],
+  ["down", "Down"],
+];
+const THRESHOLDS = [3, 5, 10, 20];
+
+function Trend({ values, dir }) {
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const color = dir === "up" ? "var(--status-danger)" : "var(--status-success)";
+  return (
+    <div>
+      <span className="sr-only">
+        {dir === "up" ? "Price trending up" : "Price trending down"}
+      </span>
+      <div
+        className="flex items-end h-24"
+        style={{ gap: 1 }}
+        aria-hidden="true"
+      >
+        {values.map((v, j) => {
+          const h = ((v - min) / range) * 18 + 3;
+          return (
+            <div
+              key={j}
+              style={{
+                width: 12,
+                height: h,
+                background: color,
+                borderRadius: "1px 1px 0 0",
+                opacity: 0.3 + (j / values.length) * 0.7,
+              }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function PriceAlertsModal({ open, onClose }) {
-  if (!open) return null;
-  const [alerts] = React.useState([
+  const [alerts] = useState([
     {
       pn: "EL-PSU-240W",
       name: "Power Supply 240W",
@@ -39,8 +89,11 @@ function PriceAlertsModal({ open, onClose }) {
       status: "resolved",
     },
   ]);
-  const [filter, setFilter] = React.useState("all");
-  const [threshold, setThreshold] = React.useState(5);
+  const [filter, setFilter] = useState("all");
+  const [threshold, setThreshold] = useState(5);
+
+  if (!open) return null;
+
   const filtered = alerts
     .filter((a) => {
       if (filter === "active") return a.status === "active";
@@ -50,20 +103,99 @@ function PriceAlertsModal({ open, onClose }) {
       return true;
     })
     .filter((a) => Math.abs(a.pct) >= threshold);
+
+  const activeCount = alerts.filter((a) => a.status === "active").length;
+
+  const columns = [
+    {
+      key: "pn",
+      header: "Part No.",
+      render: (r) => <span className="mono fw-600">{r.pn}</span>,
+    },
+    { key: "name", header: "Name" },
+    { key: "vendor", header: "Vendor" },
+    {
+      key: "base",
+      header: "Base",
+      align: "num",
+      render: (r) => <span className="mono">{INR(r.base, 2)}</span>,
+    },
+    {
+      key: "current",
+      header: "Current",
+      align: "num",
+      render: (r) => (
+        <span
+          className="mono fw-600"
+          style={{
+            color:
+              r.dir === "up"
+                ? "var(--status-danger-text)"
+                : "var(--status-success-text)",
+          }}
+        >
+          {INR(r.current, 2)}
+        </span>
+      ),
+    },
+    {
+      key: "pct",
+      header: "Change",
+      align: "num",
+      render: (r) => (
+        <span
+          className="mono fw-700"
+          style={{
+            color:
+              r.pct > 0
+                ? "var(--status-danger-text)"
+                : "var(--status-success-text)",
+          }}
+        >
+          {r.pct > 0 ? "▲" : "▼"} {Math.abs(r.pct).toFixed(1)}%
+        </span>
+      ),
+    },
+    {
+      key: "trend",
+      header: "Trend",
+      render: (r) => <Trend values={r.trend} dir={r.dir} />,
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (r) => (
+        <StatusPill
+          status={r.status}
+          tone={r.status === "active" ? "warning" : "success"}
+          label={r.status.toUpperCase()}
+        />
+      ),
+    },
+  ];
+
   return (
     <Modal
       open={open}
       onClose={onClose}
       icon={<Icon.Chart size={16} />}
       title="Price Alerts"
-      subtitle={`${alerts.filter((a) => a.status === "active").length} active`}
-      wide
+      subtitle={`${activeCount} active`}
+      size="xl"
       footer={
         <>
-          <span className="left">Threshold: ≥{threshold}% change</span>
-          <button className="btn" onClick={onClose}>
+          <span
+            style={{
+              marginRight: "auto",
+              fontSize: "var(--fs-100)",
+              color: "var(--text-muted)",
+            }}
+          >
+            Threshold: ≥{threshold}% change
+          </span>
+          <Button variant="secondary" onClick={onClose}>
             Close
-          </button>
+          </Button>
         </>
       }
     >
@@ -71,132 +203,59 @@ function PriceAlertsModal({ open, onClose }) {
         className="flex gap-12 mb-14 items-center"
         style={{ flexWrap: "wrap" }}
       >
-        <div className="flex gap-6">
-          {[
-            ["all", "All"],
-            ["active", "Active"],
-            ["resolved", "Resolved"],
-            ["up", "Up"],
-            ["down", "Down"],
-          ].map(([k, l]) => (
-            <span
+        <div
+          className="flex gap-6"
+          role="group"
+          aria-label="Filter alerts by status or direction"
+        >
+          {FILTERS.map(([k, l]) => (
+            <Button
               key={k}
-              className={(
-                "chip " +
-                (filter === k ? "active" : "") +
-                " cursor-pointer"
-              ).trim()}
+              type="button"
+              variant={filter === k ? "primary" : "secondary"}
+              size="sm"
+              aria-pressed={filter === k}
               onClick={() => setFilter(k)}
             >
               {l}
-            </span>
+            </Button>
           ))}
         </div>
-        <div className="flex gap-6 font-mono fs-11">
-          {__t("advanced.priceAlerts.threshold") || "Threshold"}:{" "}
-          {[3, 5, 10, 20].map((t) => (
-            <span
+        <div
+          className="flex gap-6 items-center font-mono fs-11"
+          role="group"
+          aria-label="Minimum change threshold"
+        >
+          <span aria-hidden="true">
+            {__t("advanced.priceAlerts.threshold") || "Threshold"}:
+          </span>
+          {THRESHOLDS.map((t) => (
+            <Button
               key={t}
-              className={(
-                "chip " +
-                (threshold === t ? "active" : "") +
-                " cursor-pointer"
-              ).trim()}
+              type="button"
+              variant={threshold === t ? "primary" : "secondary"}
+              size="sm"
+              aria-pressed={threshold === t}
+              aria-label={`${t} percent threshold`}
               onClick={() => setThreshold(t)}
             >
               {t}%
-            </span>
+            </Button>
           ))}
         </div>
       </div>
-      <div className="border-line rounded-r2 overflow-x-a">
-        <table className="bom-table table-auto">
-          <thead>
-            <tr>
-              <th className="pl-12">Part No.</th>
-              <th>Name</th>
-              <th>Vendor</th>
-              <th className="num">Base</th>
-              <th className="num">Current</th>
-              <th className="num">Change</th>
-              <th>Trend</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={8}
-                  className="text-center fg-3"
-                  style={{ padding: 40 }}
-                >
-                  No alerts matching filters
-                </td>
-              </tr>
-            ) : (
-              filtered.map((a) => (
-                <tr key={a.pn}>
-                  <td className="mono pl-12 fw-600">{a.pn}</td>
-                  <td>{a.name}</td>
-                  <td>{a.vendor}</td>
-                  <td className="num mono">{INR(a.base, 2)}</td>
-                  <td
-                    className="num mono fw-600"
-                    style={{
-                      color: a.dir === "up" ? "var(--danger)" : "var(--ok)",
-                    }}
-                  >
-                    {INR(a.current, 2)}
-                  </td>
-                  <td
-                    className="num mono fw-700"
-                    style={{ color: a.pct > 0 ? "var(--danger)" : "var(--ok)" }}
-                  >
-                    {a.pct > 0 ? "▲" : "▼"} {Math.abs(a.pct).toFixed(1)}%
-                  </td>
-                  <td>
-                    <div className="flex items-end h-24" style={{ gap: 1 }}>
-                      {a.trend.map((v, j) => {
-                        const h =
-                          ((v - Math.min(...a.trend)) /
-                            (Math.max(...a.trend) - Math.min(...a.trend) ||
-                              1)) *
-                            18 +
-                          3;
-                        return (
-                          <div
-                            key={j}
-                            style={{
-                              width: 12,
-                              height: h,
-                              background:
-                                a.dir === "up" ? "var(--danger)" : "var(--ok)",
-                              borderRadius: "1px 1px 0 0",
-                              opacity: 0.3 + (j / a.trend.length) * 0.7,
-                            }}
-                          />
-                        );
-                      })}
-                    </div>
-                  </td>
-                  <td>
-                    <span
-                      className={
-                        "status " +
-                        (a.status === "active" ? "review" : "released") +
-                        " fs-9"
-                      }
-                    >
-                      {a.status.toUpperCase()}
-                    </span>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        rows={filtered}
+        getRowKey={(r) => r.pn}
+        ariaLabel="Price alerts"
+        empty={
+          <EmptyState
+            title="No alerts"
+            message="No alerts matching filters"
+          />
+        }
+      />
     </Modal>
   );
 }
