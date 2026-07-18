@@ -133,9 +133,20 @@ A **Blackbox BOM** task pane icon should appear on the right edge of the SolidWo
    - **API Key**: the `bkb_…` value from step 1
    - Click **Save**. This writes `%LOCALAPPDATA%\BlackboxBOM\settings.json` and updates
      the running session's `ApiClient` immediately (no SolidWorks restart needed).
-3. The plugin authenticates via `POST /api/v1/auth/plugin-login` with
-   `{api_key, client_type: "solidworks_addin", client_version}` and stores the returned
-   `session_id` as a Bearer token for all subsequent calls.
+3. **How authentication actually works** (fixed this pass — previously the add-in never
+   authenticated at all, see [Change history](#change-history)): the `ApiClient` the add-in
+   actually uses (`BlackboxBomAddin`'s default-constructor client) attaches the saved API
+   key as an `X-API-Key` header on **every** request, the moment Settings are loaded or
+   saved. The backend's auth dependency
+   (`app/core/deps.py::_authenticate_by_api_key`) checks this header first, ahead of any
+   Bearer token, so this alone authenticates `/solidworks/sync`, `/apply-sync`, `/images`,
+   and `/apply-changes`. `POST /api/v1/auth/plugin-login` (`{api_key, client_type:
+   "solidworks_addin", client_version}` → a Bearer `session_id`) still exists and still
+   works, but nothing in the add-in calls it automatically today — it's only exercised via
+   `ApiClient`'s 2-argument constructor (`ApiClient(baseUrl, apiKey)`), which the add-in
+   does not construct. If a missing/invalid key means every protected call returns 401/403,
+   the add-in now surfaces a real "Authentication failed - check API key/URL in Settings"
+   error instead of a fake success (see the troubleshooting row below).
 4. Optional sanity check: `GET http://<host>:8000/api/v1/health` should return
    `{"status": "healthy", ...}` — this is a real, confirmed route (verified by reading
    `backend/app/api/api_v1.py`) used by `ApiClient.IsApiAvailable()`. It's non-blocking;
@@ -177,8 +188,9 @@ A **Blackbox BOM** task pane icon should appear on the right edge of the SolidWo
 | Add-in doesn't appear in **Tools → Add-Ins** | Registration didn't happen. Re-run the installer as Administrator, or manually `RegAsm.exe /codebase` the DLL (see [section 3](#3-install-and-register-the-add-in)). Confirm `HKLM\SOFTWARE\SolidWorks\Addins\{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}` exists. |
 | Add-in is checked in Tools → Add-Ins, but no task pane appears | Check the Windows Event Viewer / a debugger attached to `SLDWORKS.exe` for exceptions in `ConnectToSW`/`CreateTaskPane` — these are swallowed into a `MessageBox` in `BlackboxBomAddin.cs`, so look for that dialog too. |
 | "Sync failed" / HTTP errors when pushing a BOM | Confirm **API URL** in Settings is reachable from this machine (no trailing slash issues; try the same URL in a browser at `/api/v1/health`). Confirm the API key was created against the Postgres deployment (see [section 4](#4-configure-the-backend-connection)). |
+| "Authentication failed - check API key/URL in Settings (HTTP 401)." / "...(HTTP 403)." on Sync / Extract Images / Apply Blackbox Changes | The saved **API Key** is missing, wrong, expired, or was created against a different backend than **API URL** points at. Re-check both in Settings (see [section 4](#4-configure-the-backend-connection)) and re-save. This is a real, honest failure, surfaced this pass — earlier versions of the add-in sent these requests with no credentials at all and silently reported a fake "Sync complete! 0 items" instead (see next row and [Change history](#change-history)). |
 | 422 error on push | Should not happen after this pass's fixes (see [Change history](#change-history) — `component_name` is now always sent). If it recurs, compare the JSON `ApiClient.cs` sends against `BomItemRequest` in `backend/app/api/endpoints/solidworks_integration.py`. |
-| "Sync complete! 0 items added, 0 items updated" even though items clearly synced | Should not happen after this pass — was caused by response DTOs not matching the backend's snake_case JSON (fixed via a shared `SnakeCaseNamingStrategy`, see Change history). If it recurs, the two are out of sync again — check the JSON shape. |
+| "Sync complete! 0 items added, 0 items updated" even though items clearly synced | **Should no longer be possible at all** as of this pass: any non-2xx response (including an unauthenticated 401 — the actual root cause behind this symptom historically, since the add-in never attached any credentials, see [Change history](#change-history)) is now detected and thrown as a real exception *before* the response body is deserialized into the result DTO, so a failed call now shows an "Authentication failed..." or "HTTP ### ..." error dialog instead of a fake success message. A previous pass separately fixed the response-DTO snake_case mismatch (`SnakeCaseNamingStrategy`) that could also zero out these fields on an otherwise-successful call. If you still see this exact message, the sync genuinely returned HTTP 2xx with `items_added`/`items_updated` both legitimately 0 (e.g. re-syncing an unchanged BOM only touches existing rows) — check the web app's BOM/Parts screens to confirm. |
 | License-related dialogs / `501` errors | `/api/v1/solidworks/license/{verify,activate}` are intentionally not implemented server-side yet (see [Known gaps](#known-gaps-to-decide-on)). Not required for internal use — ignore or wire around the license gate. |
 | Component/part images never show a preview | Known limitation — only one image per part round-trips today, and metadata-only on read. See [Known gaps](#known-gaps-to-decide-on). |
 | SmartScreen / "Windows protected your PC" when running the installer or add-in | The build isn't Authenticode-signed. Either click "More info → Run anyway" for internal use, or sign `BlackboxBOM.SolidWorks.dll` and the installer `.exe` with `signtool` before distributing. |
@@ -248,10 +260,80 @@ None of these were changed — they were left as-is rather than "fixed" on a gue
   `solidworks-plugin/` + `.github/workflows/` + docs — no `backend/` changes).
 - **Sign for distribution** (recommended): Authenticode-sign `BlackboxBOM.SolidWorks.dll`
   and the Inno Setup output with `signtool` to avoid SmartScreen/add-in trust warnings.
+- **`ApiClient.GetBom()` is dead code with a real bug**: nothing in the project calls it
+  today, but if it's ever wired up, deserializing the backend's response will throw —
+  `BomData.ModelType` is typed as the SolidWorks `swDocumentTypes_e` enum, while the
+  backend's `GET /api/v1/solidworks/bom` returns `model_type` as a free-text string (e.g.
+  `"Assembly"`) that doesn't match any enum member name. Left as a documented note rather
+  than "fixed" on a guess, since the right fix depends on a wire-format decision (string vs.
+  enum) — see the comment on `GetBom()` in `ApiClient.cs`.
 
 ---
 
 ## Change history
+
+### This pass (runtime auth wiring)
+
+**The core bug fixed this pass:** the add-in never actually authenticated at runtime. All
+the request/response shape fixes from prior passes were correct, but every one of those
+requests still went out with **no credentials at all** — `ApiClient.Authenticate()` (which
+sets a Bearer header) was only ever called from the unused 2-argument constructor, while
+`BlackboxBomAddin.ConnectToSW` constructs its `ApiClient` with the parameterless
+constructor, and no `X-API-Key` header was attached anywhere either. The backend correctly
+replied `401` to every one of these calls — but `UploadBom()`/`SyncBom()`/`ApplyChanges()`
+unconditionally ran `JsonConvert.DeserializeObject` on that 401 body regardless of status
+code, producing a default-valued (`ItemsAdded = 0`, `ItemsUpdated = 0`, `Success = false`
+but never checked) DTO — which `SyncToBlackbox()`/`BomPanel.OnSyncClick()` then reported as
+"Sync complete! 0 items added, 0 updated." with no indication anything had failed.
+
+Fixed:
+- **`ApiClient.ApplyAuthHeader()`** (new): attaches the saved API key as an `X-API-Key`
+  header on the client's `HttpClient` — the header `app/core/deps.py`'s
+  `_authenticate_by_api_key` checks first, ahead of any Bearer token. Called from
+  `LoadSettings()` (so both constructors, and therefore the add-in's actual runtime client,
+  pick it up) and from `SaveSettings()` (so Settings dialog "Save"/"Test Connection" updates
+  it immediately, matching the existing settings-write behavior). This was chosen over
+  forcing a `POST /api/v1/auth/plugin-login` round-trip at startup because it needs no
+  network call — `Authenticate()`/`plugin-login` remain available (2-arg constructor,
+  unchanged) for anything that wants an explicit Bearer session, but nothing forces that
+  blocking call during `ConnectToSW`.
+- **`ApiClient.EnsureSuccess()`** (new): checks the HTTP status *before* deserializing a
+  response body into a result DTO, in `UploadBom()`, `SyncBom()`, `ApplyChanges()`, and
+  `UploadSingleImage()`. A 401/403 now throws "Authentication failed - check API key/URL in
+  Settings"; any other non-2xx throws the HTTP status + response body. Both `SyncToBlackbox()`
+  and `BomPanel.OnSyncClick()` already wrap their calls in `try/catch` and show
+  `ex.Message` — no UI code needed to change for the honest error to surface.
+- **`ApiClient.UploadImages()`/`UploadSingleImage()`**: the per-image `try/catch` used to
+  swallow every failure into a `Debug.WriteLine` (including auth failures), so "Extract
+  Images" always reported "Extracted N component images" even if zero images made it to the
+  server. Failures are now collected and thrown as a single exception listing every failed
+  part, which `ExtractImages()`'s existing `catch` block surfaces.
+- **Pre-existing, unrelated compile bug fixed in passing**: `ApiClient.PostAsync()` (the
+  private POST helper) returned a plain `HttpResponseMessage` (already resolved internally
+  via `.Result`), while every one of its six call sites (`Authenticate()`, `UploadBom()`,
+  `SyncBom()`, `SendUpdate()`, `ApplyChanges()`, `ActivateLicense()`) called
+  `.Result`/`.Wait()` on that return value again, as if it were a `Task` — `CS1061:
+  'HttpResponseMessage' does not contain a definition for 'Result'`. This is an
+  assembly-independent C# error with nothing to do with SolidWorks interop, confirmed
+  present at the prior commit via a real Roslyn compile (the `UseNuGetSolidWorksInterop`
+  diagnostic build) before this pass touched the file — it just couldn't be seen by the
+  "official" build path, which fails earlier at the interop-assembly guard. Fixed by making
+  `PostAsync` `async Task<HttpResponseMessage>`; no call sites needed to change.
+- **Docs**: this section, [section 4](#4-configure-the-backend-connection), the
+  troubleshooting table, and [Known gaps](#known-gaps-to-decide-on) updated to match actual
+  behavior (previously section 4 described the `plugin-login`/Bearer flow as if it ran
+  automatically, which it never did).
+
+**Verification performed** (no SolidWorks install in this environment, consistent with
+prior passes): `dotnet build BlackboxBOM.SolidWorks.sln /p:Configuration=Release` still
+fails at exactly the same "SolidWorks interop assemblies not found" guard as before this
+pass's changes (section 7's documented, expected outcome on a machine/CI runner with no
+SolidWorks install). `dotnet build ... /p:UseNuGetSolidWorksInterop=true` (the informational
+diagnostic build) was run both before and after this pass's `ApiClient.cs` changes: the
+total error count went from 260 → 248, all 12 of the removed errors were the
+`PostAsync`/`.Result` bug above (6 unique locations, each reported twice) and were the only
+`ApiClient.cs` errors either build produced — i.e. zero new compile errors were introduced,
+and the pre-existing bug above is now actually fixed.
 
 ### This pass (CI + installer + checklist)
 

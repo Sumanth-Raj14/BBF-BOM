@@ -39,6 +39,18 @@ namespace BlackboxBOM.SolidWorks
 
         public string BaseUrl => _baseUrl;
 
+        // This is the constructor the add-in actually uses (BlackboxBomAddin.ConnectToSW ->
+        // `new ApiClient()`). It never called Authenticate() (that only happened on the
+        // 2-arg constructor below, which nothing in the add-in calls), so every request this
+        // client made went out with no credentials at all: no `X-API-Key`, no `Authorization`
+        // header. The backend's auth dependency (app.core.deps.get_current_user) rejected
+        // every one of them with 401, and the (pre-existing) unconditional
+        // JsonConvert.DeserializeObject on the response body turned that 401 JSON
+        // (`{"detail": "..."}`, none of whose fields match the DTOs below) into a
+        // default-valued "success" DTO — i.e. a silent no-op that reported "Sync complete!
+        // 0 items added, 0 updated." LoadSettings() below now also attaches the saved API key
+        // as an `X-API-Key` header (see ApplyAuthHeader) so this client is actually
+        // authenticated from construction on, without an extra network round-trip.
         public ApiClient()
         {
             _httpClient = new HttpClient();
@@ -52,6 +64,7 @@ namespace BlackboxBOM.SolidWorks
             _httpClient.Timeout = TimeSpan.FromMinutes(5);
             _baseUrl = baseUrl;
             _apiKey = apiKey;
+            ApplyAuthHeader();
             Authenticate();
         }
 
@@ -174,6 +187,12 @@ namespace BlackboxBOM.SolidWorks
                 var response = PostAsync("/api/v1/solidworks/sync", payload).Result;
                 var content = response.Content.ReadAsStringAsync().Result;
 
+                // Must check this BEFORE deserializing: a 401/403 body (`{"detail": "..."}`)
+                // does not match BomUploadResult's fields, so deserializing it anyway used to
+                // silently produce a default-valued (all-zero, Success=false-but-ignored) DTO
+                // instead of a visible error.
+                EnsureSuccess(response, content);
+
                 return JsonConvert.DeserializeObject<BomUploadResult>(content, JsonSettings);
             }
             catch (Exception ex)
@@ -207,6 +226,11 @@ namespace BlackboxBOM.SolidWorks
                 var response = PostAsync("/api/v1/solidworks/apply-sync", payload).Result;
                 var content = response.Content.ReadAsStringAsync().Result;
 
+                // See the matching comment in UploadBom() above — this is the call behind
+                // the "Sync to Blackbox" button, i.e. exactly the one that used to report a
+                // fake "Sync complete! 0 items added, 0 updated" on an unauthenticated 401.
+                EnsureSuccess(response, content);
+
                 return JsonConvert.DeserializeObject<BomSyncResult>(content, JsonSettings);
             }
             catch (Exception ex)
@@ -216,7 +240,18 @@ namespace BlackboxBOM.SolidWorks
         }
 
         /// <summary>
-        /// Get BOM from Blackbox for current model
+        /// Get BOM from Blackbox for current model.
+        ///
+        /// NOTE (dead code, not fixed): nothing in this project calls GetBom() today. If it
+        /// is ever wired up, deserializing the backend's response into <see cref="BomData"/>
+        /// will throw — the backend's GET /api/v1/solidworks/bom returns `model_type` as a
+        /// free-text string (Document.fileType, e.g. "Assembly"/"Part"/"cad"), while
+        /// BomData.ModelType is typed as the SolidWorks `swDocumentTypes_e` enum, whose
+        /// member names (swDocASSEMBLY, swDocPART, ...) don't match that string — Newtonsoft
+        /// has no member to bind it to and throws a JsonSerializationException. Fixing this
+        /// for real needs a decision on the wire format (e.g. change BomData.ModelType to a
+        /// string, or have the backend emit the enum member name) that's out of scope for
+        /// this pass; flagging it here so it isn't silently "fixed" on a guess.
         /// </summary>
         public BomData GetBom(string sourceFile)
         {
@@ -243,13 +278,32 @@ namespace BlackboxBOM.SolidWorks
         #region Image Operations
 
         /// <summary>
-        /// Upload component images to Blackbox
+        /// Upload every extracted component image. Unlike the old version of this method,
+        /// a failure (including a 401/403 from missing/invalid auth) is no longer swallowed
+        /// silently into a Debug.WriteLine — every failure is collected and surfaced to the
+        /// caller as a real exception, so "Extract Images" can no longer report
+        /// "Extracted N component images" when none of them actually made it to the server.
         /// </summary>
         public void UploadImages(List<ComponentImage> images)
         {
+            var failures = new List<string>();
+
             foreach (var image in images)
             {
-                UploadSingleImage(image);
+                try
+                {
+                    UploadSingleImage(image);
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"{image.PartNumber ?? "(unknown part)"}: {ex.Message}");
+                }
+            }
+
+            if (failures.Count > 0)
+            {
+                throw new Exception(
+                    $"{failures.Count} of {images.Count} image upload(s) failed: {string.Join("; ", failures)}");
             }
         }
 
@@ -267,32 +321,31 @@ namespace BlackboxBOM.SolidWorks
         /// </summary>
         private void UploadSingleImage(ComponentImage image)
         {
-            try
-            {
-                byte[] fileBytes = image.IsometricView ?? image.Thumbnail256 ?? image.Thumbnail128 ?? image.FrontView;
+            byte[] fileBytes = image.IsometricView ?? image.Thumbnail256 ?? image.Thumbnail128 ?? image.FrontView;
 
-                using (var form = new MultipartFormDataContent())
+            using (var form = new MultipartFormDataContent())
+            {
+                form.Add(new StringContent(image.PartNumber ?? ""), "part_number");
+
+                if (fileBytes != null)
                 {
-                    form.Add(new StringContent(image.PartNumber ?? ""), "part_number");
-
-                    if (fileBytes != null)
-                    {
-                        var fileContent = new ByteArrayContent(fileBytes);
-                        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
-                        form.Add(fileContent, "file", $"{image.PartNumber ?? "component"}.png");
-                    }
-
-                    var response = _httpClient.PostAsync($"{_baseUrl}/api/v1/solidworks/images", form).Result;
-
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        throw new Exception($"Image upload failed for {image.PartNumber}");
-                    }
+                    var fileContent = new ByteArrayContent(fileBytes);
+                    fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+                    form.Add(fileContent, "file", $"{image.PartNumber ?? "component"}.png");
                 }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Error uploading image: {ex.Message}");
+
+                var response = _httpClient.PostAsync($"{_baseUrl}/api/v1/solidworks/images", form).Result;
+                string content;
+                try
+                {
+                    content = response.Content.ReadAsStringAsync().Result;
+                }
+                catch
+                {
+                    content = "";
+                }
+
+                EnsureSuccess(response, content);
             }
         }
 
@@ -427,6 +480,8 @@ namespace BlackboxBOM.SolidWorks
                 var response = PostAsync(endpoint, changes).Result;
                 var content = response.Content.ReadAsStringAsync().Result;
 
+                EnsureSuccess(response, content);
+
                 return JsonConvert.DeserializeObject<ApplyResult>(content, JsonSettings);
             }
             catch (Exception ex)
@@ -558,6 +613,8 @@ namespace BlackboxBOM.SolidWorks
                 _baseUrl = "http://localhost:8000";
                 _apiKey = "";
             }
+
+            ApplyAuthHeader();
         }
 
         /// <summary>
@@ -568,6 +625,7 @@ namespace BlackboxBOM.SolidWorks
         {
             _baseUrl = baseUrl;
             _apiKey = apiKey;
+            ApplyAuthHeader();
 
             var settings = PluginSettings.Load();
             settings.ApiUrl = baseUrl;
@@ -579,11 +637,68 @@ namespace BlackboxBOM.SolidWorks
 
         #region Helper Methods
 
-        private HttpResponseMessage PostAsync(string endpoint, object payload)
+        /// <summary>
+        /// Attach the saved API key as an `X-API-Key` header on every request this client
+        /// makes from now on. This is the header the backend's auth dependency
+        /// (app.core.deps._authenticate_by_api_key) checks FIRST, ahead of any Bearer
+        /// token, so this alone authenticates every call the add-in actually makes (the
+        /// default-constructor client — see the comment on the parameterless constructor
+        /// above). Called from LoadSettings() (constructor/startup) and SaveSettings()
+        /// (Settings dialog "Save"/"Test Connection") so the header always reflects the
+        /// current key, never a stale or missing one.
+        /// </summary>
+        private void ApplyAuthHeader()
+        {
+            _httpClient.DefaultRequestHeaders.Remove("X-API-Key");
+            if (!string.IsNullOrWhiteSpace(_apiKey))
+            {
+                _httpClient.DefaultRequestHeaders.Add("X-API-Key", _apiKey);
+            }
+        }
+
+        /// <summary>
+        /// Throw a real, descriptive exception for any non-2xx response instead of letting
+        /// the caller deserialize an error body (e.g. FastAPI's `{"detail": "..."}`) into a
+        /// success DTO, which used to silently produce default-valued (0 items / false)
+        /// "success" results — most visibly "Sync complete! 0 items added, 0 updated" on an
+        /// unauthenticated 401. Call this AFTER reading the response body (pass the already-
+        /// read string) and BEFORE calling JsonConvert.DeserializeObject on it.
+        /// </summary>
+        private static void EnsureSuccess(HttpResponseMessage response, string content)
+        {
+            if (response.IsSuccessStatusCode) return;
+
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+                response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            {
+                throw new Exception(
+                    $"Authentication failed - check API key/URL in Settings (HTTP {(int)response.StatusCode}).");
+            }
+
+            throw new Exception(
+                $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}" +
+                (string.IsNullOrWhiteSpace(content) ? "" : $": {content}"));
+        }
+
+        // NOTE (pre-existing bug, unrelated to auth, fixed here because it sits directly in
+        // every method this pass touches): this used to return a plain HttpResponseMessage
+        // (already resolved via an internal `.Result`), but every call site — Authenticate(),
+        // UploadBom(), SyncBom(), SendUpdate(), ApplyChanges(), ActivateLicense() — calls
+        // `.Result`/`.Wait()` on its return value as though it were a Task. That is
+        // `HttpResponseMessage does not contain a definition for 'Result'/'Wait'` (CS1061) —
+        // an assembly-independent C# error that has nothing to do with SolidWorks interop
+        // and would block a real build the moment this file actually gets compiled (which
+        // the "official" build path never reaches today, since it fails earlier at the
+        // interop-assembly guard — see BUILD_AND_TEST_CHECKLIST.md). Confirmed present,
+        // unchanged, at the pre-existing base commit via a real Roslyn compile (the NuGet
+        // interop diagnostic build) before this pass touched this file. Returning
+        // Task<HttpResponseMessage> instead (and awaiting internally) makes every existing
+        // call site's `.Result`/`.Wait()` usage correct, with no call-site changes needed.
+        private async Task<HttpResponseMessage> PostAsync(string endpoint, object payload)
         {
             string json = JsonConvert.SerializeObject(payload, JsonSettings);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
-            return _httpClient.PostAsync($"{_baseUrl}{endpoint}", content).Result;
+            return await _httpClient.PostAsync($"{_baseUrl}{endpoint}", content);
         }
 
         #endregion
