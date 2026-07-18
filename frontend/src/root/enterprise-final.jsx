@@ -448,7 +448,19 @@ export const bulkOps = {
 };
 window.bulkOps = bulkOps;
 // ============ CONTEXT MENU ============
+// Cursor-positioned menu (opened from a right-click / "more" action, not a
+// trigger element) — reuses the shared .ui-menu / .ui-menu__item styling and
+// ARIA "menu" pattern (role=menu/menuitem, roving focus, Arrow/Home/End/
+// Escape) from components/ui/Menu.jsx so it matches the design system and is
+// fully keyboard-operable, while keeping the original x/y/items/onClose API.
 export function ContextMenu({ x, y, items, onClose }) {
+  const [activeIdx, setActiveIdx] = React.useState(-1);
+  const itemRefs = React.useRef([]);
+  const actionable = React.useMemo(
+    () => (items || []).map((it, i) => (it !== "divider" ? i : -1)).filter((i) => i >= 0),
+    [items],
+  );
+
   React.useEffect(() => {
     const handler = () => onClose();
     document.addEventListener("click", handler);
@@ -458,22 +470,56 @@ export function ContextMenu({ x, y, items, onClose }) {
       document.removeEventListener("contextmenu", handler);
     };
   }, [onClose]);
+
+  // Focus the first actionable item as soon as the menu appears so keyboard
+  // users (who cannot "hover" a context menu) can act on it immediately.
+  React.useEffect(() => {
+    if (actionable.length) setActiveIdx(actionable[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  React.useEffect(() => {
+    if (activeIdx >= 0) itemRefs.current[activeIdx]?.focus();
+  }, [activeIdx]);
+
   if (!items || items.length === 0) return null;
+
+  const move = (dir) => {
+    if (!actionable.length) return;
+    const pos = actionable.indexOf(activeIdx);
+    const nextPos = (pos + dir + actionable.length) % actionable.length;
+    setActiveIdx(actionable[nextPos]);
+  };
+  const onKeyDown = (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      move(1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      move(-1);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActiveIdx(actionable[0]);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setActiveIdx(actionable[actionable.length - 1]);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+    }
+  };
+
   return React.createElement(
     "div",
     {
-      className: "context-menu",
+      className: "ui-menu context-menu",
+      role: "menu",
+      "aria-label": __t("common.contextMenu") || "Context menu",
+      onKeyDown,
       style: {
         position: "fixed",
         left: x,
         top: y,
         zIndex: Z.FLOATING_PANEL,
-        background: "var(--bg)",
-        border: "1px solid var(--line)",
-        borderRadius: "var(--r-2)",
-        boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
-        padding: "4px 0",
-        minWidth: 160,
       },
       onClick: (e) => e.stopPropagation(),
     },
@@ -481,35 +527,29 @@ export function ContextMenu({ x, y, items, onClose }) {
       if (item === "divider") {
         return React.createElement("div", {
           key: i,
-          style: { height: 1, background: "var(--line)", margin: "4px 0" },
+          className: "ui-menu__divider",
+          role: "separator",
         });
       }
       return React.createElement(
         "button",
         {
           key: i,
+          ref: (el) => (itemRefs.current[i] = el),
+          type: "button",
+          role: "menuitem",
+          tabIndex: -1,
+          className: ["ui-menu__item", item.danger ? "ui-menu__item--danger" : ""]
+            .filter(Boolean)
+            .join(" "),
           onClick: () => {
             item.onClick?.();
             onClose();
           },
-          style: {
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            width: "100%",
-            padding: "6px 12px",
-            border: "none",
-            background: "transparent",
-            cursor: "pointer",
-            fontSize: 13,
-            color: item.danger ? "var(--danger)" : "var(--fg)",
-            textAlign: "left",
-          },
-          onMouseEnter: (e) => (e.target.style.background = "var(--bg-2)"),
-          onMouseLeave: (e) => (e.target.style.background = "transparent"),
         },
-        item.icon,
-        item.label,
+        item.icon &&
+          React.createElement("span", { "aria-hidden": "true" }, item.icon),
+        React.createElement("span", { className: "ui-menu__label" }, item.label),
       );
     }),
   );
@@ -521,10 +561,18 @@ ContextMenu.propTypes = {
   onClose: PropTypes.func,
 };
 // ============ TOOLTIP ============
+// Portal-rendered, viewport-clamped tooltip for use inside scrollable/
+// overflow-clipped containers (e.g. table cells) where the simpler
+// components/ui/Tooltip (which relies on normal document flow) would be
+// clipped. Kept as a distinct component for that reason, but restyled onto
+// the shared .ui-tooltip look/tokens and wired up for screen readers via
+// aria-describedby (previously the tooltip text was never announced) plus
+// Escape-to-dismiss.
 export function Tooltip({ children, text, position = "top" }) {
   const [show, setShow] = React.useState(false);
   const [pos, setPos] = React.useState({ x: 0, y: 0 });
   const ref = React.useRef(null);
+  const id = React.useId();
   React.useEffect(() => {
     if (!show || !ref.current) return;
     const rect = ref.current.getBoundingClientRect();
@@ -548,6 +596,10 @@ export function Tooltip({ children, text, position = "top" }) {
         onMouseLeave: () => setShow(false),
         onFocus: () => setShow(true),
         onBlur: () => setShow(false),
+        onKeyDown: (e) => {
+          if (e.key === "Escape") setShow(false);
+        },
+        "aria-describedby": show ? id : undefined,
         style: { display: "inline-flex" },
       },
       children,
@@ -558,16 +610,18 @@ export function Tooltip({ children, text, position = "top" }) {
           "div",
           {
             role: "tooltip",
+            id,
             style: {
               position: "fixed",
               left: pos.x,
               top: pos.y,
               zIndex: Z.FLOATING_CHILD,
-              background: "var(--fg)",
-              color: "var(--bg)",
-              padding: "4px 8px",
-              borderRadius: "var(--r-1)",
-              fontSize: 12,
+              background: "var(--text-primary)",
+              color: "var(--text-inverse)",
+              padding: "var(--sp-1) var(--sp-2)",
+              borderRadius: "var(--radius-sm)",
+              fontSize: "var(--fs-50)",
+              boxShadow: "var(--shadow-md)",
               whiteSpace: "nowrap",
               pointerEvents: "none",
               maxWidth: 300,

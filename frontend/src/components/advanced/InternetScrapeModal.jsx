@@ -1,11 +1,16 @@
 import PropTypes from "prop-types";
-import { Modal } from "../../globals";
+import { useState } from "react";
+
+import { Icon } from "../../globals";
+import { Modal, Button, Field, Input, Card, Badge, DataTable, Spinner } from "../ui";
 
 function InternetScrapeModal({ open, onClose }) {
+  const [url, setUrl] = useState("");
+  const [results, setResults] = useState(null);
+  const [loading, setLoading] = useState(false);
+
   if (!open) return null;
-  const [url, setUrl] = React.useState("");
-  const [results, setResults] = React.useState(null);
-  const [loading, setLoading] = React.useState(false);
+
   const scrape = async () => {
     if (!url.trim()) return;
     setLoading(true);
@@ -62,6 +67,21 @@ function InternetScrapeModal({ open, onClose }) {
     setResults(mock[domain] || mock.generic);
     setLoading(false);
   };
+
+  const specColumns = [
+    {
+      key: "spec",
+      header: "Specification",
+      width: 160,
+      render: (r) => <span className="font-mono fs-10 fg-3">{r.spec}</span>,
+    },
+    {
+      key: "value",
+      header: "Value",
+      render: (r) => <span className="fw-500 fs-12">{r.value}</span>,
+    },
+  ];
+
   return (
     <Modal
       open={open}
@@ -69,92 +89,90 @@ function InternetScrapeModal({ open, onClose }) {
       icon={<Icon.Search size={16} />}
       title="Internet Scraping Engine"
       subtitle="Extract component data from distributor sites"
-      wide
+      size="lg"
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             Close
-          </button>
-          <button className="btn primary" disabled={!results}>
+          </Button>
+          <Button variant="primary" disabled={!results}>
             Apply to BOM
-          </button>
+          </Button>
         </>
       }
     >
-      <div className="flex gap-8 mb-14">
-        <div className="search flex-1" style={{ height: 34 }}>
-          <Icon.Search size={11} />
-          <input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="Paste DigiKey / Mouser URL\u2026"
-            className="fs-12 flex-1"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") scrape();
-            }}
-          />
+      <div className="flex gap-8 items-end mb-16" style={{ flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <Field label="Product URL">
+            <Input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="Paste DigiKey / Mouser URL…"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") scrape();
+              }}
+            />
+          </Field>
         </div>
-        <button
-          className="btn primary"
+        <Button
+          variant="primary"
           onClick={scrape}
+          loading={loading}
           disabled={loading || !url.trim()}
         >
-          {loading ? "Scraping\u2026" : "Scrape"}
-        </button>
+          {loading ? "Scraping…" : "Scrape"}
+        </Button>
       </div>
+
       {loading && (
         <div className="text-center" style={{ padding: 60 }}>
-          <div className="spinner" style={{ margin: "0 auto 14px" }} />
-          <div className="font-mono fs-11 fg-3">Fetching from source\u2026</div>
+          <Spinner size="lg" label="Fetching from source" />
+          <div className="font-mono fs-11 fg-3 mt-14" aria-hidden="true">
+            Fetching from source…
+          </div>
         </div>
       )}
+
       {results && !loading && (
-        <div
-          className="bg-sunk rounded-r2 border-line mb-14"
-          style={{ padding: "10px 14px" }}
-        >
-          <div className="flex items-center gap-8 mb-4">
-            <span className="tag-pill font-mono">
+        <Card
+          title={results.pn}
+          subtitle={results.mfr}
+          actions={
+            <Badge tone="accent" pill>
               {results.source || "source"}
+            </Badge>
+          }
+          className="mb-16"
+        >
+          <p className="fs-11 fg-2">{results.desc}</p>
+          <div className="flex items-center gap-8 font-mono fs-10 fg-3 mt-8">
+            <span>
+              {results.stock != null
+                ? `${results.stock.toLocaleString()} in stock`
+                : "Stock N/A"}
             </span>
-            <span className="fw-700">{results.pn}</span>
-            <span className="fg-3">{results.mfr}</span>
+            <span aria-hidden="true">·</span>
+            <span>Lead: {results.lead}</span>
+            {results.rohs != null && (
+              <Badge tone={results.rohs ? "success" : "neutral"} pill>
+                {results.rohs ? "RoHS compliant" : "RoHS unknown"}
+              </Badge>
+            )}
           </div>
-          <div className="fs-11 fg-2">{results.desc}</div>
-          <div className="font-mono fs-10 fg-3 mt-4">
-            {results.stock != null
-              ? `${results.stock.toLocaleString()} in stock`
-              : "Stock N/A"}{" "}
-            · Lead: {results.lead}
-          </div>
-        </div>
+        </Card>
       )}
+
       {results && !loading && (
-        <div className="border-line rounded-r2 overflow-h">
-          <div
-            className="bg-sunk font-mono fs-9 uppercase letter-sp-6 fg-3 border-bottom"
-            style={{ padding: "8px 12px" }}
-          >
-            Specifications
-          </div>
-          <table className="bom-table table-auto">
-            <tbody>
-              {Object.entries(results.specs).map(([k, v]) => (
-                <tr key={k}>
-                  <td
-                    className="font-mono fs-10 fg-3"
-                    style={{ padding: "6px 12px", width: 140 }}
-                  >
-                    {k}
-                  </td>
-                  <td className="fw-500 fs-12" style={{ padding: "6px 12px" }}>
-                    {v}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={specColumns}
+          rows={Object.entries(results.specs).map(([spec, value]) => ({
+            spec,
+            value,
+          }))}
+          getRowKey={(r) => r.spec}
+          ariaLabel="Scraped specifications"
+          dense
+        />
       )}
     </Modal>
   );

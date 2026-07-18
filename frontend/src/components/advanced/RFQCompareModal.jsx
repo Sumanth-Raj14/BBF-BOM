@@ -2,9 +2,22 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { INR, Modal } from "../../globals";
+import { Icon, INR } from "../../globals";
+import { Badge, Button, Modal } from "../ui";
+
+const CRITERIA = [
+  { label: "Unit price (qty 50)", key: "unit", kind: "money" },
+  { label: "Lead time (days)", key: "lead", kind: "days" },
+  { label: "MOQ", key: "moq", kind: "num" },
+  { label: "Payment terms", key: "terms", kind: "text" },
+  { label: "Quality score", key: "quality", kind: "pct" },
+  { label: "Free samples?", key: "paid_samples", kind: "bool-inv" },
+];
+
 function RFQCompareModal({ open, onClose }) {
+  const [picked, setPicked] = React.useState(null);
   if (!open) return null;
+
   const part = {
     pn: "EL-PSU-240W",
     name: "Power Supply, 240W ATX",
@@ -69,7 +82,7 @@ function RFQCompareModal({ open, onClose }) {
     lead: Math.min(...quotes.map((q) => q.lead)),
     quality: Math.max(...quotes.map((q) => q.quality)),
   };
-  const [picked, setPicked] = React.useState(null);
+
   return (
     <Modal
       open={open}
@@ -77,18 +90,21 @@ function RFQCompareModal({ open, onClose }) {
       icon={<Icon.Diff size={16} />}
       title={__t("advanced.rfqCompare.title") || "RFQ Comparison"}
       subtitle={`${part.pn} · ${part.name} · ${quotes.length} responses received`}
-      wide
+      size="xl"
       footer={
         <>
-          <span className="left">
+          <span
+            className="font-mono fs-10 fg-3"
+            style={{ marginRight: "auto" }}
+          >
             Target unit: {INR(part.target_unit, 2)} · Best quote:{" "}
             {INR(best.unit, 2)}
           </span>
-          <button className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            className="btn primary"
+          <Button variant="secondary" onClick={onClose}>
+            {__t("common.cancel") || "Cancel"}
+          </Button>
+          <Button
+            variant="primary"
             disabled={!picked}
             onClick={() => {
               onClose();
@@ -96,72 +112,77 @@ function RFQCompareModal({ open, onClose }) {
             }}
           >
             Award to {picked || "vendor"}
-          </button>
+          </Button>
         </>
       }
     >
-      <div className="ox-auto">
-        <table className="w-100p fs-11" style={{ borderCollapse: "collapse" }}>
+      <div className="ui-table-wrap">
+        <table
+          className="ui-table"
+          aria-label={
+            __t("advanced.rfqCompare.tableLabel") ||
+            "RFQ comparison by vendor"
+          }
+        >
           <thead>
             <tr>
-              <th
-                className="text-left font-mono fs-9 uppercase letter-sp-6 fg-3"
-                style={{ padding: 10, borderBottom: "2px solid var(--line)" }}
-              >
+              <th scope="col" className="font-mono fs-9 uppercase letter-sp-6 fg-3 text-left">
                 Criterion
               </th>
-              {quotes.map((q) => (
-                <th
-                  key={q.vendor}
-                  className="bl-1 text-center c-pointer"
-                  style={{
-                    padding: 10,
-                    borderBottom: "2px solid var(--line)",
-                    minWidth: 140,
-                    background:
-                      picked === q.vendor
-                        ? "var(--accent-soft)"
-                        : "transparent",
-                  }}
-                  onClick={() => setPicked(q.vendor)}
-                >
-                  <div className="fw-700 fs-13">{q.vendor}</div>
-                  <div className="font-mono fs-9 fg-3 mt-2">
-                    {q.country} · ★ {q.rating}
-                  </div>
-                  {q.preferred && (
-                    <span
-                      className="d-iblock mt-4 font-mono fg-accent letter-sp-6"
-                      style={{ fontSize: 8 }}
+              {quotes.map((q) => {
+                const selected = picked === q.vendor;
+                return (
+                  <th
+                    key={q.vendor}
+                    scope="col"
+                    className="text-center"
+                    style={{
+                      borderLeft: "1px solid var(--border-subtle)",
+                      minWidth: 140,
+                      padding: 0,
+                      background: selected ? "var(--bg-selected)" : "transparent",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="ui-focusable"
+                      onClick={() => setPicked(q.vendor)}
+                      aria-pressed={selected}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                        padding: "10px",
+                        font: "inherit",
+                        color: "inherit",
+                      }}
                     >
-                      PREFERRED
-                    </span>
-                  )}
-                </th>
-              ))}
+                      <div className="fw-700 fs-13">{q.vendor}</div>
+                      <div className="font-mono fs-9 fg-3 mt-2">
+                        {q.country} · ★ {q.rating}
+                      </div>
+                      {q.preferred && (
+                        <Badge tone="accent" pill className="mt-4">
+                          Preferred
+                        </Badge>
+                      )}
+                    </button>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
-            {[
-              ["Unit price (qty 50)", "unit", "money", "low"],
-              ["Lead time (days)", "lead", "days", "low"],
-              ["MOQ", "moq", "num", "low"],
-              ["Payment terms", "terms", "text"],
-              ["Quality score", "quality", "pct", "high"],
-              ["Free samples?", "paid_samples", "bool-inv"],
-            ].map(([label, key, kind]) => (
+            {CRITERIA.map(({ label, key, kind }) => (
               <tr key={key}>
-                <td
-                  className="font-mono fs-10 fg-3 uppercase letter-sp-4"
-                  style={{
-                    padding: 10,
-                    borderBottom: "1px solid var(--line-soft)",
-                  }}
-                >
+                <td className="font-mono fs-10 fg-3 uppercase letter-sp-4">
                   {label}
                 </td>
                 {quotes.map((q) => {
                   const v = q[key];
+                  const selected = picked === q.vendor;
                   const isBest =
                     (kind === "money" && v === best.unit) ||
                     (kind === "days" && v === best.lead) ||
@@ -181,24 +202,28 @@ function RFQCompareModal({ open, onClose }) {
                   return (
                     <td
                       key={q.vendor}
-                      className="bl-1 text-center"
+                      className="text-center"
                       style={{
-                        padding: 10,
-                        borderBottom: "1px solid var(--line-soft)",
-                        background:
-                          picked === q.vendor
-                            ? "var(--accent-soft)"
-                            : "transparent",
+                        borderLeft: "1px solid var(--border-subtle)",
+                        background: selected ? "var(--bg-selected)" : "transparent",
                       }}
                     >
                       <span
+                        className="font-mono"
                         style={{
                           fontWeight: isBest ? 700 : 500,
-                          color: isBest ? "var(--ok)" : "var(--fg)",
+                          color: isBest ? "var(--ok-text)" : "var(--text-primary)",
                         }}
                       >
                         {display}
-                        {isBest && <span className="ml-4 fs-9 fg-ok">★</span>}
+                        {isBest && (
+                          <span
+                            className="ml-4 fs-9"
+                            style={{ color: "var(--ok-text)" }}
+                          >
+                            ★
+                          </span>
+                        )}
                       </span>
                     </td>
                   );
@@ -206,29 +231,27 @@ function RFQCompareModal({ open, onClose }) {
               </tr>
             ))}
             <tr>
-              <td
-                className="font-mono fs-10 fg-3 uppercase"
-                style={{ padding: 14 }}
-              >
+              <td className="font-mono fs-10 fg-3 uppercase" style={{ padding: 14 }}>
                 Total (50 units)
               </td>
-              {quotes.map((q) => (
-                <td
-                  key={q.vendor}
-                  className="bl-1 text-center"
-                  style={{
-                    padding: 14,
-                    background:
-                      picked === q.vendor
-                        ? "var(--accent-soft)"
-                        : "transparent",
-                  }}
-                >
-                  <span className="font-mono fs-14 fw-700">
-                    {INR(q.unit * 50, 0)}
-                  </span>
-                </td>
-              ))}
+              {quotes.map((q) => {
+                const selected = picked === q.vendor;
+                return (
+                  <td
+                    key={q.vendor}
+                    className="text-center"
+                    style={{
+                      borderLeft: "1px solid var(--border-subtle)",
+                      padding: 14,
+                      background: selected ? "var(--bg-selected)" : "transparent",
+                    }}
+                  >
+                    <span className="font-mono fs-14 fw-700">
+                      {INR(q.unit * 50, 0)}
+                    </span>
+                  </td>
+                );
+              })}
             </tr>
           </tbody>
         </table>

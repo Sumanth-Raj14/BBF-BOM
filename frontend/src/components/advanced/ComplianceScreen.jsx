@@ -1,4 +1,27 @@
-import { api } from "../../globals";
+import { api, Icon } from "../../globals";
+import {
+  ScreenHeader,
+  Tabs,
+  TabPanel,
+  Button,
+  DataTable,
+  StatusPill,
+  Badge,
+  EmptyState,
+  Spinner,
+} from "../ui";
+
+const COMPLIANCE_TABS_ID = "compliance-tabs";
+
+// Domain compliance status -> semantic tone (not covered by the shared
+// STATUS_TONES map, so resolved explicitly here).
+const COMPLIANCE_TONE = {
+  valid: "success",
+  expiring: "warning",
+  expired: "danger",
+  missing: "neutral",
+};
+
 function ComplianceScreen() {
   const [docs, setDocs] = React.useState([]);
   const [packs, setPacks] = React.useState([]);
@@ -68,51 +91,118 @@ function ComplianceScreen() {
     missing: docs.filter((d) => Object.values(d).includes("missing")).length,
     expired: docs.filter((d) => Object.values(d).includes("expired")).length,
   };
-  const colorFor = (s) =>
-    s === "valid"
-      ? "var(--ok)"
-      : s === "expiring"
-        ? "var(--warn)"
-        : s === "expired"
-          ? "var(--danger)"
-          : "var(--fg-3)";
+
+  const tabItems = [
+    { value: "parts", label: "Parts", count: docs.length },
+    { value: "packs", label: "Compliance Packs", count: packs.length },
+  ];
+
+  const loadingRow = (label) => (
+    <div
+      className="flex items-center gap-8 fg-3 fs-12"
+      style={{ padding: "32px 0" }}
+    >
+      <Spinner size="sm" label={label} />
+      <span aria-hidden="true">Loading…</span>
+    </div>
+  );
+
+  const statusCell = (status) => (
+    <StatusPill
+      tone={COMPLIANCE_TONE[status] || "neutral"}
+      label={String(status || "—").toUpperCase()}
+    />
+  );
+
+  const partColumns = [
+    {
+      key: "pn",
+      header: "Part No.",
+      render: (d) => <span className="mono fw-600">{d.pn}</span>,
+    },
+    { key: "rohs", header: "RoHS", render: (d) => statusCell(d.rohs) },
+    { key: "reach", header: "REACH", render: (d) => statusCell(d.reach) },
+    {
+      key: "conflict",
+      header: "Conflict Minerals",
+      render: (d) => statusCell(d.conflict),
+    },
+    {
+      key: "lab",
+      header: "Lab / Source",
+      render: (d) => <span className="mono fg-3">{d.lab}</span>,
+    },
+    {
+      key: "reach_expires",
+      header: "Cert expires",
+      render: (d) => (
+        <span
+          className="mono"
+          style={{
+            color:
+              d.reach_expires &&
+              new Date(d.reach_expires) < new Date("2026-08-25")
+                ? "var(--warn)"
+                : "var(--fg-3)",
+          }}
+        >
+          {d.reach_expires || "—"}
+        </span>
+      ),
+    },
+  ];
+
+  const packColumns = [
+    {
+      key: "name",
+      header: "Pack Name",
+      render: (p) => <span className="fw-600">{p.pack_name || p.name}</span>,
+    },
+    {
+      key: "standard",
+      header: "Standard",
+      render: (p) => <Badge tone="accent">{p.standard || "—"}</Badge>,
+    },
+    {
+      key: "requirement_count",
+      header: "Requirements",
+      align: "right",
+      render: (p) => <span className="mono">{p.requirement_count || 0}</span>,
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (p) => (
+        <StatusPill
+          tone={p.is_active ? "success" : "neutral"}
+          label={p.is_active ? "Active" : "Inactive"}
+        />
+      ),
+    },
+  ];
+
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>Compliance</h1>
-          <div className="sub">
-            {loading
-              ? "Loading\u2026"
-              : `${docs.length} parts tracked · ${packs.length} compliance packs · RoHS · REACH · Conflict Minerals`}
-          </div>
-        </div>
-        <div className="flex gap-8">
-          <div className="tabs flex">
-            {["parts", "packs"].map((t) => (
-              <button
-                key={t}
-                className={"tab " + (activeTab === t ? "active" : "")}
-                onClick={() => setActiveTab(t)}
-                style={{
-                  padding: "4px 12px",
-                  borderRadius: "var(--r-2)",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  border: "none",
-                  cursor: "pointer",
-                  background:
-                    activeTab === t ? "var(--bg-elev)" : "transparent",
-                }}
-              >
-                {t === "parts" ? "Parts" : "Compliance Packs"}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      <ScreenHeader
+        title="Compliance"
+        description={
+          loading
+            ? "Loading…"
+            : `${docs.length} parts tracked · ${packs.length} compliance packs · RoHS · REACH · Conflict Minerals`
+        }
+      />
+
+      <Tabs
+        id={COMPLIANCE_TABS_ID}
+        items={tabItems}
+        value={activeTab}
+        onChange={setActiveTab}
+        ariaLabel="Compliance view"
+        className="mb-16"
+      />
+
       <div
-        className="kpi-grid"
+        className="kpi-grid mb-16"
         style={{ gridTemplateColumns: "repeat(4, 1fr)" }}
       >
         {[
@@ -129,109 +219,46 @@ function ComplianceScreen() {
           </div>
         ))}
       </div>
-      {activeTab === "parts" && (
-        <div className="card">
-          <table className="bom-table table-auto">
-            <thead>
-              <tr>
-                <th className="pl-16">Part No.</th>
-                <th>RoHS</th>
-                <th>REACH</th>
-                <th>Conflict Minerals</th>
-                <th>Lab / Source</th>
-                <th>Cert expires</th>
-              </tr>
-            </thead>
-            <tbody>
-              {docs.map((d) => (
-                <tr key={d.pn}>
-                  <td className="mono pl-16 fw-600">{d.pn}</td>
-                  {["rohs", "reach", "conflict"].map((c) => (
-                    <td key={c}>
-                      <span
-                        className="inline-flex items-center gap-6 font-mono fs-11"
-                        style={{ color: colorFor(d[c]) }}
-                      >
-                        <span
-                          className="w-8 h-8"
-                          style={{
-                            borderRadius: 99,
-                            background: colorFor(d[c]),
-                          }}
-                        />
-                        {d[c].toUpperCase()}
-                      </span>
-                    </td>
-                  ))}
-                  <td className="mono fg-3">{d.lab}</td>
-                  <td
-                    className="mono"
-                    style={{
-                      color:
-                        d.reach_expires &&
-                        new Date(d.reach_expires) < new Date("2026-08-25")
-                          ? "var(--warn)"
-                          : "var(--fg-3)",
-                    }}
-                  >
-                    {d.reach_expires || "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+      <TabPanel
+        id={COMPLIANCE_TABS_ID}
+        value="parts"
+        active={activeTab === "parts"}
+      >
+        <DataTable
+          dense
+          ariaLabel="Parts compliance"
+          columns={partColumns}
+          rows={docs}
+          getRowKey={(d) => d.pn}
+          empty={loading ? loadingRow("Loading compliance data…") : <EmptyState title="No parts tracked" />}
+        />
+      </TabPanel>
+
+      <TabPanel
+        id={COMPLIANCE_TABS_ID}
+        value="packs"
+        active={activeTab === "packs"}
+      >
+        <div className="flex justify-between items-center mb-12">
+          <h3 className="m-0 fs-14 fw-600">Compliance Packs</h3>
+          <Button variant="primary" size="sm">
+            <Icon.Plus size={12} /> New Pack
+          </Button>
         </div>
-      )}
-      {activeTab === "packs" && (
-        <div className="card">
-          <div className="flex justify-between items-center mb-12">
-            <h3 className="m-0 fs-14 fw-600">Compliance Packs</h3>
-            <button className="btn">New Pack</button>
-          </div>
-          <table className="bom-table table-auto">
-            <thead>
-              <tr>
-                <th className="pl-16">Pack Name</th>
-                <th>Standard</th>
-                <th>Requirements</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {packs.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={4}
-                    className="empty p-16"
-                    style={{ textAlign: "center", color: "var(--fg-3)" }}
-                  >
-                    No compliance packs configured.
-                  </td>
-                </tr>
-              ) : (
-                packs.map((p) => (
-                  <tr key={p.id}>
-                    <td className="pl-16 fw-600">{p.pack_name || p.name}</td>
-                    <td>
-                      <span className="cat assembly">{p.standard || "—"}</span>
-                    </td>
-                    <td className="mono">{p.requirement_count || 0}</td>
-                    <td>
-                      <span
-                        className={
-                          "status " + (p.is_active ? "active" : "draft")
-                        }
-                      >
-                        {p.is_active ? "Active" : "Inactive"}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+        <DataTable
+          dense
+          ariaLabel="Compliance packs"
+          columns={packColumns}
+          rows={packs}
+          getRowKey={(p) => p.id}
+          empty={
+            loading
+              ? loadingRow("Loading compliance packs…")
+              : <EmptyState title="No compliance packs configured." />
+          }
+        />
+      </TabPanel>
     </div>
   );
 }
