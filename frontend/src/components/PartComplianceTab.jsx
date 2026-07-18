@@ -18,7 +18,13 @@ const ROHS_TONE = {
 };
 
 export function PartComplianceTab({ row }) {
-  const partId = row?.id;
+  // `row.id` is a synthetic tree-node key ("api-" + backend id for API-backed
+  // rows, or a fixture id like "r1.4.1" for demo rows) — never the real
+  // backend part id. The real numeric id is threaded separately as
+  // `row.partId` by convertApiPartsToTree (utils/bom.js). Demo/fixture rows
+  // have no `partId` at all, so this correctly falls through to the
+  // honest-failure path below rather than sending a bogus id to the API.
+  const partId = typeof row?.partId === "number" ? row.partId : null;
   const [substances, setSubstances] = React.useState([]);
   const [composition, setComposition] = React.useState([]);
   const [compliance, setCompliance] = React.useState(null);
