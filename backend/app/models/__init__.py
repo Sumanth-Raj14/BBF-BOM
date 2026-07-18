@@ -14,6 +14,7 @@ from app.models.calendar_event import CalendarEvent
 # Enterprise models
 from app.models.bom import BOM
 from app.models.bom import BOMItem as BOMItemMaster
+from app.models.bom_closure import BomClosure
 from app.models.bom_item import BomItem
 from app.models.bom_snapshot import BomBaseline, BomSnapshot
 from app.models.bom_template import BomTemplate

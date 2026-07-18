@@ -11,6 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.security import verify_password, verify_token_with_blacklist
 from app.core.tenant_context import set_tenant_id
+from app.db.rls import (
+    apply_rls_auth_bootstrap,
+    apply_rls_tenant_context,
+    clear_rls_auth_bootstrap,
+)
 from app.db.session import get_db
 from app.models.api_key import ApiKey
 from app.models.digital_signature import UserMfa
@@ -77,6 +82,16 @@ async def _authenticate_by_api_key(request: Request, db: AsyncSession) -> Option
     if not api_key_header or "_" not in api_key_header:
         return None
 
+    # Postgres RLS defense-in-depth (opt-in, no-op unless ENABLE_RLS +
+    # postgresql): api_keys/users/user_mfa are themselves RLS-protected
+    # tenant tables, but the tenant is not yet known -- that's exactly what
+    # the reads below are discovering. Open the narrow, transaction-local
+    # auth-bootstrap escape hatch (see app.db.rls / migration 040) BEFORE
+    # issuing any of those reads, and close it the moment we're done with
+    # them (every return path below), so it never applies to later,
+    # tenant-scoped business-logic queries.
+    await apply_rls_auth_bootstrap(db)
+
     # Use key prefix for indexed lookup instead of O(n) enumeration
     key_prefix = api_key_header.split("_")[0]
     result = await db.execute(
@@ -87,13 +102,16 @@ async def _authenticate_by_api_key(request: Request, db: AsyncSession) -> Option
     )
     api_key = result.scalar_one_or_none()
     if not api_key or not verify_password(api_key_header, api_key.key_hash):
+        await clear_rls_auth_bootstrap(db)
         return None
 
     if api_key.expires_at and api_key.expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
+        await clear_rls_auth_bootstrap(db)
         return None
 
     # Per-API-key rate limiting
     if not await _check_api_key_rate_limit(key_prefix):
+        await clear_rls_auth_bootstrap(db)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="API key rate limit exceeded (120 req/min per key)",
@@ -101,11 +119,16 @@ async def _authenticate_by_api_key(request: Request, db: AsyncSession) -> Option
         )
 
     api_key.last_used_at = datetime.now(UTC)
+    # NOTE: db.commit() ends the current transaction, which resets any
+    # `SET LOCAL`/transaction-local GUC (including the bootstrap flag just
+    # set above) -- so it must be re-opened for the reads that follow.
     await db.commit()
+    await apply_rls_auth_bootstrap(db)
 
     result = await db.execute(select(User).where(User.id == api_key.user_id))
     user = result.scalar_one_or_none()
     if not user or not user.isActive:
+        await clear_rls_auth_bootstrap(db)
         return None
 
     # MFA enforcement for superusers via API key
@@ -114,10 +137,34 @@ async def _authenticate_by_api_key(request: Request, db: AsyncSession) -> Option
             select(UserMfa).where(UserMfa.user_id == user.id, UserMfa.is_enabled)
         )
         if not result.scalar_one_or_none():
+            await clear_rls_auth_bootstrap(db)
             return None
 
+    await clear_rls_auth_bootstrap(db)
     set_tenant_id(user.effective_tenant_id)
+    # Postgres RLS defense-in-depth (opt-in, no-op unless ENABLE_RLS + postgresql):
+    # see app.db.rls for details. App-layer isolation above is unaffected either way.
+    # Use the row's own (always-present) tenantId rather than
+    # effective_tenant_id here: RLS is pinning *this transaction* so the
+    # user's own row (and their own user_mfa row) stay visible for the
+    # remainder of the request, including for superusers, whose
+    # effective_tenant_id is None (a value apply_rls_tenant_context always
+    # treats as a no-op). Known staged limitation: this means a superuser's
+    # cross-tenant business-logic reads are, once ENABLE_RLS is on, still
+    # additionally scoped by RLS to their own home tenant -- full
+    # superuser-cross-tenant RLS bypass is out of scope for this pass.
+    await apply_rls_tenant_context(db, _rls_pin_tenant_id(user))
     return user
+
+
+def _rls_pin_tenant_id(user: User) -> Optional[int]:
+    """The tenant to pin for RLS purposes once auth has resolved: always
+    the user's own concrete `tenantId` (never None), even for superusers --
+    see the comment above each call site for why this differs from
+    `effective_tenant_id` (which app-layer `set_tenant_id` still uses
+    unchanged, for both auth paths).
+    """
+    return user.tenantId
 
 
 # Per-user rate limiting (token-authenticated users)
@@ -187,14 +234,34 @@ async def get_current_user(
             headers={"Retry-After": "60"},
         )
 
+    # Postgres RLS defense-in-depth (opt-in, no-op unless ENABLE_RLS +
+    # postgresql): `users` is itself an RLS-protected tenant table, but the
+    # SELECT below is exactly how we discover the tenant. Unlike the
+    # API-key path, the bearer token already carries a *signed and
+    # verified* tenantId/isSuperuser claim (set at issuance in
+    # create_tokens_for_user) -- verify_token_with_blacklist above has
+    # already validated the signature, so it's safe to seed the RLS
+    # tenant pin from those claims BEFORE the User row is selected,
+    # avoiding any bootstrap escape hatch for this path entirely.
+    claimed_tenant_id = payload.get("tenantId")
+    set_tenant_id(None if payload.get("isSuperuser") else claimed_tenant_id)
+    await apply_rls_tenant_context(db, claimed_tenant_id)
+
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
 
     if user is None:
         raise credentials_exception
 
-    # Set tenant context for multi-tenancy
+    # Re-pin using the freshly-loaded, authoritative row (covers tenant
+    # reassignment/superuser promotion that may have happened since the
+    # token was issued) for the remainder of the request.
     set_tenant_id(user.effective_tenant_id)
+    # See _rls_pin_tenant_id: RLS is pinned to the row's own concrete
+    # tenantId (not effective_tenant_id) so the user's own row -- and, for
+    # superusers, their own user_mfa row checked in get_current_superuser
+    # right after this dependency resolves -- stay visible.
+    await apply_rls_tenant_context(db, _rls_pin_tenant_id(user))
 
     return user
 

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import cache_get, cache_invalidate, cache_set
 from app.core.tenant_context import get_tenant_id
 from app.models.bom import BOM, BOMItem
+from app.models.bom_closure import BomClosure
 from app.models.bom_item import BomItem as TemplateBomItem
 from app.models.bom_snapshot import BomBaseline, BomSnapshot
 from app.models.bom_template import BomTemplate
@@ -122,6 +123,7 @@ _BOM_ITEM_WRITABLE_FIELDS = {
 async def _invalidate_bom_caches(bom_id: int) -> None:
     await cache_invalidate(f"bom:{bom_id}")
     await cache_invalidate(f"bom:explosion:{bom_id}:*")
+    await cache_invalidate(f"bom:explosion_closure:{bom_id}:*")
     await cache_invalidate(f"bom:cost_rollup:{bom_id}")
 
 
@@ -209,6 +211,153 @@ async def _validate_no_duplicate(
         )
 
 
+# ---- BomClosure maintenance (WS5) ----
+#
+# Maintained incrementally, scoped by BOTH bom_id AND tenantId, alongside
+# every write below. `item_id` MUST already be persisted (post-flush) before
+# any of these run, since closure rows FK-reference it.
+
+
+async def _closure_add_item(
+    db: AsyncSession,
+    bom_id: int,
+    tid,
+    item_id: int,
+    parent_item_id: Optional[int],
+) -> None:
+    """New line: write its self row (depth 0), plus one row for every
+    ancestor of its parent (depth+1) — i.e. it inherits its parent's full
+    ancestor chain, one hop further away."""
+    db.add(
+        BomClosure(
+            bom_id=bom_id,
+            tenantId=tid,
+            ancestor_item_id=item_id,
+            descendant_item_id=item_id,
+            depth=0,
+        )
+    )
+    if parent_item_id is None:
+        return
+    stmt = select(BomClosure).where(
+        BomClosure.bom_id == bom_id, BomClosure.descendant_item_id == parent_item_id
+    )
+    if tid is not None:
+        stmt = stmt.where(BomClosure.tenantId == tid)
+    parent_ancestors = (await db.execute(stmt)).scalars().all()
+    for row in parent_ancestors:
+        db.add(
+            BomClosure(
+                bom_id=bom_id,
+                tenantId=tid,
+                ancestor_item_id=row.ancestor_item_id,
+                descendant_item_id=item_id,
+                depth=row.depth + 1,
+            )
+        )
+
+
+async def _closure_remove_subtree(db: AsyncSession, bom_id: int, tid, item_id: int) -> None:
+    """Delete `item_id` and its ENTIRE subtree — from bom_items_master and
+    from the closure table — mirroring the ON DELETE CASCADE declared on
+    parent_item_id (which Postgres enforces at the DB level but which SQLite,
+    as used in tests, does not enforce by default), so behavior is identical
+    on both backends regardless of FK-pragma state."""
+    stmt = select(BomClosure.descendant_item_id, BomClosure.depth).where(
+        BomClosure.bom_id == bom_id, BomClosure.ancestor_item_id == item_id
+    )
+    if tid is not None:
+        stmt = stmt.where(BomClosure.tenantId == tid)
+    subtree_rows = (await db.execute(stmt)).all()
+
+    depth_by_id: dict[int, int] = {item_id: 0}
+    for r in subtree_rows:
+        depth_by_id[r.descendant_item_id] = r.depth
+    subtree_ids = set(depth_by_id)
+
+    # Delete deepest descendants first (regardless of backend FK enforcement)
+    # so no ordering issue ever arises, then the root of the removed subtree.
+    ordered_ids = sorted(subtree_ids, key=lambda i: -depth_by_id[i])
+    items_stmt = select(BOMItem).where(BOMItem.id.in_(subtree_ids), BOMItem.bom_id == bom_id)
+    if tid is not None:
+        items_stmt = items_stmt.where(BOMItem.tenantId == tid)
+    items_by_id = {i.id: i for i in (await db.execute(items_stmt)).scalars().all()}
+    for iid in ordered_ids:
+        row = items_by_id.get(iid)
+        if row is not None:
+            await db.delete(row)
+    await db.flush()
+
+    # Every closure row mentioning any removed item, in EITHER direction —
+    # a removed descendant also appears as the descendant side of rows owned
+    # by ancestors ABOVE item_id, which must go too.
+    closure_stmt = select(BomClosure).where(
+        BomClosure.bom_id == bom_id,
+        (BomClosure.ancestor_item_id.in_(subtree_ids))
+        | (BomClosure.descendant_item_id.in_(subtree_ids)),
+    )
+    if tid is not None:
+        closure_stmt = closure_stmt.where(BomClosure.tenantId == tid)
+    for crow in (await db.execute(closure_stmt)).scalars().all():
+        await db.delete(crow)
+
+
+async def _closure_reparent(
+    db: AsyncSession,
+    bom_id: int,
+    tid,
+    item_id: int,
+    new_parent_item_id: Optional[int],
+) -> None:
+    """A line's parent_item_id changed: detach its whole subtree from every
+    OLD external ancestor, then reattach the subtree beneath the new
+    parent's own ancestor chain (or leave it rootless if the new parent is
+    None). Internal (subtree-to-subtree) closure rows are untouched — only
+    the tree's shape ABOVE item_id changed, not below it."""
+    stmt = select(BomClosure.descendant_item_id, BomClosure.depth).where(
+        BomClosure.bom_id == bom_id, BomClosure.ancestor_item_id == item_id
+    )
+    if tid is not None:
+        stmt = stmt.where(BomClosure.tenantId == tid)
+    subtree_rows = (await db.execute(stmt)).all()
+    subtree_depth: dict[int, int] = {item_id: 0}
+    for r in subtree_rows:
+        subtree_depth[r.descendant_item_id] = r.depth
+    subtree_ids = set(subtree_depth)
+
+    old_links_stmt = select(BomClosure).where(
+        BomClosure.bom_id == bom_id,
+        BomClosure.descendant_item_id.in_(subtree_ids),
+        BomClosure.ancestor_item_id.notin_(subtree_ids),
+    )
+    if tid is not None:
+        old_links_stmt = old_links_stmt.where(BomClosure.tenantId == tid)
+    for row in (await db.execute(old_links_stmt)).scalars().all():
+        await db.delete(row)
+    await db.flush()
+
+    if new_parent_item_id is None:
+        return
+
+    new_parent_ancestors_stmt = select(BomClosure).where(
+        BomClosure.bom_id == bom_id, BomClosure.descendant_item_id == new_parent_item_id
+    )
+    if tid is not None:
+        new_parent_ancestors_stmt = new_parent_ancestors_stmt.where(BomClosure.tenantId == tid)
+    new_parent_ancestors = (await db.execute(new_parent_ancestors_stmt)).scalars().all()
+    for anc in new_parent_ancestors:
+        for did, ddepth in subtree_depth.items():
+            db.add(
+                BomClosure(
+                    bom_id=bom_id,
+                    tenantId=tid,
+                    ancestor_item_id=anc.ancestor_item_id,
+                    descendant_item_id=did,
+                    depth=anc.depth + ddepth + 1,
+                )
+            )
+
+
 async def list_bom_items(db: AsyncSession, bom_id: int) -> list[dict]:
     await get_bom_or_404(db, bom_id)
     tid = get_tenant_id()
@@ -265,6 +414,10 @@ async def create_bom_item(
     fields = {k: v for k, v in data.items() if k in _BOM_ITEM_WRITABLE_FIELDS}
     item = BOMItem(bom_id=bom.id, tenantId=tid, **fields)
     db.add(item)
+    await db.flush()  # assigns item.id, needed by closure rows below
+
+    await _closure_add_item(db, bom.id, tid, item.id, item.parent_item_id)
+
     await db.commit()
     await db.refresh(item)
 
@@ -303,6 +456,9 @@ async def update_bom_item(db: AsyncSession, bom_id: int, item_id: int, data: dic
             db, bom_id, tid, new_part_id, new_parent_id, new_refdes, exclude_item_id=item.id
         )
 
+    if "parent_item_id" in fields and fields["parent_item_id"] != item.parent_item_id:
+        await _closure_reparent(db, bom_id, tid, item.id, fields["parent_item_id"])
+
     for field, value in fields.items():
         setattr(item, field, value)
 
@@ -321,9 +477,13 @@ async def update_bom_item(db: AsyncSession, bom_id: int, item_id: int, data: dic
 
 
 async def delete_bom_item(db: AsyncSession, bom_id: int, item_id: int) -> None:
+    """Delete a line AND its entire subtree (children, grandchildren, ...) —
+    both bom_items_master rows and their bom_closures rows — so the closure
+    table (and the item tree it describes) never ends up with orphaned
+    descendants pointing at a parent that no longer exists."""
     tid = get_tenant_id()
     item = await _get_bom_item_or_404(db, bom_id, item_id, tid)
-    await db.delete(item)
+    await _closure_remove_subtree(db, bom_id, tid, item.id)
     await db.commit()
     await _invalidate_bom_caches(bom_id)
 
@@ -419,6 +579,166 @@ async def get_bom_explosion(db: AsyncSession, bom_id: int, level: int = 10) -> l
     # Scope traversal to THIS BOM and its own tenant (not the ambient request
     # tenant context) so the tree can never mix in another BOM's or tenant's items.
     result = await _build_explosion_tree(db, bom.id, None, 0, level, bom.tenantId)
+    await cache_set(cache_key, result, ttl=300)
+    return result
+
+
+# ============ Closure-backed Explosion + Where-Used (WS5) ============
+#
+# BomClosure (maintained incrementally above, by create/update/delete_bom_item)
+# holds one row per (ancestor, descendant) pair in a BOM's item tree,
+# including a self row at depth 0. That lets these two functions fetch an
+# entire subtree / ancestor chain in O(1) queries instead of the O(depth)
+# recursive round-trips in get_bom_explosion / get_where_used_tree above —
+# and they MUST return results identical to those two.
+
+
+async def get_bom_explosion_via_closure(db: AsyncSession, bom_id: int, level: int = 10) -> list[dict]:
+    bom = await get_bom_or_404(db, bom_id)
+    tid = bom.tenantId
+    cache_key = f"bom:explosion_closure:{bom_id}:{level}"
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    items_stmt = select(BOMItem).where(BOMItem.bom_id == bom_id)
+    if tid is not None:
+        items_stmt = items_stmt.where(BOMItem.tenantId == tid)
+    items = (await db.execute(items_stmt)).scalars().all()
+
+    items_by_parent: dict[Optional[int], list[BOMItem]] = {}
+    for it in items:
+        items_by_parent.setdefault(it.parent_item_id, []).append(it)
+    for group in items_by_parent.values():
+        group.sort(key=lambda i: i.id)
+
+    # 1-indexed depth-from-root for every item, in ONE query: the count of
+    # its own ancestor rows (including its self row) in bom_closures.
+    closure_stmt = (
+        select(BomClosure.descendant_item_id, func.count())
+        .where(BomClosure.bom_id == bom_id)
+        .group_by(BomClosure.descendant_item_id)
+    )
+    if tid is not None:
+        closure_stmt = closure_stmt.where(BomClosure.tenantId == tid)
+    level_by_item = {row[0]: row[1] for row in (await db.execute(closure_stmt)).all()}
+
+    part_ids = [i.part_id for i in items if i.part_id]
+    parts_map: dict[int, tuple[str, str]] = {}
+    if part_ids:
+        pr_stmt = select(Part).where(Part.id.in_(set(part_ids)))
+        if tid is not None:
+            pr_stmt = pr_stmt.where(Part.tenantId == tid)
+        for p in (await db.execute(pr_stmt)).scalars().all():
+            parts_map[p.id] = (p.pn, p.name)
+
+    def build(parent_item_id: Optional[int]) -> list[dict]:
+        tree = []
+        for item in items_by_parent.get(parent_item_id, []):
+            # get_bom_explosion's current_level is 0-indexed for roots and
+            # prunes when current_level > level; closure level is 1-indexed
+            # (self row counts), so current_level == closure_level - 1.
+            item_level = level_by_item.get(item.id, 1)
+            if item_level - 1 > level:
+                continue
+            pn, desc = parts_map.get(item.part_id, ("", "")) if item.part_id else ("", "")
+            tree.append(
+                {
+                    "part_id": item.part_id or 0,
+                    "part_number": pn,
+                    "description": desc,
+                    "quantity": item.quantity,
+                    "level": item_level - 1,
+                    "parent_part_id": parent_item_id,
+                    "children": build(item.id),
+                }
+            )
+        return tree
+
+    result = build(None)
+    await cache_set(cache_key, result, ttl=300)
+    return result
+
+
+async def get_where_used_via_closure(db: AsyncSession, part_id: int) -> dict:
+    cache_key = f"bom:where_used_closure:{part_id}"
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    pr = await db.execute(select(Part).where(Part.id == part_id))
+    if not pr.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Part not found")
+
+    tid = get_tenant_id()
+    items_stmt = select(BOMItem).where(BOMItem.part_id == part_id)
+    if tid is not None:
+        items_stmt = items_stmt.where(BOMItem.tenantId == tid)
+    items = (await db.execute(items_stmt)).scalars().all()
+    if not items:
+        result = {"part_id": part_id, "usages": []}
+        await cache_set(cache_key, result, ttl=300)
+        return result
+
+    bom_ids = {item.bom_id for item in items if item.bom_id}
+    boms_map: dict[int, Any] = {}
+    if bom_ids:
+        br = await db.execute(select(BOM).where(BOM.id.in_(bom_ids)))
+        for b in br.scalars().all():
+            boms_map[b.id] = b
+
+    # Every ancestor (excluding self) of every occurrence, in ONE query,
+    # ordered nearest-ancestor-first via `depth`.
+    item_ids = [i.id for i in items]
+    closure_stmt = select(BomClosure).where(
+        BomClosure.bom_id.in_(bom_ids) if bom_ids else BomClosure.bom_id.is_(None),
+        BomClosure.descendant_item_id.in_(item_ids),
+        BomClosure.ancestor_item_id != BomClosure.descendant_item_id,
+    )
+    if tid is not None:
+        closure_stmt = closure_stmt.where(BomClosure.tenantId == tid)
+    closure_rows = (await db.execute(closure_stmt)).scalars().all()
+
+    ancestors_by_item: dict[int, list[BomClosure]] = {}
+    for row in closure_rows:
+        ancestors_by_item.setdefault(row.descendant_item_id, []).append(row)
+    for rows in ancestors_by_item.values():
+        rows.sort(key=lambda r: r.depth)
+
+    all_ancestor_item_ids = {row.ancestor_item_id for row in closure_rows}
+    ancestor_items_map: dict[int, BOMItem] = {}
+    if all_ancestor_item_ids:
+        ai_stmt = select(BOMItem).where(BOMItem.id.in_(all_ancestor_item_ids))
+        if tid is not None:
+            ai_stmt = ai_stmt.where(BOMItem.tenantId == tid)
+        for ai in (await db.execute(ai_stmt)).scalars().all():
+            ancestor_items_map[ai.id] = ai
+
+    usages = []
+    for item in items:
+        bom = boms_map.get(item.bom_id)
+        if not bom:
+            continue
+        parents = []
+        for row in ancestors_by_item.get(item.id, []):
+            anc_item = ancestor_items_map.get(row.ancestor_item_id)
+            if anc_item is None:
+                continue
+            anc_bom = boms_map.get(anc_item.bom_id)
+            if anc_bom is None:
+                continue
+            parents.append(
+                {"bom_id": anc_bom.id, "bom_name": anc_bom.name, "quantity": anc_item.quantity}
+            )
+        usages.append(
+            {
+                "bom_id": bom.id,
+                "bom_name": bom.name,
+                "quantity": item.quantity,
+                "parents": parents,
+            }
+        )
+    result = {"part_id": part_id, "usages": usages}
     await cache_set(cache_key, result, ttl=300)
     return result
 
