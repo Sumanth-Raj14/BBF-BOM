@@ -3,7 +3,8 @@ import { ANIM } from "../../utils/design-tokens.js";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Modal, api } from "../../globals";
+import { Icon, api } from "../../globals";
+import { Modal, Button, Input, StatusPill } from "../ui";
 // ============ BARCODE SCAN ============
 
 export default function BarcodeScanModal({ open, onClose, onFound }) {
@@ -127,49 +128,51 @@ export default function BarcodeScanModal({ open, onClose, onFound }) {
       subtitle={
         useCamera
           ? __t("modals.barcode.realCamera") ||
-            "Real camera \u00B7 point at barcode"
+            "Real camera · point at barcode"
           : phase === "scanning"
             ? __t("modals.barcode.pointCamera") || "Point camera at barcode"
             : phase === "error"
               ? __t("common.error") || "Error"
               : __t("modals.barcode.matchFound") || "Match found"
       }
+      closeLabel={__t("modals.barcode.closeDialog") || "Close scan dialog"}
       footer={
         phase === "found" ? (
           <>
-            <button className="btn" onClick={scanAnother}>
+            <Button variant="secondary" onClick={scanAnother}>
               {__t("modals.barcode.scanAnother") || "Scan another"}
-            </button>
-            <button className="btn" onClick={onClose}>
+            </Button>
+            <Button variant="secondary" onClick={onClose}>
               {__t("common.close") || "Close"}
-            </button>
-            <button className="btn primary" onClick={apply}>
+            </Button>
+            <Button variant="primary" onClick={apply}>
               <Icon.Plus size={12} />{" "}
               {__t("modals.barcode.addToPo") || "Add to PO"}
-            </button>
+            </Button>
           </>
         ) : (
           <>
-            <button
-              className="btn"
+            <Button
+              variant="secondary"
+              aria-pressed={useCamera}
               onClick={() => setUseCamera(!useCamera)}
-              style={{ color: useCamera ? "var(--accent-text)" : "var(--fg-3)" }}
+              className={useCamera ? "barcode-modal__camera-btn--on" : ""}
             >
               <Icon.Scan size={12} />{" "}
               {useCamera
                 ? __t("modals.barcode.usingCamera") || "Using camera"
                 : __t("modals.barcode.useCamera") || "Use camera"}
-            </button>
-            <button className="btn" onClick={onClose}>
+            </Button>
+            <Button variant="secondary" onClick={onClose}>
               {__t("common.cancel") || "Cancel"}
-            </button>
+            </Button>
           </>
         )
       }
     >
       <div
-        className="pos-relative rounded-r3 overflow-h border-line"
-        style={{ aspectRatio: "16 / 10", background: "#0a0a0a" }}
+        className="barcode-modal__viewfinder pos-relative rounded-r3 overflow-h border-line"
+        style={{ aspectRatio: "16 / 10" }}
       >
         {useCamera ? (
           <video
@@ -202,14 +205,15 @@ export default function BarcodeScanModal({ open, onClose, onFound }) {
         )}
         {/* Viewfinder corners */}
         {[0, 1, 2, 3].map((i) => {
-          const bt = i < 2 ? "3px solid var(--accent)" : "none";
-          const bb = i >= 2 ? "3px solid var(--accent)" : "none";
-          const bl = i % 2 === 0 ? "3px solid var(--accent)" : "none";
-          const br = i % 2 === 1 ? "3px solid var(--accent)" : "none";
+          const bt = i < 2 ? "3px solid var(--accent-interactive)" : "none";
+          const bb = i >= 2 ? "3px solid var(--accent-interactive)" : "none";
+          const bl = i % 2 === 0 ? "3px solid var(--accent-interactive)" : "none";
+          const br = i % 2 === 1 ? "3px solid var(--accent-interactive)" : "none";
           return (
             <div
               key={"ov-" + i}
               className="pos-absolute w-28 h-28"
+              aria-hidden="true"
               style={{
                 borderTop: bt,
                 borderBottom: bb,
@@ -223,6 +227,7 @@ export default function BarcodeScanModal({ open, onClose, onFound }) {
         {phase === "found" && foundPart && (
           <div
             className="pos-absolute flex justify-center"
+            aria-hidden="true"
             style={{
               left: "30%",
               right: "30%",
@@ -246,28 +251,29 @@ export default function BarcodeScanModal({ open, onClose, onFound }) {
             ))}
           </div>
         )}
-        {/* Scan line */}
-        {phase === "scanning" && <div className="pos-absolute" />}
         {/* Status text */}
         <div
           className="pos-absolute font-mono fs-11 flex justify-between"
+          role="status"
+          aria-live="polite"
           style={{ bottom: 12, left: 12, right: 12, color: "white" }}
         >
           <span className="inline-flex items-center gap-6">
             <span
+              aria-hidden="true"
               style={{
                 width: 6,
                 height: 6,
                 borderRadius: 99,
                 background:
                   phase === "found"
-                    ? "var(--ok)"
+                    ? "var(--status-success)"
                     : phase === "error"
-                      ? "var(--err)"
-                      : "var(--accent)",
+                      ? "var(--status-danger)"
+                      : "var(--accent-interactive)",
                 animation:
                   phase === "scanning"
-                    ? "pulse " + ANIM.PULSE + " infinite"
+                    ? "barcode-modal-pulse " + ANIM.PULSE + " infinite"
                     : "none",
               }}
             />
@@ -279,7 +285,7 @@ export default function BarcodeScanModal({ open, onClose, onFound }) {
           </span>
           <span className="op-06">
             {useCamera
-              ? __t("modals.barcode.liveRearCam") || "LIVE \u00B7 rear cam"
+              ? __t("modals.barcode.liveRearCam") || "LIVE · rear cam"
               : __t("modals.barcode.manualEntry") || "MANUAL ENTRY"}
           </span>
         </div>
@@ -287,92 +293,94 @@ export default function BarcodeScanModal({ open, onClose, onFound }) {
 
       {/* Manual barcode entry when not using camera */}
       {!useCamera && phase === "scanning" && (
-        <div className="mt-14">
-          <div className="flex gap-8">
-            <input
-              id="barcode-manual"
-              name="manualBarcode"
-              type="text"
-              placeholder={
-                __t("modals.barcode.manualPlaceholder") ||
-                "Enter barcode manually..."
-              }
-              value={manualBarcode}
-              onChange={(e) => setManualBarcode(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleManualLookup()}
-              style={{
-                flex: 1,
-                padding: "8px 12px",
-                background: "var(--bg-2)",
-                border: "1px solid var(--line)",
-                borderRadius: "var(--r-2)",
-                color: "var(--fg)",
-                fontFamily: "var(--font-mono)",
-                fontSize: 12,
-              }}
-              disabled={loading}
-            />
-            <button
-              className="btn primary"
-              onClick={handleManualLookup}
-              disabled={loading || !manualBarcode.trim()}
-            >
-              {loading
-                ? __t("modals.barcode.lookingUp") || "Looking up..."
-                : __t("modals.barcode.lookup") || "Lookup"}
-            </button>
-          </div>
+        <div className="mt-14 flex gap-8">
+          <Input
+            id="barcode-manual"
+            name="manualBarcode"
+            type="text"
+            mono
+            aria-label={
+              __t("modals.barcode.manualPlaceholder") ||
+              "Enter barcode manually..."
+            }
+            placeholder={
+              __t("modals.barcode.manualPlaceholder") ||
+              "Enter barcode manually..."
+            }
+            value={manualBarcode}
+            onChange={(e) => setManualBarcode(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleManualLookup()}
+            className="flex-1"
+            disabled={loading}
+          />
+          <Button
+            variant="primary"
+            onClick={handleManualLookup}
+            loading={loading}
+            disabled={!manualBarcode.trim()}
+          >
+            {loading
+              ? __t("modals.barcode.lookingUp") || "Looking up..."
+              : __t("modals.barcode.lookup") || "Lookup"}
+          </Button>
         </div>
       )}
 
       {/* Error message */}
       {phase === "error" && error && (
-        <div
-          className="mt-14 rounded-r2"
-          style={{
-            padding: 12,
-            border: "1px solid var(--err)",
-            background: "var(--err-soft)",
-          }}
-        >
-          <div className="fs-13" style={{ color: "var(--err)" }}>
-            {error}
-          </div>
-          <button className="btn mt-8" onClick={scanAnother}>
+        <div className="barcode-modal__error mt-14 rounded-r2" role="alert">
+          <div className="fs-13">{error}</div>
+          <Button variant="secondary" className="mt-8" onClick={scanAnother}>
             {__t("modals.barcode.tryAgain") || "Try Again"}
-          </button>
+          </Button>
         </div>
       )}
 
       {/* Found part details */}
       {phase === "found" && foundPart && (
-        <div
-          className="mt-14 rounded-r2"
-          style={{
-            padding: 12,
-            border: "1px solid var(--accent)",
-            background: "var(--accent-soft)",
-          }}
-        >
+        <div className="barcode-modal__result mt-14 rounded-r2" role="status">
           <div className="font-mono fs-11 fg-accent letter-sp-6 uppercase">
             EAN-13 · {foundPart.barcode} · {foundPart.pn}
           </div>
           <div className="fs-14 fw-600 mt-4">{foundPart.name}</div>
-          <div className="font-mono fs-11 fg-2 mt-2">
-            {foundPart.vendor || __t("modals.barcode.unknown") || "Unknown"}{" "}
-            \u00B7{" "}
-            {foundPart.cost
-              ? `\u20B9${(foundPart.cost * (window.INR_RATE || 83)).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
-              : "N/A"}{" "}
-            \u00B7{" "}
-            {foundPart.status || __t("modals.barcode.unknown") || "Unknown"}
+          <div className="flex items-center gap-6 font-mono fs-11 fg-2 mt-2">
+            <span>
+              {foundPart.vendor || __t("modals.barcode.unknown") || "Unknown"}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>
+              {foundPart.cost
+                ? `₹${(foundPart.cost * (window.INR_RATE || 83)).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
+                : "N/A"}
+            </span>
+            {foundPart.status && (
+              <>
+                <span aria-hidden="true">·</span>
+                <StatusPill status={foundPart.status} />
+              </>
+            )}
           </div>
         </div>
       )}
 
       <style>{`
-        @keyframes scan { 0% { top: 20%; } 50% { top: 80%; } 100% { top: 20%; } }
-        @keyframes pulse { 50% { opacity: 0.3; } }
+        @keyframes barcode-modal-pulse { 50% { opacity: 0.3; } }
+        @media (prefers-reduced-motion: reduce) {
+          .barcode-modal__viewfinder * { animation: none !important; }
+        }
+        .barcode-modal__viewfinder { background: #0a0a0a; }
+        .barcode-modal__camera-btn--on { color: var(--accent-text); }
+        .barcode-modal__error {
+          padding: 12px;
+          border: 1px solid var(--status-danger);
+          background: color-mix(in srgb, var(--status-danger) 10%, var(--bg-surface));
+          color: var(--status-danger-text);
+        }
+        .barcode-modal__result {
+          padding: 12px;
+          border: 1px solid var(--accent-interactive);
+          background: color-mix(in srgb, var(--accent-interactive) 8%, var(--bg-surface));
+        }
       `}</style>
     </Modal>
   );
