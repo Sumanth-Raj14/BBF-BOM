@@ -199,6 +199,10 @@ class Settings(BaseSettings):
     BACKUP_DIR: str = "./backups"
     BACKUP_SCHEDULE_HOURS: int = 6
     BACKUP_MIN_DISK_GB: int = 5
+    # WAL archive directory — MUST match postgresql.conf's archive_command
+    # target (see backend/postgresql.conf) and scripts/pitr_restore.py, or
+    # PITR restores will silently fail to find archived WAL segments.
+    WAL_ARCHIVE_DIR: str = "/var/lib/postgresql/wal_archive"
 
     # Encryption
     ENCRYPTION_KEY: str = ""
