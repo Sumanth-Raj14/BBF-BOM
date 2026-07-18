@@ -5,6 +5,45 @@ All notable changes to the Blackbox BOM Management Tool will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1-rc] - 2026-07-19
+**Postgres Production Bring-Up: Schema Migration Complete, Alembic Bugs Identified**
+
+### Technical Notes
+- **Live Postgres deployment**: Schema successfully migrated from alembic revision 029 (`fix_column_mismatches`) through 040 (`postgres_rls_tenant_isolation`) on production PostgreSQL instance. Database now running on Postgres 18.4 with 135 tables, all RLS policies in place (opt-in, default off).
+
+### Fixed
+- **Alembic revision ID length**: Migration 036 (`role_permission_tenant_scoped`) has a 33-character revision ID, but Alembic's default `alembic_version.version_num` is VARCHAR(32), causing fresh Postgres installs to fail at that revision. Column widened to VARCHAR(64) post-deployment; permanent fix pending in `alembic/env.py`.
+
+### Known Issues / Deployment Blockers
+
+#### Issue #1: Alembic Authentication Falls Back to Hardcoded Empty Password
+- **Location**: `backend/alembic/env.py:17-19`, `backend/alembic/alembic.ini:14`
+- **Impact**: Migrations fail to authenticate unless `DATABASE_URL` env var is explicitly exported. On fresh Postgres installs, if `DATABASE_URL` is not set, `env.py` falls back to the hardcoded connection string in `alembic.ini` — `postgresql+asyncpg://bom_user:@localhost:5432/bom_db` (empty password, matches only local-dev). Deployment procedures must ensure `DATABASE_URL` is set with full credentials before running `alembic upgrade head`.
+- **Workaround**: Export `DATABASE_URL` environment variable with correct auth before migration runs; OR update `alembic/env.py` to read `.env` directly (currently ignores app's `.env` file).
+
+#### Issue #2: SQLite Test Suite Does Not Catch Postgres-Specific Defects
+- **Location**: `backend/app/tests/conftest.py`, `backend/.github/workflows/ci.yml`
+- **Impact**: All 72+ backend test files run on SQLite, not Postgres. Postgres-specific issues are not caught in CI:
+  - VARCHAR length enforcement (e.g., migration 036 VARCHAR(32) → 33-char ID)
+  - Row-Level Security behavior and policy interactions
+  - Dialect-specific SQL syntax (e.g., PostgreSQL-only functions, operators)
+  - Enum types and array columns
+  - Composite foreign keys and complex constraints
+- **Test Status**: ~73 pre-existing test failures documented as unrelated stubs (missing endpoint implementations, infrastructure dependencies). Full Postgres test suite not yet implemented.
+- **Recommendation**: Implement PostgreSQL test database integration in CI pipeline (similar to existing `docker-compose.test.yml` structure); parallelize SQLite + Postgres test runs.
+
+### Files Changed
+- `backend/alembic/versions/040_postgres_rls_tenant_isolation.py` — Schema migrated, RLS enabled on all tenant tables
+- (alembic_version column widening not yet committed; permanent fix in progress)
+
+### Database Schema Status
+- **Head Revision**: 040_postgres_rls_tenant_isolation (2026-07-18)
+- **Applied Migrations**: 001 through 040 (40 total)
+- **Tenant Isolation**: Opt-in Postgres RLS + app-layer filtering (defense-in-depth)
+- **Previous Revision**: 039_bom_closure_table (closure table for fast multi-level BOM explosion/where-used)
+
+---
+
 ## [2.0.0] - 2026-07-18
 Enterprise transformation release — production-ready, OpenBOM-competitive, **local-first**.
 Supersedes the untagged 1.x line.
@@ -47,7 +86,10 @@ Supersedes the untagged 1.x line.
 
 Database: single Alembic head `040_postgres_rls_tenant_isolation`.
 
+---
+
 ## [v1.48.0] - 2026-07-06
+
 ### Added
 - Comprehensive BBF Enterprise branding to replace generic SaaS UI.
 - High-density manufacturing tables in detail drawers and main BOM grids.
@@ -58,3 +100,30 @@ Database: single Alembic head `040_postgres_rls_tenant_isolation`.
 
 ### Fixed
 - Fixed 38 backward-compatible `window.*` shims after module refactoring.
+
+---
+
+## Project Release Notes
+
+The Blackbox BOM platform shipped v2.0.0 on 2026-07-18, marking the completion of a comprehensive enterprise transformation. The application is production-ready, runs entirely on-premises (local-first), and includes:
+
+- **Canonical BOM editor** with instant persistence
+- **Multi-tenant isolation** at both app and database layers (opt-in Postgres RLS)
+- **Enterprise design system** with WCAG-AA accessibility
+- **One-click local deployment** (Windows + Docker)
+- **Integration ecosystem** (ClickUp, Cliq, SolidWorks, ERP)
+- **Advanced manufacturing features** (closure tables, service BOMs, work orders, ECR, compliance, etc.)
+
+### Pending Features (Not Yet Merged)
+The following branches are feature-complete but await final review:
+- **feat/regulated** — FDA 21 CFR Part 11 e-signatures + RoHS/REACH substance compliance
+- **feat/zoho-books** — Two-way Zoho Books sync (parts/items, vendors/contacts, POs, cost)
+- **feat/polish** — WCAG-AA dark mode + high-contrast/colorblind a11y modes, mobile-scanner tweaks
+
+### Documentation
+For full architecture, feature catalog, and testing guidance, see:
+- `ARCHITECTURE.md` — System architecture, component tree, data flow, security layers
+- `FEATURE_CATALOG.md` — All features organized by domain (BOM, Parts, Procurement, Manufacturing, etc.)
+- `TESTING_AND_VALIDATION.md` — Test strategy, coverage, running instructions, CI/CD
+- `INSTALL.md` — One-click deployment guide for Windows and Docker
+- `frontend/CHANGELOG.md` — Detailed frontend commit history and UI transformations
