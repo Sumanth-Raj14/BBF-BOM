@@ -1,7 +1,12 @@
 // Cloud Sync Module — bridges frontend localStorage with PostgreSQL backend
 // Provides automatic sync on login, periodic sync, and manual sync triggers
 
-const SYNC_API = 'http://localhost:8001/api/v1/user-sync';
+import config from './src/config.js';
+
+// Same-origin by default (see src/config.js) so this goes through the same
+// reverse proxy as every other API call, instead of a hardcoded absolute
+// URL/port that the Docker Compose stack never exposes to the browser.
+const SYNC_API = `${config.API_BASE}/user-sync`;
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const SYNC_KEYS = [
   '__bbox_rows',

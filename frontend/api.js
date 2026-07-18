@@ -27,8 +27,9 @@ export function openPrintWindow(title, bodyHtml, opts) {
   return w;
 }
 
-// Derived from config.js (window.__BBOX_CONFIG / VITE_API_URL) so production
-// config takes effect; localhost remains only the DEFAULTS fallback.
+// Derived from config.js (relative '/api/v1' by default so requests go
+// through the same reverse proxy that served the page — see config.js —
+// overridable via window.__BBOX_CONFIG when the API truly lives elsewhere).
 const API_BASE = config.API_BASE;
 
 let _onUnauthorized = null;
