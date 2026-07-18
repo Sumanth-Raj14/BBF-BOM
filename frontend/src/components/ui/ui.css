@@ -65,7 +65,12 @@
 .ui-btn--primary {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
-  color: var(--text-inverse);
+  /* --accent-fg (always white): --accent-strong keeps its light-mode value
+     in dark theme too (see styles.css dark-token banner), so its paired
+     foreground must stay constant white rather than follow --text-inverse
+     (which correctly flips per-theme for the *different* "text on a
+     --text-primary-painted surface" role — avatar/tooltip). */
+  color: var(--accent-fg);
 }
 .ui-btn--primary:hover:not(:disabled) {
   background: var(--accent-strong-hover);
@@ -84,7 +89,7 @@
 .ui-btn--danger {
   background: var(--status-danger);
   border-color: var(--status-danger);
-  color: var(--text-inverse);
+  color: var(--accent-fg); /* constant white — --status-danger is unchanged in dark mode */
 }
 .ui-btn--danger:hover:not(:disabled) { background: var(--status-danger-text); border-color: var(--status-danger-text); }
 
@@ -414,7 +419,7 @@
   cursor: pointer; font-variant-numeric: tabular-nums;
 }
 .ui-page__btn:hover:not(:disabled) { background: var(--bg-hover); }
-.ui-page__btn[aria-current="page"] { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--text-inverse); }
+.ui-page__btn[aria-current="page"] { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--accent-fg); }
 .ui-page__btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .ui-page__ellipsis { padding: 0 var(--sp-1); color: var(--text-muted); }
 

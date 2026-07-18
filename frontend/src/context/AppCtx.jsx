@@ -54,6 +54,23 @@ function AppCtxProvider({ children }) {
   const [onboardingDone, setOnboardingDone] = React.useState(() =>
     storage.onboarding.isDone(),
   );
+  // Theme: "light" | "dark" | "system" (persisted). "system" resolves via
+  // prefers-color-scheme, tracked live through a matchMedia listener below
+  // so an OS-level theme change is reflected without a reload.
+  const [themePref, setThemePrefState] = React.useState(() =>
+    storage.theme.get(),
+  );
+  const [systemPrefersDark, setSystemPrefersDark] = React.useState(() =>
+    typeof window !== "undefined" && window.matchMedia
+      ? window.matchMedia("(prefers-color-scheme: dark)").matches
+      : false,
+  );
+  const resolvedTheme =
+    themePref === "system" ? (systemPrefersDark ? "dark" : "light") : themePref;
+  const setThemePref = React.useCallback((v) => {
+    storage.theme.set(v);
+    setThemePrefState(v);
+  }, []);
   const [showMobileScan, setShowMobileScan] = React.useState(false);
   const [userRole, setUserRole] = React.useState(() => storage.role.get());
   const [authChecking, setAuthChecking] = React.useState(false);
@@ -229,20 +246,39 @@ function AppCtxProvider({ children }) {
   // this only governs the slide-in overlay + scrim below the breakpoint.
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
 
+  // Live-track the OS theme so themePref === "system" updates without a
+  // reload when the user flips their OS between light/dark.
   React.useEffect(() => {
-    // Dark mode was removed (a real AA dark theme is a later build); the app is
-    // light-only. Density + accent remain user-adjustable via Tweaks.
+    if (typeof window === "undefined" || !window.matchMedia) return undefined;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = (e) => setSystemPrefersDark(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  // Stamp data-theme before paint (useLayoutEffect, matching the
+  // data-nav-collapsed pattern in NavRail.jsx) to avoid a flash of the
+  // wrong theme. styles.css defines a complete :root[data-theme="dark"]
+  // token override that every component consumes automatically.
+  React.useLayoutEffect(() => {
+    document.documentElement.setAttribute("data-theme", resolvedTheme);
+  }, [resolvedTheme]);
+
+  React.useEffect(() => {
     document.documentElement.setAttribute("data-density", t.density);
     // Accent-preset AA rethread: a chosen preset must move the *whole* accent
     // family together (interactive/hover/strong/strong-hover/text/focus/subtle),
     // not just the single legacy --accent alias — otherwise components reading
     // --accent-strong/--accent-text/--focus directly stay desynced on the
     // default orange while --accent-driven chrome follows the new pick.
-    const tokens = accentTokensFor(t.accent);
+    // Threading resolvedTheme through re-derives --accent-text/--accent-subtle
+    // for dark surfaces (utils/accent.js) — the light-tuned values otherwise
+    // stay pinned as an inline style, overriding the CSS dark-token fallback.
+    const tokens = accentTokensFor(t.accent, resolvedTheme);
     for (const [prop, value] of Object.entries(tokens)) {
       document.documentElement.style.setProperty(prop, value);
     }
-  }, [t.density, t.accent]);
+  }, [t.density, t.accent, resolvedTheme]);
 
   React.useEffect(() => {
     // Hydrate the canonical bom_items_master lines for the active BOM so
@@ -387,6 +423,9 @@ function AppCtxProvider({ children }) {
     t,
     gridDensity,
     setTweak,
+    themePref,
+    setThemePref,
+    resolvedTheme,
     selectedRow,
     setSelectedRow,
     search,

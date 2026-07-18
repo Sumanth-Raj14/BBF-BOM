@@ -18,6 +18,7 @@ export const KEYS = {
   SAVED_SEARCHES: "__bbox_saved_searches",
   SUPPLIER_USERS: "__bbox_supplier_users",
   NAV_COLLAPSED: "__bbox_nav_collapsed",
+  THEME: "__bbox_theme",
 };
 
 function get(key, fallback = null) {
@@ -183,5 +184,13 @@ export const storage = {
     // Persisted collapsed state for the primary navigation rail.
     getCollapsed: () => get(KEYS.NAV_COLLAPSED) === "1",
     setCollapsed: (v) => set(KEYS.NAV_COLLAPSED, v ? "1" : "0"),
+  },
+
+  theme: {
+    // "light" | "dark" | "system" — "system" follows prefers-color-scheme
+    // (see AppCtx.jsx). Defaults to "system" so a fresh install respects the
+    // OS setting rather than silently forcing light mode.
+    get: () => get(KEYS.THEME, "system"),
+    set: (v) => set(KEYS.THEME, v),
   },
 };

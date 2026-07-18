@@ -13,6 +13,12 @@ const DENSITIES = [
   { v: "comfortable", label: "Comfortable density" },
 ];
 
+const THEMES = [
+  { v: "light", label: "Light theme", icon: Icon.Sun },
+  { v: "dark", label: "Dark theme", icon: Icon.Moon },
+  { v: "system", label: "Match system theme", icon: Icon.Monitor },
+];
+
 export default function TopBar() {
   const ctx = React.useContext(AppContext);
   const {
@@ -34,6 +40,8 @@ export default function TopBar() {
     setSearch,
     t,
     setTweak,
+    themePref,
+    setThemePref,
     mobileNavOpen,
     setMobileNavOpen,
   } = ctx;
@@ -243,6 +251,27 @@ export default function TopBar() {
                 <i />
                 <i />
               </span>
+            </button>
+          ))}
+        </div>
+
+        <div
+          className="theme-seg"
+          role="group"
+          aria-label="Theme"
+          title="Theme"
+        >
+          {THEMES.map((opt) => (
+            <button
+              key={opt.v}
+              type="button"
+              className={"theme-opt" + (themePref === opt.v ? " active" : "")}
+              aria-pressed={themePref === opt.v}
+              aria-label={opt.label}
+              title={opt.label}
+              onClick={() => setThemePref(opt.v)}
+            >
+              <opt.icon size={13} />
             </button>
           ))}
         </div>
