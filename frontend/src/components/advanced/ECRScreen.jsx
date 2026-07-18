@@ -2,14 +2,48 @@ import { storage } from "../../utils/storage.js";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
+import { Icon, INR, escapeHtml, openPrintWindow, useAppStore } from "../../globals";
 import {
-  DropdownButton,
-  INR,
+  Badge,
+  Button,
+  Card,
+  DataTable,
+  EmptyState,
+  Field,
+  Input,
+  Menu,
   Modal,
-  escapeHtml,
-  openPrintWindow,
-  useAppStore,
-} from "../../globals";
+  ScreenHeader,
+  Select,
+  StatusPill,
+  TabPanel,
+  Tabs,
+} from "../ui";
+
+const IMPACT_TONE = { high: "danger", med: "warning", low: "neutral" };
+const APPROVAL_TONE = {
+  approved: "var(--status-success)",
+  rejected: "var(--status-danger)",
+  pending: "var(--bg-subtle)",
+};
+
+function ApprovalDot({ role, value }) {
+  return (
+    <span
+      title={role.toUpperCase() + ": " + value}
+      className="w-18 h-18 inline-flex items-center justify-center font-mono fs-9 fw-700"
+      style={{
+        borderRadius: 99,
+        background: APPROVAL_TONE[value] || "var(--bg-subtle)",
+        color: value === "pending" ? "var(--text-muted)" : "white",
+        border: value === "pending" ? "1px solid var(--border-subtle)" : "none",
+      }}
+    >
+      {role[0].toUpperCase()}
+    </span>
+  );
+}
+
 function ECRScreen() {
   const ctx = useAppStore();
   const [filter, setFilter] = React.useState("All");
@@ -108,7 +142,7 @@ function ECRScreen() {
         {
           id: Date.now(),
           who: "System",
-          init: "\u230C",
+          init: "⌌",
           color: "sys",
           action: actionText,
           obj: objText,
@@ -191,402 +225,380 @@ function ECRScreen() {
     notify("ECR " + label, id + " · " + (ecr?.title || ""));
   };
 
+  const exportCsv = () => {
+    const csv = ecrs
+      .map(
+        (e) =>
+          `${e.id},${e.title},${e.project},${e.status},${e.requester},${e.date}`,
+      )
+      .join("\n");
+    const b = new Blob([csv], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(b);
+    a.download = "ecr_log.csv";
+    a.click();
+    toast(__t("advanced.ecr.exported") || "ECR log exported", {
+      kind: "success",
+    });
+  };
+
+  const printEcr = (e) => {
+    const h = escapeHtml;
+    openPrintWindow(
+      __t("advanced.ecr.ecrPrint") || "ECR Print",
+      "<html><head><title>" +
+        h(e.id) +
+        "</title><style>body{font-family:monospace;padding:30px}</style></head><body><h1>" +
+        h(e.id) +
+        "</h1><h2>" +
+        h(e.title) +
+        "</h2><p>" +
+        (__t("advanced.ecr.projectCol") || "Project") +
+        ": " +
+        h(e.project) +
+        " | " +
+        (__t("advanced.ecr.impactCol") || "Impact") +
+        ": " +
+        h(e.impact) +
+        " | " +
+        (__t("advanced.ecr.statusCol") || "Status") +
+        ": " +
+        h(e.status) +
+        "</p><p>" +
+        (__t("advanced.ecr.requester") || "Requester") +
+        ": " +
+        h(e.requester) +
+        " | " +
+        (__t("advanced.ecr.date") || "Date") +
+        ": " +
+        h(e.date) +
+        "</p></body></html>",
+      { features: "width=700,height=500", printDelay: 300 },
+    );
+  };
+
+  const rowMenuItems = (e) => [
+    ...(e.status === "Draft"
+      ? [
+          {
+            icon: <Icon.Check size={11} />,
+            label: __t("advanced.ecr.submitForReview") || "Submit for review",
+            onSelect: () => updateStatus(e.id, "advance"),
+          },
+        ]
+      : []),
+    ...(e.status === "Review"
+      ? [
+          {
+            icon: <Icon.Check size={11} />,
+            label: __t("common.approve") || "Approve",
+            onSelect: () => updateStatus(e.id, "approve"),
+          },
+          {
+            icon: <Icon.X size={11} />,
+            label: __t("common.reject") || "Reject",
+            onSelect: () => updateStatus(e.id, "reject"),
+          },
+        ]
+      : []),
+    ...(e.status === "Approved"
+      ? [
+          {
+            icon: <Icon.Check size={11} />,
+            label: __t("advanced.ecr.markImplemented") || "Mark implemented",
+            onSelect: () => updateStatus(e.id, "implement"),
+          },
+        ]
+      : []),
+    {
+      icon: <Icon.Diff size={11} />,
+      label: __t("advanced.ecr.viewDiff") || "View diff",
+      onSelect: () => window.__nav?.("diff"),
+    },
+    {
+      icon: <Icon.Doc size={11} />,
+      label: __t("advanced.ecr.printEcr") || "Print ECR",
+      onSelect: () => printEcr(e),
+    },
+  ];
+
+  const filterItems = [
+    "All",
+    "Draft",
+    "Review",
+    "Approved",
+    "Implemented",
+    "Rejected",
+  ].map((s) => ({
+    value: s,
+    label: s,
+    count: s === "All" ? ecrs.length : counts[s] || 0,
+  }));
+
+  const columns = [
+    {
+      key: "id",
+      header: __t("advanced.ecr.ecrId") || "ECR ID",
+      render: (e) => <span className="mono fw-600">{e.id}</span>,
+    },
+    {
+      key: "title",
+      header: __t("advanced.ecr.titleCol") || "Title",
+      render: (e) => (
+        <>
+          <div className="fw-500">{e.title}</div>
+          <div className="font-mono fs-10 fg-3">
+            {e.requester} · {e.date}
+          </div>
+        </>
+      ),
+    },
+    {
+      key: "project",
+      header: __t("advanced.ecr.projectCol") || "Project",
+      render: (e) => <span className="mono">{e.project}</span>,
+    },
+    {
+      key: "impact",
+      header: __t("advanced.ecr.impactCol") || "Impact",
+      render: (e) => (
+        <Badge tone={IMPACT_TONE[e.impact] || "neutral"} pill>
+          {e.impact.toUpperCase()}
+        </Badge>
+      ),
+    },
+    {
+      key: "items",
+      header: __t("advanced.ecr.itemsCol") || "Items",
+      align: "num",
+      render: (e) => <span className="mono">{e.items_affected}</span>,
+    },
+    {
+      key: "cost",
+      header: __t("advanced.ecr.costDelta") || "Cost Δ",
+      align: "num",
+      render: (e) => (
+        <span
+          className="mono fw-600"
+          style={{
+            color:
+              e.cost_impact > 0
+                ? "var(--status-danger)"
+                : e.cost_impact < 0
+                  ? "var(--status-success)"
+                  : "var(--text-muted)",
+          }}
+        >
+          {e.cost_impact > 0 ? "+" : ""}
+          {INR(e.cost_impact, 0)}
+        </span>
+      ),
+    },
+    {
+      key: "approvals",
+      header: __t("advanced.ecr.approvalsCol") || "Approvals",
+      render: (e) => (
+        <div className="inline-flex" style={{ gap: 3 }}>
+          {Object.entries(e.approvals).map(([k, v]) => (
+            <ApprovalDot key={k} role={k} value={v} />
+          ))}
+        </div>
+      ),
+    },
+    {
+      key: "status",
+      header: __t("advanced.ecr.statusCol") || "Status",
+      render: (e) => <StatusPill status={e.status} />,
+    },
+    {
+      key: "actions",
+      header: "",
+      render: (e) => (
+        <span onClick={(ev) => ev.stopPropagation()}>
+          <Menu
+            ariaLabel={__t("advanced.ecr.moreOptions") || "More options"}
+            align="right"
+            trigger={
+              <Button
+                variant="ghost"
+                size="sm"
+                iconOnly
+                aria-label={__t("advanced.ecr.moreOptions") || "More options"}
+              >
+                <Icon.Dots size={11} />
+              </Button>
+            }
+            items={rowMenuItems(e)}
+          />
+        </span>
+      ),
+    },
+  ];
+
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("advanced.ecr.title") || "Engineering Change Requests"}</h1>
-          <div className="sub">
+      <ScreenHeader
+        title={__t("advanced.ecr.title") || "Engineering Change Requests"}
+        description={
+          <>
             {ecrs.length} {__t("advanced.ecr.ecrs") || "ECRs"} ·{" "}
             {counts.Review || 0}{" "}
             {__t("advanced.ecr.awaitingReview") || "awaiting review"} ·{" "}
             {counts.Approved || 0} {__t("advanced.ecr.approved") || "approved"}
-          </div>
-        </div>
-        <div className="flex gap-8">
-          <button
-            className="btn"
-            onClick={() => {
-              const csv = ecrs
-                .map(
-                  (e) =>
-                    `${e.id},${e.title},${e.project},${e.status},${e.requester},${e.date}`,
-                )
-                .join("\n");
-              const b = new Blob([csv], { type: "text/csv" });
-              const a = document.createElement("a");
-              a.href = URL.createObjectURL(b);
-              a.download = "ecr_log.csv";
-              a.click();
-              toast(__t("advanced.ecr.exported") || "ECR log exported", {
-                kind: "success",
-              });
-            }}
-          >
-            <Icon.Export size={12} /> {__t("common.export") || "Export"}
-          </button>
-          <button
-            className="btn primary"
-            onClick={() => setShowForm(!showForm)}
-          >
-            <Icon.Plus size={12} /> {__t("advanced.ecr.newEcr") || "New ECR"}
-          </button>
-        </div>
-      </div>
+          </>
+        }
+        actions={
+          <>
+            <Button variant="secondary" size="sm" onClick={exportCsv}>
+              <Icon.Export size={12} /> {__t("common.export") || "Export"}
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setShowForm(!showForm)}
+              aria-expanded={showForm}
+            >
+              <Icon.Plus size={12} /> {__t("advanced.ecr.newEcr") || "New ECR"}
+            </Button>
+          </>
+        }
+      />
 
       {showForm && (
-        <div className="card mb-14" style={{ padding: 16 }}>
-          <div className="fw-700 fs-13 mb-12">
-            {__t("advanced.ecr.createNew") || "Create New ECR"}
-          </div>
+        <Card
+          className="mb-14"
+          title={__t("advanced.ecr.createNew") || "Create New ECR"}
+          footer={
+            <div className="flex gap-8 justify-end">
+              <Button variant="secondary" onClick={() => setShowForm(false)}>
+                {__t("common.cancel") || "Cancel"}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={addEcr}
+                disabled={!form.title.trim()}
+              >
+                <Icon.Plus size={12} />{" "}
+                {__t("advanced.ecr.createEcr") || "Create ECR"}
+              </Button>
+            </div>
+          }
+        >
           <div
             className="d-grid gap-10 mb-12"
             style={{ gridTemplateColumns: "1fr 1fr 1fr" }}
           >
-            <div>
-              <label className="d-block font-mono fs-9 uppercase letter-sp-6 fg-3 mb-4">
-                {__t("advanced.ecr.titleLabel") || "Title"}
-              </label>
-              <input
+            <Field
+              label={__t("advanced.ecr.titleLabel") || "Title"}
+              htmlFor="ecr-form-title"
+            >
+              <Input
                 id="ecr-form-title"
                 name="ecrTitle"
-                className="input w-100p fs-12"
                 value={form.title}
                 onChange={(e) => setForm({ ...form, title: e.target.value })}
                 placeholder={
                   __t("advanced.ecr.titlePlaceholder") ||
-                  "Describe the change\u2026"
+                  "Describe the change…"
                 }
-                style={{ height: 30 }}
               />
-            </div>
-            <div>
-              <label className="d-block font-mono fs-9 uppercase letter-sp-6 fg-3 mb-4">
-                {__t("advanced.ecr.projectLabel") || "Project"}
-              </label>
-              <select
+            </Field>
+            <Field
+              label={__t("advanced.ecr.projectLabel") || "Project"}
+              htmlFor="ecr-form-project"
+            >
+              <Select
                 id="ecr-form-project"
                 name="ecrProject"
-                className="input w-100p fs-12"
                 value={form.project}
                 onChange={(e) => setForm({ ...form, project: e.target.value })}
-                style={{ height: 30 }}
               >
                 {["ATLAS", "ATLAS-LITE", "HORIZON", "All"].map((p) => (
                   <option key={p} value={p}>
                     {p}
                   </option>
                 ))}
-              </select>
-            </div>
-            <div>
-              <label className="d-block font-mono fs-9 uppercase letter-sp-6 fg-3 mb-4">
-                {__t("advanced.ecr.impactLabel") || "Impact"}
-              </label>
-              <select
+              </Select>
+            </Field>
+            <Field
+              label={__t("advanced.ecr.impactLabel") || "Impact"}
+              htmlFor="ecr-form-impact"
+            >
+              <Select
                 id="ecr-form-impact"
                 name="ecrImpact"
-                className="input w-100p fs-12"
                 value={form.impact}
                 onChange={(e) => setForm({ ...form, impact: e.target.value })}
-                style={{ height: 30 }}
               >
                 {["low", "med", "high"].map((v) => (
                   <option key={v} value={v}>
                     {v.toUpperCase()}
                   </option>
                 ))}
-              </select>
-            </div>
+              </Select>
+            </Field>
           </div>
           <div
-            className="d-grid gap-10 mb-14"
+            className="d-grid gap-10"
             style={{ gridTemplateColumns: "1fr 1fr" }}
           >
-            <div>
-              <label className="d-block font-mono fs-9 uppercase letter-sp-6 fg-3 mb-4">
-                {__t("advanced.ecr.costImpact") || "Cost Impact (₹)"}
-              </label>
-              <input
+            <Field
+              label={__t("advanced.ecr.costImpact") || "Cost Impact (₹)"}
+              htmlFor="ecr-form-cost"
+            >
+              <Input
                 id="ecr-form-cost"
                 name="ecrCostImpact"
                 type="number"
-                className="input w-100p fs-12"
+                mono
                 value={form.cost_impact}
                 onChange={(e) =>
                   setForm({ ...form, cost_impact: e.target.value })
                 }
-                style={{ height: 30 }}
               />
-            </div>
-            <div>
-              <label className="d-block font-mono fs-9 uppercase letter-sp-6 fg-3 mb-4">
-                {__t("advanced.ecr.itemsAffected") || "Items Affected"}
-              </label>
-              <input
+            </Field>
+            <Field
+              label={__t("advanced.ecr.itemsAffected") || "Items Affected"}
+              htmlFor="ecr-form-items"
+            >
+              <Input
                 id="ecr-form-items"
                 name="ecrItemsAffected"
                 type="number"
-                className="input w-100p fs-12"
+                mono
                 value={form.items_affected}
                 onChange={(e) =>
                   setForm({ ...form, items_affected: e.target.value })
                 }
-                style={{ height: 30 }}
               />
-            </div>
+            </Field>
           </div>
-          <div className="flex gap-8 justify-end">
-            <button className="btn" onClick={() => setShowForm(false)}>
-              {__t("common.cancel") || "Cancel"}
-            </button>
-            <button
-              className="btn primary"
-              onClick={addEcr}
-              disabled={!form.title.trim()}
-              style={{ opacity: form.title.trim() ? 1 : 0.5 }}
-            >
-              <Icon.Plus size={12} />{" "}
-              {__t("advanced.ecr.createEcr") || "Create ECR"}
-            </button>
-          </div>
-        </div>
+        </Card>
       )}
 
-      <div className="flex gap-6 mb-14" style={{ flexWrap: "wrap" }}>
-        {["All", "Draft", "Review", "Approved", "Implemented", "Rejected"].map(
-          (s) => (
-            <span
-              key={s}
-              className={(
-                "chip " +
-                (s === filter ? "active" : "") +
-                " cursor-pointer"
-              ).trim()}
-              onClick={() => setFilter(s)}
-            >
-              {s}{" "}
-              <span className="fg-4 ml-4">
-                {s === "All" ? ecrs.length : counts[s] || 0}
-              </span>
-            </span>
-          ),
-        )}
-      </div>
+      <Tabs
+        id="ecr-filter"
+        ariaLabel={__t("advanced.ecr.filterByStatus") || "Filter by status"}
+        items={filterItems}
+        value={filter}
+        onChange={setFilter}
+        className="mb-14"
+      />
 
-      <div className="card overflow-vis">
-        <table className="bom-table table-auto">
-          <thead>
-            <tr>
-              <th className="pl-16">{__t("advanced.ecr.ecrId") || "ECR ID"}</th>
-              <th>{__t("advanced.ecr.titleCol") || "Title"}</th>
-              <th>{__t("advanced.ecr.projectCol") || "Project"}</th>
-              <th>{__t("advanced.ecr.impactCol") || "Impact"}</th>
-              <th>{__t("advanced.ecr.itemsCol") || "Items"}</th>
-              <th className="num">
-                {__t("advanced.ecr.costDelta") || "Cost Δ"}
-              </th>
-              <th>{__t("advanced.ecr.approvalsCol") || "Approvals"}</th>
-              <th>{__t("advanced.ecr.statusCol") || "Status"}</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((e) => (
-              <tr
-                key={e.id}
-                onClick={() => setDetailEcr(e)}
-                className="cursor-pointer"
-              >
-                <td className="mono pl-16 fw-600">{e.id}</td>
-                <td>
-                  <div className="fw-500">{e.title}</div>
-                  <div className="font-mono fs-10 fg-3">
-                    {e.requester} · {e.date}
-                  </div>
-                </td>
-                <td className="mono">{e.project}</td>
-                <td>
-                  <span
-                    className={"tag-pill"}
-                    style={{
-                      borderColor:
-                        e.impact === "high"
-                          ? "var(--danger)"
-                          : e.impact === "med"
-                            ? "var(--warn)"
-                            : "var(--fg-3)",
-                      color:
-                        e.impact === "high"
-                          ? "var(--danger)"
-                          : e.impact === "med"
-                            ? "var(--warn)"
-                            : "var(--fg-3)",
-                    }}
-                  >
-                    {e.impact.toUpperCase()}
-                  </span>
-                </td>
-                <td className="mono num">{e.items_affected}</td>
-                <td
-                  className="num mono fw-600"
-                  style={{
-                    color:
-                      e.cost_impact > 0
-                        ? "var(--danger)"
-                        : e.cost_impact < 0
-                          ? "var(--ok)"
-                          : "var(--fg-3)",
-                  }}
-                >
-                  {e.cost_impact > 0 ? "+" : ""}
-                  {INR(e.cost_impact, 0)}
-                </td>
-                <td>
-                  <div className="inline-flex" style={{ gap: 3 }}>
-                    {Object.entries(e.approvals).map(([k, v]) => (
-                      <span
-                        key={k}
-                        title={k.toUpperCase() + ": " + v}
-                        className="w-18 h-18 inline-flex items-center justify-center font-mono fs-9 fw-700"
-                        style={{
-                          borderRadius: 99,
-                          background:
-                            v === "approved"
-                              ? "var(--ok)"
-                              : v === "rejected"
-                                ? "var(--danger)"
-                                : "var(--bg-sunk)",
-                          color: "white",
-                          border:
-                            v === "pending" ? "1px solid var(--fg-3)" : "none",
-                        }}
-                      >
-                        {k[0].toUpperCase()}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td>
-                  <span
-                    className={
-                      "status " +
-                      (e.status === "Approved" || e.status === "Implemented"
-                        ? "released"
-                        : e.status === "Review"
-                          ? "review"
-                          : e.status === "Rejected"
-                            ? "deprecated"
-                            : "draft")
-                    }
-                  >
-                    {e.status}
-                  </span>
-                </td>
-                <td onClick={(ev) => ev.stopPropagation()}>
-                  <DropdownButton
-                    width={200}
-                    trigger={
-                      <button
-                        className="icon-btn w-22 h-22"
-                        aria-label={
-                          __t("advanced.ecr.moreOptions") || "More options"
-                        }
-                      >
-                        <Icon.Dots size={11} />
-                      </button>
-                    }
-                    items={[
-                      ...(e.status === "Draft"
-                        ? [
-                            {
-                              icon: <Icon.Check size={11} />,
-                              label:
-                                __t("advanced.ecr.submitForReview") ||
-                                "Submit for review",
-                              onClick: () => updateStatus(e.id, "advance"),
-                            },
-                          ]
-                        : []),
-                      ...(e.status === "Review"
-                        ? [
-                            {
-                              icon: <Icon.Check size={11} />,
-                              label: __t("common.approve") || "Approve",
-                              onClick: () => updateStatus(e.id, "approve"),
-                            },
-                            {
-                              icon: <Icon.X size={11} />,
-                              label: __t("common.reject") || "Reject",
-                              onClick: () => updateStatus(e.id, "reject"),
-                            },
-                          ]
-                        : []),
-                      ...(e.status === "Approved"
-                        ? [
-                            {
-                              icon: <Icon.Check size={11} />,
-                              label:
-                                __t("advanced.ecr.markImplemented") ||
-                                "Mark implemented",
-                              onClick: () => updateStatus(e.id, "implement"),
-                            },
-                          ]
-                        : []),
-                      {
-                        icon: <Icon.Diff size={11} />,
-                        label: __t("advanced.ecr.viewDiff") || "View diff",
-                        onClick: () => window.__nav?.("diff"),
-                      },
-                      {
-                        icon: <Icon.Doc size={11} />,
-                        label: __t("advanced.ecr.printEcr") || "Print ECR",
-                        onClick: () => {
-                          const h = escapeHtml;
-                          openPrintWindow(
-                            __t("advanced.ecr.ecrPrint") || "ECR Print",
-                            "<html><head><title>" +
-                              h(e.id) +
-                              "</title><style>body{font-family:monospace;padding:30px}</style></head><body><h1>" +
-                              h(e.id) +
-                              "</h1><h2>" +
-                              h(e.title) +
-                              "</h2><p>" +
-                              (__t("advanced.ecr.projectCol") || "Project") +
-                              ": " +
-                              h(e.project) +
-                              " | " +
-                              (__t("advanced.ecr.impactCol") || "Impact") +
-                              ": " +
-                              h(e.impact) +
-                              " | " +
-                              (__t("advanced.ecr.statusCol") || "Status") +
-                              ": " +
-                              h(e.status) +
-                              "</p><p>" +
-                              (__t("advanced.ecr.requester") || "Requester") +
-                              ": " +
-                              h(e.requester) +
-                              " | " +
-                              (__t("advanced.ecr.date") || "Date") +
-                              ": " +
-                              h(e.date) +
-                              "</p></body></html>",
-                            {
-                              features: "width=700,height=500",
-                              printDelay: 300,
-                            },
-                          );
-                        },
-                      },
-                    ]}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <TabPanel id="ecr-filter" value={filter} active>
+        <DataTable
+          ariaLabel={__t("advanced.ecr.title") || "Engineering Change Requests"}
+          columns={columns}
+          rows={filtered}
+          getRowKey={(e) => e.id}
+          onRowClick={(e) => setDetailEcr(e)}
+          empty={
+            <EmptyState
+              title={__t("advanced.ecr.noResults") || "No ECRs match this filter"}
+            />
+          }
+        />
+      </TabPanel>
 
       {detailEcr && (
         <Modal
@@ -601,15 +613,15 @@ function ECRScreen() {
             " · " +
             detailEcr.date
           }
-          wide
+          size="lg"
           footer={
             <>
-              <button className="btn" onClick={() => setDetailEcr(null)}>
+              <Button variant="secondary" onClick={() => setDetailEcr(null)}>
                 {__t("common.close") || "Close"}
-              </button>
+              </Button>
               {detailEcr.status === "Draft" && (
-                <button
-                  className="btn primary"
+                <Button
+                  variant="primary"
                   onClick={() => {
                     updateStatus(detailEcr.id, "advance");
                     setDetailEcr(null);
@@ -617,21 +629,21 @@ function ECRScreen() {
                 >
                   <Icon.Check size={12} />{" "}
                   {__t("advanced.ecr.submitForReview") || "Submit for Review"}
-                </button>
+                </Button>
               )}
               {detailEcr.status === "Review" && (
                 <>
-                  <button
-                    className="btn fg-danger"
+                  <Button
+                    variant="danger"
                     onClick={() => {
                       updateStatus(detailEcr.id, "reject");
                       setDetailEcr(null);
                     }}
                   >
                     <Icon.X size={12} /> {__t("common.reject") || "Reject"}
-                  </button>
-                  <button
-                    className="btn primary"
+                  </Button>
+                  <Button
+                    variant="primary"
                     onClick={() => {
                       updateStatus(detailEcr.id, "approve");
                       setDetailEcr(null);
@@ -639,12 +651,12 @@ function ECRScreen() {
                   >
                     <Icon.Check size={12} />{" "}
                     {__t("common.approve") || "Approve"}
-                  </button>
+                  </Button>
                 </>
               )}
               {detailEcr.status === "Approved" && (
-                <button
-                  className="btn primary"
+                <Button
+                  variant="primary"
                   onClick={() => {
                     updateStatus(detailEcr.id, "implement");
                     setDetailEcr(null);
@@ -652,7 +664,7 @@ function ECRScreen() {
                 >
                   <Icon.Check size={12} />{" "}
                   {__t("advanced.ecr.markImplemented") || "Mark Implemented"}
-                </button>
+                </Button>
               )}
             </>
           }
@@ -668,26 +680,12 @@ function ECRScreen() {
               <div>{detailEcr.project}</div>
             </div>
             <div>
-              <div>{__t("advanced.ecr.impactCol") || "Impact"}</div>
-              <span
-                className="tag-pill fs-9 uppercase fg-3 font-mono mb-4"
-                style={{
-                  borderColor:
-                    detailEcr.impact === "high"
-                      ? "var(--danger)"
-                      : detailEcr.impact === "med"
-                        ? "var(--warn)"
-                        : "var(--fg-3)",
-                  color:
-                    detailEcr.impact === "high"
-                      ? "var(--danger)"
-                      : detailEcr.impact === "med"
-                        ? "var(--warn)"
-                        : "var(--fg-3)",
-                }}
-              >
+              <div className="fs-9 uppercase fg-3 font-mono mb-4 fw-600">
+                {__t("advanced.ecr.impactCol") || "Impact"}
+              </div>
+              <Badge tone={IMPACT_TONE[detailEcr.impact] || "neutral"} pill>
                 {detailEcr.impact.toUpperCase()}
-              </span>
+              </Badge>
             </div>
             <div>
               <div className="fs-9 uppercase fg-3 font-mono mb-4 fw-600">
@@ -697,10 +695,10 @@ function ECRScreen() {
                 style={{
                   color:
                     detailEcr.cost_impact > 0
-                      ? "var(--danger)"
+                      ? "var(--status-danger)"
                       : detailEcr.cost_impact < 0
-                        ? "var(--ok)"
-                        : "var(--fg)",
+                        ? "var(--status-success)"
+                        : "var(--text-primary)",
                 }}
               >
                 {detailEcr.cost_impact > 0 ? "+" : ""}
@@ -714,23 +712,10 @@ function ECRScreen() {
               <div>{detailEcr.items_affected}</div>
             </div>
             <div>
-              <div>{__t("advanced.ecr.statusCol") || "Status"}</div>
-              <span
-                className={(
-                  "status " +
-                  (detailEcr.status === "Approved" ||
-                  detailEcr.status === "Implemented"
-                    ? "released"
-                    : detailEcr.status === "Review"
-                      ? "review"
-                      : detailEcr.status === "Rejected"
-                        ? "deprecated"
-                        : "draft") +
-                  " fs-9 uppercase fg-3 font-mono mb-4"
-                ).trim()}
-              >
-                {detailEcr.status}
-              </span>
+              <div className="fs-9 uppercase fg-3 font-mono mb-4 fw-600">
+                {__t("advanced.ecr.statusCol") || "Status"}
+              </div>
+              <StatusPill status={detailEcr.status} />
             </div>
           </div>
           <div className="border-top pt-12">
@@ -746,34 +731,20 @@ function ECRScreen() {
                     padding: "6px 10px",
                     background:
                       v === "approved"
-                        ? "color-mix(in oklch, var(--ok) 10%, var(--bg))"
+                        ? "color-mix(in oklch, var(--status-success) 10%, var(--bg-surface))"
                         : v === "rejected"
-                          ? "color-mix(in oklch, var(--danger) 10%, var(--bg))"
-                          : "var(--bg-sunk)",
+                          ? "color-mix(in oklch, var(--status-danger) 10%, var(--bg-surface))"
+                          : "var(--bg-subtle)",
                     border:
                       "1px solid " +
                       (v === "approved"
-                        ? "var(--ok)"
+                        ? "var(--status-success)"
                         : v === "rejected"
-                          ? "var(--danger)"
-                          : "var(--line)"),
+                          ? "var(--status-danger)"
+                          : "var(--border-subtle)"),
                   }}
                 >
-                  <span
-                    className="w-20 h-20 inline-flex items-center justify-center font-mono fs-9 fw-700"
-                    style={{
-                      borderRadius: 99,
-                      background:
-                        v === "approved"
-                          ? "var(--ok)"
-                          : v === "rejected"
-                            ? "var(--danger)"
-                            : "var(--fg-3)",
-                      color: "white",
-                    }}
-                  >
-                    {k[0].toUpperCase()}
-                  </span>
+                  <ApprovalDot role={k} value={v} />
                   <div>
                     <div className="fs-10 fw-600 fs-9 fg-3">
                       {k.toUpperCase()}
