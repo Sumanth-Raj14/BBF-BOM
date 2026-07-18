@@ -114,14 +114,17 @@ The Blackbox BOM SolidWorks Plugin provides seamless integration between SolidWo
    - BlackboxBOM.SolidWorks.dll
    - BlackboxBOM.SolidWorks.pdb
    - Newtonsoft.Json.dll
-   - SldWorks.Interop.dll
-   - SldWorks.Interop.sldworks.dll
-   - SldWorks.Interop.swconst.dll
+   - SolidWorks.Interop.sldworks.dll
+   - SolidWorks.Interop.swconst.dll
+   - SolidWorks.Interop.swpublished.dll
    ```
 
 2. **Register COM DLL**
+   Use `RegAsm` (the .NET Framework's COM registration tool), not `regsvr32` —
+   `regsvr32` only works on native COM DLLs and silently no-ops on a managed
+   assembly:
    ```cmd
-   regsvr32 "C:\Program Files\BlackboxBOM\SolidWorks\BlackboxBOM.SolidWorks.dll"
+   %windir%\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe /codebase "C:\Program Files\BlackboxBOM\SolidWorks\BlackboxBOM.SolidWorks.dll"
    ```
 
 3. **Add Registry Keys**
@@ -431,6 +434,9 @@ backend/server.log
 
 ## API Reference
 
+All plugin endpoints live under `/api/v1/solidworks/*` (not `/api/v1/cad/*` — that
+prefix doesn't exist on the backend; earlier drafts of this doc referenced it).
+
 ### Authentication
 
 ```http
@@ -443,11 +449,13 @@ Content-Type: application/json
   "client_version": "1.0.0"
 }
 ```
+Response includes `session_id` (a bearer access token) — the plugin sends it as
+`Authorization: Bearer <session_id>` on every subsequent request.
 
-### BOM Sync
+### BOM Sync (builds the real multi-level BOM)
 
 ```http
-POST /api/v1/cad/sync
+POST /api/v1/solidworks/sync
 Content-Type: application/json
 
 {
@@ -458,8 +466,27 @@ Content-Type: application/json
       "component_name": "Part1",
       "part_number": "PART-001",
       "quantity": 2,
+      "level": 0,
+      "is_assembly": false,
       "material": "Steel"
     }
+  ]
+}
+```
+`level` (0 = top level) and `is_assembly` are what let the backend rebuild the
+parent/child tree — every item must set them correctly. `component_name` is
+required on every item.
+
+### Lightweight Sync (parts only, no tree)
+
+```http
+POST /api/v1/solidworks/apply-sync
+Content-Type: application/json
+
+{
+  "source_file": "Assembly.SLDASM",
+  "items": [
+    { "component_name": "Part1", "part_number": "PART-001", "quantity": 2, "description": "..." }
   ]
 }
 ```
@@ -467,41 +494,38 @@ Content-Type: application/json
 ### Image Upload
 
 ```http
-POST /api/v1/cad/images
-Content-Type: application/json
+POST /api/v1/solidworks/images
+Content-Type: multipart/form-data
 
-{
-  "part_number": "PART-001",
-  "isometric_view": "base64-encoded-image",
-  "thumbnail_128": "base64-encoded-thumbnail"
-}
+part_number=PART-001
+file=<binary image data>
 ```
+This is a **form upload**, not JSON — the backend stores one image per part today.
 
 ### Get Updates
 
 ```http
-GET /api/v1/cad/updates?session=abc123
+GET /api/v1/solidworks/updates?session=abc123
 ```
 
 ### Apply Changes
 
 ```http
-POST /api/v1/cad/apply-changes
+POST /api/v1/solidworks/apply-changes?model=Assembly.SLDASM
 Content-Type: application/json
 
-{
-  "model": "Assembly.SLDASM",
-  "changes": [
-    {
-      "change_id": "123",
-      "type": "custom_property",
-      "part_number": "PART-001",
-      "property": "Description",
-      "new_value": "Updated Description"
-    }
-  ]
-}
+[
+  {
+    "change_id": "123",
+    "type": "custom_property",
+    "part_number": "PART-001",
+    "property": "Description",
+    "new_value": "Updated Description"
+  }
+]
 ```
+Note `model` is a **query parameter**, and the body is the **raw array** of
+changes — not `{"model": ..., "changes": [...]}`.
 
 ---
 

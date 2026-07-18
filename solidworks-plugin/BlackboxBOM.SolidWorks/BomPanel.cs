@@ -138,7 +138,13 @@ namespace BlackboxBOM.SolidWorks
             _bomListView = new ListView
             {
                 Dock = DockStyle.Fill,
-                View = View.Details,
+                // Must be fully qualified: `SolidWorks.Interop.sldworks` (used elsewhere in
+                // this file for `ISldWorks`) also declares a type named `View` (a graphics
+                // viewport interface), so the bare `View.Details` is ambiguous between it and
+                // `System.Windows.Forms.View` (the ListView display-mode enum actually wanted
+                // here) — confirmed via a real compile against a real SolidWorks interop
+                // assembly (CS0104), not a guess.
+                View = System.Windows.Forms.View.Details,
                 FullRowSelect = true,
                 GridLines = true,
                 Font = new Font("Segoe UI", 9)

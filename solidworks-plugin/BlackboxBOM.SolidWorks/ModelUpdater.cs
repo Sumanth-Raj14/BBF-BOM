@@ -250,7 +250,11 @@ namespace BlackboxBOM.SolidWorks
         /// </summary>
         private bool UpdateFeatureParameter(IFeature feature, string paramName, object newValue)
         {
-            IFeatureData featData = feature.GetFeatureData2();
+            // See the identical note in BomExtractor.cs: `IFeatureData` does not exist as a
+            // distinct type in a real published SolidWorks interop assembly (reflection-
+            // verified); `object` is a behavior-preserving replacement since every caller
+            // only ever narrows via an `is I...FeatureData2` pattern.
+            object featData = feature.GetFeatureData2();
             if (featData == null) return false;
 
             string typeName = feature.GetTypeName2();
@@ -276,7 +280,7 @@ namespace BlackboxBOM.SolidWorks
             }
         }
 
-        private bool UpdateExtrudeFeature(IFeatureData featData, string paramName, object newValue)
+        private bool UpdateExtrudeFeature(object featData, string paramName, object newValue)
         {
             if (featData is IExtrudeFeatureData2 extrudeData)
             {
@@ -295,7 +299,7 @@ namespace BlackboxBOM.SolidWorks
             return false;
         }
 
-        private bool UpdateRevolveFeature(IFeatureData featData, string paramName, object newValue)
+        private bool UpdateRevolveFeature(object featData, string paramName, object newValue)
         {
             if (featData is IRevolveFeatureData2 revolveData)
             {
@@ -309,7 +313,7 @@ namespace BlackboxBOM.SolidWorks
             return false;
         }
 
-        private bool UpdateFilletFeature(IFeatureData featData, string paramName, object newValue)
+        private bool UpdateFilletFeature(object featData, string paramName, object newValue)
         {
             if (featData is IFilletFeatureData2 filletData)
             {
@@ -323,7 +327,7 @@ namespace BlackboxBOM.SolidWorks
             return false;
         }
 
-        private bool UpdateHoleWizardFeature(IFeatureData featData, string paramName, object newValue)
+        private bool UpdateHoleWizardFeature(object featData, string paramName, object newValue)
         {
             if (featData is IHoleWizardFeatureData2 hwData)
             {
@@ -418,6 +422,8 @@ namespace BlackboxBOM.SolidWorks
                 List<PendingChange> changes = kvp.Value;
 
                 // Open model
+                int errors = 0;
+                int warnings = 0;
                 IModelDoc2 model = _swApp.OpenDoc6(
                     modelPath,
                     (int)swDocumentTypes_e.swDocPART,

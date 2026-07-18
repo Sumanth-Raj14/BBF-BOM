@@ -167,17 +167,18 @@ namespace BlackboxBOM.SolidWorks
 
         private void BtnSave_Click(object sender, EventArgs e)
         {
-            var settings = new PluginSettings
-            {
-                ApiUrl = txtApiUrl.Text,
-                ApiKey = txtApiKey.Text,
-                LicenseKey = txtLicenseKey.Text,
-                AutoSync = chkAutoSync.Checked,
-                AutoExtract = chkAutoExtract.Checked,
-                SyncInterval = (int)numSyncInterval.Value
-            };
+            // Route the URL/key through ApiClient so its in-memory state (used by
+            // every request this session) picks up the change immediately, instead
+            // of only taking effect after restarting SolidWorks.
+            _apiClient.SaveSettings(txtApiUrl.Text, txtApiKey.Text);
 
+            var settings = PluginSettings.Load();
+            settings.LicenseKey = txtLicenseKey.Text;
+            settings.AutoSync = chkAutoSync.Checked;
+            settings.AutoExtract = chkAutoExtract.Checked;
+            settings.SyncInterval = (int)numSyncInterval.Value;
             settings.Save();
+
             this.DialogResult = DialogResult.OK;
             this.Close();
         }

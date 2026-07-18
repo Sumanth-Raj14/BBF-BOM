@@ -36,10 +36,11 @@ Source: "BlackboxBOM.SolidWorks\bin\Release\BlackboxBOM.SolidWorks.dll"; DestDir
 Source: "BlackboxBOM.SolidWorks\bin\Release\BlackboxBOM.SolidWorks.pdb"; DestDir: "{app}"; Flags: ignoreversion
 Source: "BlackboxBOM.SolidWorks\bin\Release\Newtonsoft.Json.dll"; DestDir: "{app}"; Flags: ignoreversion
 
-; SolidWorks Interop DLLs
-Source: "BlackboxBOM.SolidWorks\bin\Release\SldWorks.Interop.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "BlackboxBOM.SolidWorks\bin\Release\SldWorks.Interop.sldworks.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "BlackboxBOM.SolidWorks\bin\Release\SldWorks.Interop.swconst.dll"; DestDir: "{app}"; Flags: ignoreversion
+; SolidWorks Interop DLLs (copied to bin\Release automatically since the .csproj
+; references them with Private=true; names must match the actual assembly names)
+Source: "BlackboxBOM.SolidWorks\bin\Release\SolidWorks.Interop.sldworks.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "BlackboxBOM.SolidWorks\bin\Release\SolidWorks.Interop.swconst.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "BlackboxBOM.SolidWorks\bin\Release\SolidWorks.Interop.swpublished.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Documentation
 Source: "..\docs\SolidWorks_Integration_Guide.md"; DestDir: "{app}\Docs"; Flags: ignoreversion
@@ -59,19 +60,26 @@ Root: HKCU; Subkey: "Software\BlackboxBOM"; ValueType: string; ValueName: "ApiUr
 Root: HKCU; Subkey: "Software\BlackboxBOM"; ValueType: string; ValueName: "ApiKey"; ValueData: ""; Flags: uninsdeletekey
 
 [Icons]
-Name: "{group}\Settings"; Filename: "{app}\Settings.exe"
+; NOTE: there is no standalone "Settings.exe" — Settings is a WinForms dialog
+; (SettingsForm.cs) opened from *inside* SolidWorks via the add-in's "Settings"
+; toolbar/menu command (OpenSettings()), not a separate executable. A Start Menu
+; shortcut pointing at a nonexistent Settings.exe (as this used to) would be a
+; dead/broken shortcut on every install — removed.
 Name: "{group}\Documentation"; Filename: "{app}\Docs\SolidWorks_Integration_Guide.md"
 Name: "{group}\Uninstall"; Filename: "{uninstallexe}"
 
 [Run]
-; Register COM DLL
-Filename: "{sys}\regsvr32.exe"; Parameters: "/s ""{app}\BlackboxBOM.SolidWorks.dll"""; Flags: runhidden
-Filename: "{sys}\regsvr32.exe"; Parameters: "/s ""{app}\SldWorks.Interop.sldworks.dll"""; Flags: runhidden
+; Register the add-in for COM interop via RegAsm. NOTE: regsvr32 (used here
+; previously) only works for native COM DLLs that export DllRegisterServer — a
+; managed .NET assembly (even one built with RegisterForComInterop=true) has no
+; such export, so regsvr32 against it silently no-ops (errors are swallowed by
+; /s). RegAsm is the correct tool for .NET COM interop registration. The interop
+; reference DLLs (SolidWorks.Interop.*) are plain reference assemblies, not COM
+; servers, and must NOT be registered at all.
+Filename: "{dotnet4064}\RegAsm.exe"; Parameters: "/codebase ""{app}\BlackboxBOM.SolidWorks.dll"""; Flags: runhidden
 
 [UninstallRun]
-; Unregister COM DLL
-Filename: "{sys}\regsvr32.exe"; Parameters: "/s /u ""{app}\BlackboxBOM.SolidWorks.dll"""; Flags: runhidden
-Filename: "{sys}\regsvr32.exe"; Parameters: "/s /u ""{app}\SldWorks.Interop.sldworks.dll"""; Flags: runhidden
+Filename: "{dotnet4064}\RegAsm.exe"; Parameters: "/unregister ""{app}\BlackboxBOM.SolidWorks.dll"""; Flags: runhidden
 
 [Code]
 // Check if SolidWorks is installed
