@@ -34,7 +34,7 @@ namespace BlackboxBOM.SolidWorks
 
             if (model.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY)
             {
-                ExtractFromAssembly(model as IAssemblyDoc, bom, null);
+                ExtractFromAssembly(model as IAssemblyDoc, bom, 0);
             }
             else if (model.GetType() == (int)swDocumentTypes_e.swDocPART)
             {
@@ -49,11 +49,54 @@ namespace BlackboxBOM.SolidWorks
         }
 
         /// <summary>
-        /// Recursively extract components from assembly
+        /// Extract a single top-level part document (no assembly, nothing to recurse into).
         /// </summary>
-        private void ExtractFromAssembly(IAssemblyDoc assembly, BomData bom, IComponent2 parentComponent)
+        private void ExtractFromPart(IPartDoc part, BomData bom)
         {
-            object[] components = assembly.GetComponents2(false);
+            if (part == null) return;
+
+            IModelDoc2 model = part as IModelDoc2;
+            if (model == null) return;
+
+            var item = new BomItem
+            {
+                ComponentName = model.GetTitle(),
+                ComponentPath = model.GetPathName(),
+                Quantity = 1,
+                Level = 0,
+                IsAssembly = false
+            };
+
+            ExtractPartDetails(model, item);
+            ExtractCustomProperties(model, item);
+            ExtractParametricData(model, item);
+            ExtractMaterials(model, item);
+
+            IConfiguration config = model.ConfigurationManager?.ActiveConfiguration;
+            if (config != null)
+            {
+                item.ConfigurationName = config.Name;
+                if (string.IsNullOrEmpty(item.Description))
+                    item.Description = config.Description;
+            }
+
+            bom.Items.Add(item);
+        }
+
+        /// <summary>
+        /// Recursively extract components from assembly, tracking depth (Level) so the
+        /// backend can rebuild the real parent/child tree.
+        ///
+        /// IMPORTANT: IAssemblyDoc.GetComponents2(false) already returns EVERY component
+        /// in the assembly, flattened, including everything nested inside sub-assemblies.
+        /// Calling it again inside the recursion (as this used to) would re-visit and
+        /// duplicate every descendant component once per level of nesting. We instead
+        /// call GetComponents2(true) (top-level/direct children only) at each level and
+        /// recurse manually — that is the only way to get correct per-level counts.
+        /// </summary>
+        private void ExtractFromAssembly(IAssemblyDoc assembly, BomData bom, int level)
+        {
+            object[] components = assembly.GetComponents2(true);
 
             if (components == null) return;
 
@@ -63,14 +106,18 @@ namespace BlackboxBOM.SolidWorks
                 if (component.GetSuppression2() == (int)swComponentSuppressionState_e.swComponentSuppressed)
                     continue;
 
+                IModelDoc2 childDoc = component.GetModelDoc2();
+                bool isAssembly = childDoc != null && childDoc.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY;
+
                 var item = ExtractComponentData(component, bom.SourceFile);
+                item.Level = level;
+                item.IsAssembly = isAssembly;
                 bom.Items.Add(item);
 
-                // Recurse into sub-assemblies
-                IModelDoc2 childDoc = component.GetModelDoc2();
-                if (childDoc != null && childDoc.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY)
+                // Recurse into sub-assemblies (direct children only, next level down)
+                if (isAssembly)
                 {
-                    ExtractFromAssembly(childDoc as IAssemblyDoc, bom, component);
+                    ExtractFromAssembly(childDoc as IAssemblyDoc, bom, level + 1);
                 }
             }
         }
@@ -385,7 +432,7 @@ namespace BlackboxBOM.SolidWorks
             ISketch sketch = feature.GetSpecificFeature2() as ISketch;
             if (sketch != null)
             {
-                featInfo.Parameters["SketchPlane"] = sketch-plane?.Name ?? "Unknown";
+                featInfo.Parameters["SketchPlane"] = "Unknown"; // TODO: resolve the sketch's reference plane/face name via ISketch's containing feature once needed
                 featInfo.Parameters["IsClosed"] = sketch.IsClosed();
                 featInfo.Parameters["EntityCount"] = sketch.GetSketchSegmentCount();
             }

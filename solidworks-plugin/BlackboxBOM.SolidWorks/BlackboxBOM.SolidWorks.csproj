@@ -13,6 +13,19 @@
     <WarningLevel>4</WarningLevel>
     <RegisterForComInterop>true</RegisterForComInterop>
     <LangVersion>latest</LangVersion>
+
+    <!--
+      Where the pre-built SolidWorks Interop assemblies live. SolidWorks ships these
+      alongside the install (NOT on NuGet, and NOT safe to `tlbimp` a COMReference
+      against, since that requires the exact type library GUID/version registered on
+      the build machine). Override this on the command line or in a
+      Directory.Build.props if your install lives elsewhere, e.g.:
+        msbuild /p:SolidWorksApiRedistDir="D:\SOLIDWORKS\api\redist\"
+      Typical locations (adjust the year/edition to match your install):
+        C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist\
+        C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS 2024\api\redist\
+    -->
+    <SolidWorksApiRedistDir Condition="'$(SolidWorksApiRedistDir)'==''">C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist\</SolidWorksApiRedistDir>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,28 +34,50 @@
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Net.Http" />
-    <Reference Include="Newtonsoft.Json" HintPath="..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll" />
   </ItemGroup>
 
   <ItemGroup>
-    <COMReference Include="SldWorks">
-      <Guid>{83A33D51-C5AC-11CE-9295-000021473128}</Guid>
-      <VersionMajor>1</VersionMajor>
-      <VersionMinor>0</VersionMinor>
-      <Lcid>0</Lcid>
-      <WrapperTool>tlbimp</WrapperTool>
-      <Isolated>false</Isolated>
-    </COMReference>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <!--
+    SolidWorks interop references. These are the three assemblies every SolidWorks
+    C# add-in needs (ISwAddin/ISldWorks, the sw*_e enums, and the published
+    interfaces used for callbacks/events). They are NOT NuGet packages — reference
+    the real DLLs from the SolidWorks install (see SolidWorksApiRedistDir above).
+    EmbedInteropTypes is false (matches SolidWorks' own add-in samples) and
+    Private=true so the DLLs are copied next to the add-in output, since they are
+    not guaranteed to be in the GAC on every SolidWorks machine.
+  -->
+  <ItemGroup>
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SolidWorksApiRedistDir)SolidWorks.Interop.sldworks.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swconst">
+      <HintPath>$(SolidWorksApiRedistDir)SolidWorks.Interop.swconst.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swpublished">
+      <HintPath>$(SolidWorksApiRedistDir)SolidWorks.Interop.swpublished.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\BlackboxBOM.ico" />
   </ItemGroup>
 
-  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
-    <PropertyGroup>
-      <ErrorText>This project references NuGet package(s) that are missing on this computer.</ErrorText>
-    </PropertyGroup>
+  <!-- Fail fast with an actionable message instead of a wall of CS0246 "type or
+       namespace not found" errors when the SolidWorks interop DLLs aren't where
+       SolidWorksApiRedistDir points. -->
+  <Target Name="CheckSolidWorksInterop" BeforeTargets="BeforeBuild">
+    <Error
+      Condition="!Exists('$(SolidWorksApiRedistDir)SolidWorks.Interop.sldworks.dll')"
+      Text="SolidWorks interop assemblies not found at '$(SolidWorksApiRedistDir)'. Install SolidWorks on this machine, or pass the correct folder with /p:SolidWorksApiRedistDir=&quot;&lt;path&gt;\api\redist\&quot; (see the comment on SolidWorksApiRedistDir in this .csproj)." />
   </Target>
 
 </Project>

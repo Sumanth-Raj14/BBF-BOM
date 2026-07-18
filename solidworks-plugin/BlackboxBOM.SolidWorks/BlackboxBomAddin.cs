@@ -416,6 +416,11 @@ namespace BlackboxBOM.SolidWorks
         [ComRegisterFunction]
         public static void RegisterFunction(Type t)
         {
+            // Single source of truth for title/description/load-at-startup: the
+            // [SwAddin(...)] attribute on this class, rather than duplicated literals.
+            var meta = (SwAddinAttribute)Attribute.GetCustomAttribute(t, typeof(SwAddinAttribute))
+                       ?? new SwAddinAttribute { Title = "Blackbox BOM", Description = "Blackbox BOM Management Integration", LoadAtStartup = true };
+
             Microsoft.Win32.RegistryKey hklm = Microsoft.Win32.Registry.LocalMachine;
             Microsoft.Win32.RegistryKey hkcu = Microsoft.Win32.Registry.CurrentUser;
 
@@ -425,15 +430,15 @@ namespace BlackboxBOM.SolidWorks
             if (addinKey != null)
             {
                 addinKey.SetValue(null, 0);
-                addinKey.SetValue("Description", "Blackbox BOM Management Integration");
-                addinKey.SetValue("Title", "Blackbox BOM");
+                addinKey.SetValue("Description", meta.Description);
+                addinKey.SetValue("Title", meta.Title);
             }
 
             keyName = $"Software\\SolidWorks\\AddInsStartup\\{{{t.GUID}}}";
             addinKey = hkcu.CreateSubKey(keyName);
             if (addinKey != null)
             {
-                addinKey.SetValue(null, 1); // Load at startup
+                addinKey.SetValue(null, meta.LoadAtStartup ? 1 : 0);
             }
         }
 

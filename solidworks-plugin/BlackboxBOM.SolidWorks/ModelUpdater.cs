@@ -418,6 +418,8 @@ namespace BlackboxBOM.SolidWorks
                 List<PendingChange> changes = kvp.Value;
 
                 // Open model
+                int errors = 0;
+                int warnings = 0;
                 IModelDoc2 model = _swApp.OpenDoc6(
                     modelPath,
                     (int)swDocumentTypes_e.swDocPART,

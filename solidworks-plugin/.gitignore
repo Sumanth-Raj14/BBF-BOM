@@ -1,0 +1,15 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+
+# NuGet
+packages/
+*.nupkg
+
+# Inno Setup output
+installer_output/
+
+# VS
+.vs/
