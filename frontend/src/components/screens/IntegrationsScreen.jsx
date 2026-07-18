@@ -18,6 +18,23 @@ const PROVIDERS = [
   { id: "cliq", name: "Zoho Cliq", credLabel: "Incoming webhook URL", cfgLabel: "Default channel", cfgKey: "default_channel" },
 ];
 
+// Maps the honest /test-connection result to a StatusPill tone + label.
+// Never claims "Connected" unless the backend actually verified credentials;
+// a missing credential reports "Not configured", any other failure reports
+// "Failed" alongside the backend's safe (pre-sanitized) detail text.
+function checkTone(check) {
+  if (!check) return "neutral";
+  if (check.ok) return "success";
+  if (check.reason === "not_configured") return "neutral";
+  return "danger";
+}
+function checkLabel(check) {
+  if (!check) return "Not configured";
+  if (check.ok) return "Connected";
+  if (check.reason === "not_configured") return "Not configured";
+  return "Failed";
+}
+
 export default function IntegrationsScreen() {
   const [conns, setConns] = React.useState({});
   const [deliveries, setDeliveries] = React.useState([]);
@@ -202,19 +219,30 @@ export default function IntegrationsScreen() {
               </div>
               {checks[p.id] && (
                 <div
+                  className="flex gap-8"
                   style={{
                     marginTop: "var(--sp-2, 8px)",
-                    fontSize: "var(--fs-sm, 13px)",
-                    color: checks[p.id].ok ? "var(--success)" : "var(--danger)",
+                    alignItems: "center",
+                    flexWrap: "wrap",
                   }}
                 >
-                  {checks[p.id].ok ? "Verified" : "Not verified"}:{" "}
-                  {checks[p.id].detail}
-                  {checks[p.id].checked_at
-                    ? ` (checked ${new Date(
-                        checks[p.id].checked_at,
-                      ).toLocaleTimeString()})`
-                    : ""}
+                  <StatusPill
+                    tone={checkTone(checks[p.id])}
+                    label={checkLabel(checks[p.id])}
+                  />
+                  <span
+                    style={{
+                      fontSize: "var(--fs-sm, 13px)",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    {checks[p.id].detail}
+                    {checks[p.id].checked_at
+                      ? ` (checked ${new Date(
+                          checks[p.id].checked_at,
+                        ).toLocaleTimeString()})`
+                      : ""}
+                  </span>
                 </div>
               )}
             </Card>

@@ -92,7 +92,7 @@ describe("IntegrationsScreen — live test-connection", () => {
     expect(
       await screen.findByText(/Provider rejected the request \(HTTP 401\)\./),
     ).toBeTruthy();
-    expect(screen.getByText(/Not verified/)).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
   });
 
   it("disables the Test connection button when no credentials are saved yet", async () => {
@@ -106,5 +106,36 @@ describe("IntegrationsScreen — live test-connection", () => {
     render(<IntegrationsScreen />);
     const btns = await screen.findAllByRole("button", { name: "Test connection" });
     expect(btns[0]).toBeDisabled();
+  });
+
+  it("renders a 'Not configured' StatusPill without ever claiming success, even on a stale check", async () => {
+    apiRequest.mockImplementation(async (path) => {
+      if (path === "/integrations/") return mockConnections();
+      if (path === "/integrations/deliveries") return [];
+      if (path === "/integrations/clickup/test-connection") {
+        return {
+          provider: "clickup",
+          ok: false,
+          reason: "not_configured",
+          detail: "No credentials saved for this provider yet.",
+          checked_at: "2026-07-18T10:00:00Z",
+        };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    render(<IntegrationsScreen />);
+    const btns = await screen.findAllByRole("button", { name: "Test connection" });
+    fireEvent.click(btns[0]);
+
+    expect(await screen.findByText("Not configured")).toBeTruthy();
+    expect(
+      screen.getByText(/No credentials saved for this provider yet\./),
+    ).toBeTruthy();
+    // Honest failure: the live check never fires a success toast.
+    expect(toast).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ kind: "error" }),
+    );
   });
 });
