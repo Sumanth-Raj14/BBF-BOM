@@ -10,12 +10,14 @@ import {
   Input,
   Select,
   Textarea,
+  Checkbox,
   Card,
   DataTable,
   StatusPill,
   Badge,
   Menu,
   EmptyState,
+  Modal,
 } from "../components/ui";
 
 function woStatusTone(status) {
@@ -1065,14 +1067,14 @@ function LandedCostModal({ open, onClose, part }) {
           : __t("power.landedCost.subtitle") ||
             "Calculate true delivered cost including duty, freight, taxes"
       }
-      wide
+      size="lg"
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.close") || "Close"}
-          </button>
-          <button
-            className="btn primary"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => {
               onClose();
               toast(
@@ -1085,50 +1087,39 @@ function LandedCostModal({ open, onClose, part }) {
             }}
           >
             {__t("power.landedCost.applyToPart") || "Apply to part"}
-          </button>
+          </Button>
         </>
       }
     >
       <div className="d-grid gap-24" style={{ gridTemplateColumns: "1fr 1fr" }}>
         <div>
           <div className="field-row">
-            <div className="field">
-              <label htmlFor="landed-unit">
-                {__t("power.landedCost.unitCostUsd") || "Unit cost ($USD)"}
-              </label>
-              <input
-                id="landed-unit"
+            <Field
+              label={__t("power.landedCost.unitCostUsd") || "Unit cost ($USD)"}
+            >
+              <Input
                 name="unitCost"
-                className="input mono"
+                mono
                 type="number"
                 step="0.01"
                 value={unit}
                 onChange={(e) => setUnit(+e.target.value)}
               />
-            </div>
-            <div className="field">
-              <label htmlFor="landed-qty">
-                {__t("part.quantity") || "Qty"}
-              </label>
-              <input
-                id="landed-qty"
+            </Field>
+            <Field label={__t("part.quantity") || "Qty"}>
+              <Input
                 name="unitQty"
-                className="input mono"
+                mono
                 type="number"
                 value={qty}
                 onChange={(e) => setQty(+e.target.value)}
               />
-            </div>
+            </Field>
           </div>
           <div className="field-row">
-            <div className="field">
-              <label htmlFor="landed-origin">
-                {__t("part.origin") || "Origin"}
-              </label>
-              <select
-                id="landed-origin"
+            <Field label={__t("part.origin") || "Origin"}>
+              <Select
                 name="origin"
-                className="select"
                 value={origin}
                 onChange={(e) => setOrigin(e.target.value)}
               >
@@ -1137,16 +1128,13 @@ function LandedCostModal({ open, onClose, part }) {
                 <option>JP</option>
                 <option>US</option>
                 <option>DE</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="landed-route">
-                {__t("power.landedCost.shippingRoute") || "Shipping route"}
-              </label>
-              <select
-                id="landed-route"
+              </Select>
+            </Field>
+            <Field
+              label={__t("power.landedCost.shippingRoute") || "Shipping route"}
+            >
+              <Select
                 name="shippingRoute"
-                className="select"
                 value={route}
                 onChange={(e) => setRoute(e.target.value)}
               >
@@ -1160,20 +1148,14 @@ function LandedCostModal({ open, onClose, part }) {
                   {__t("power.landedCost.expressCourier") ||
                     "Express courier (3d)"}
                 </option>
-              </select>
-            </div>
+              </Select>
+            </Field>
           </div>
-          <div className="field">
-            <label htmlFor="landed-hsn">
-              {__t("power.landedCost.hsnCode") || "HSN / customs code"}
-            </label>
-            <input
-              id="landed-hsn"
-              name="customsCode"
-              className="input mono"
-              defaultValue="8504.40.90"
-            />
-          </div>
+          <Field
+            label={__t("power.landedCost.hsnCode") || "HSN / customs code"}
+          >
+            <Input name="customsCode" mono defaultValue="8504.40.90" />
+          </Field>
           {part && (
             <div
               className="mt-12 bg-sunk border-line rounded-r2 fs-11"
@@ -1191,34 +1173,32 @@ function LandedCostModal({ open, onClose, part }) {
             </div>
           )}
           <div className="field-row mt-12">
-            <div className="field">
-              <label htmlFor="landed-freight">
-                {__t("power.landedCost.customFreight") || "Custom freight ($)"}
-              </label>
-              <input
-                id="landed-freight"
+            <Field
+              label={
+                __t("power.landedCost.customFreight") || "Custom freight ($)"
+              }
+            >
+              <Input
                 name="customFreight"
-                className="input mono"
+                mono
                 type="number"
                 step="0.01"
                 value={customFreight}
                 onChange={(e) => setCustomFreight(+e.target.value)}
               />
-            </div>
-            <div className="field">
-              <label htmlFor="landed-tax">
-                {__t("power.landedCost.customTax") || "Custom tax ($)"}
-              </label>
-              <input
-                id="landed-tax"
+            </Field>
+            <Field
+              label={__t("power.landedCost.customTax") || "Custom tax ($)"}
+            >
+              <Input
                 name="customTax"
-                className="input mono"
+                mono
                 type="number"
                 step="0.01"
                 value={customTax}
                 onChange={(e) => setCustomTax(+e.target.value)}
               />
-            </div>
+            </Field>
           </div>
         </div>
         <div
@@ -1315,46 +1295,36 @@ function MarginModal({ open, onClose }) {
       }
     >
       <div className="field-row">
-        <div className="field">
-          <label htmlFor="margin-cogs">
-            {__t("power.margin.bomCost") || "BOM cost (\u20B9)"}
-          </label>
-          <input
-            id="margin-cogs"
+        <Field label={__t("power.margin.bomCost") || "BOM cost (\u20B9)"}>
+          <Input
             name="bomCost"
-            className="input mono"
+            mono
             type="number"
             value={cogs}
             onChange={(e) => setCogs(+e.target.value)}
           />
-        </div>
-        <div className="field">
-          <label htmlFor="margin-overhead">
-            {__t("power.margin.overhead") || "Overhead (%)"}
-          </label>
-          <input
-            id="margin-overhead"
+        </Field>
+        <Field label={__t("power.margin.overhead") || "Overhead (%)"}>
+          <Input
             name="overheadPct"
-            className="input mono"
+            mono
             type="number"
             value={overhead}
             onChange={(e) => setOverhead(+e.target.value)}
           />
-        </div>
+        </Field>
       </div>
-      <div className="field">
-        <label htmlFor="margin-target">
-          {__t("power.margin.targetGross") || "Target gross margin (%)"}
-        </label>
-        <input
-          id="margin-target"
+      <Field
+        label={__t("power.margin.targetGross") || "Target gross margin (%)"}
+      >
+        <Input
           name="targetMargin"
-          className="input mono"
+          mono
           type="number"
           value={target}
           onChange={(e) => setTarget(+e.target.value)}
         />
-      </div>
+      </Field>
       <div
         className="bg-sunk border-line rounded-r2 mt-16"
         style={{ padding: 16 }}
@@ -1423,11 +1393,11 @@ function ShareLinkModal({ open, onClose }) {
       }
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.cancel") || "Cancel"}
-          </button>
-          <button
-            className="btn primary"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => {
               navigator.clipboard?.writeText(link);
               onClose();
@@ -1440,18 +1410,17 @@ function ShareLinkModal({ open, onClose }) {
           >
             <Icon.Link size={12} />{" "}
             {__t("power.shareLink.copyLink") || "Copy link"}
-          </button>
+          </Button>
         </>
       }
     >
-      <div className="field">
-        <label htmlFor="share-permission">
-          {__t("power.shareLink.anyoneWithLink") || "Anyone with the link can"}
-        </label>
-        <select
-          id="share-permission"
+      <Field
+        label={
+          __t("power.shareLink.anyoneWithLink") || "Anyone with the link can"
+        }
+      >
+        <Select
           name="sharePermission"
-          className="select"
           value={permission}
           onChange={(e) => setPermission(e.target.value)}
         >
@@ -1465,17 +1434,12 @@ function ShareLinkModal({ open, onClose }) {
             {__t("power.shareLink.suggestChanges") ||
               "Suggest changes (review)"}
           </option>
-        </select>
-      </div>
+        </Select>
+      </Field>
       <div className="field-row">
-        <div className="field">
-          <label htmlFor="share-expires">
-            {__t("power.shareLink.linkExpires") || "Link expires"}
-          </label>
-          <select
-            id="share-expires"
+        <Field label={__t("power.shareLink.linkExpires") || "Link expires"}>
+          <Select
             name="shareExpires"
-            className="select"
             value={expires}
             onChange={(e) => setExpires(e.target.value)}
           >
@@ -1491,25 +1455,25 @@ function ShareLinkModal({ open, onClose }) {
             <option value="never">
               {__t("power.shareLink.never") || "Never"}
             </option>
-          </select>
-        </div>
-        <div className="field flex items-center gap-6">
-          <label htmlFor="share-password">
-            <input
-              id="share-password"
-              name="sharePasswordEnabled"
-              type="checkbox"
-              className="row-checkbox"
-              checked={password}
-              onChange={(e) => setPassword(e.target.checked)}
-            />{" "}
-            {__t("power.shareLink.passwordProtect") || "Password protect"}
-          </label>
+          </Select>
+        </Field>
+        <div className="field flex flex-col justify-center gap-6">
+          <Checkbox
+            name="sharePasswordEnabled"
+            checked={password}
+            onChange={(e) => setPassword(e.target.checked)}
+            label={
+              __t("power.shareLink.passwordProtect") || "Password protect"
+            }
+          />
           {password && (
-            <input
-              id="share-password-value"
+            <Input
               name="sharePassword"
-              className="input mono mt-4"
+              mono
+              className="mt-4"
+              aria-label={
+                __t("power.shareLink.passwordPlaceholder") || "Password"
+              }
               placeholder={
                 __t("power.shareLink.passwordPlaceholder") || "Password"
               }
@@ -1522,12 +1486,13 @@ function ShareLinkModal({ open, onClose }) {
         style={{ padding: 10 }}
       >
         <span className="fg-accent">{link}</span>
-        <button
-          className="btn small"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => navigator.clipboard?.writeText(link)}
         >
           {__t("power.shareLink.copy") || "Copy"}
-        </button>
+        </Button>
       </div>
     </Modal>
   );
@@ -1580,14 +1545,14 @@ function WebhooksModal({ open, onClose }) {
       icon={<Icon.Link size={16} />}
       title={__t("power.webhooks.title") || "Webhooks"}
       subtitle={`${hooks.length} ${__t("power.webhooks.configured") || "configured"} \u00B7 ${hooks.filter((h) => h.active).length} ${__t("power.webhooks.active") || "active"}`}
-      wide
+      size="lg"
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.close") || "Close"}
-          </button>
-          <button
-            className="btn primary"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => {
               setHooks([
                 {
@@ -1604,7 +1569,7 @@ function WebhooksModal({ open, onClose }) {
           >
             <Icon.Plus size={12} />{" "}
             {__t("power.webhooks.newWebhook") || "New webhook"}
-          </button>
+          </Button>
         </>
       }
     >
@@ -1615,27 +1580,30 @@ function WebhooksModal({ open, onClose }) {
             className="border-line rounded-r2 d-grid gap-12 items-center"
             style={{ padding: 12, gridTemplateColumns: "180px 1fr 90px 60px" }}
           >
-            <select
-              id={"webhook-event-" + h.id}
+            <Select
+              aria-label={__t("power.webhooks.event") || "Webhook event"}
               name="webhookEvent"
-              className="select h-28 fs-11"
+              className="h-28 fs-11"
               defaultValue={h.event}
             >
               {events.map((e) => (
                 <option key={e}>{e}</option>
               ))}
-            </select>
-            <input
-              id={"webhook-url-" + h.id}
+            </Select>
+            <Input
+              aria-label={__t("power.webhooks.url") || "Webhook URL"}
               name="webhookUrl"
-              className="input mono h-28 fs-11"
+              mono
+              className="h-28 fs-11"
               defaultValue={h.url}
               placeholder="https://..."
             />
             <span className="font-mono fs-10 fg-3">{h.last_fire}</span>
             <div className="flex gap-4 justify-end">
-              <button
-                className="icon-btn w-22 h-22"
+              <Button
+                variant="ghost"
+                size="sm"
+                iconOnly
                 title={__t("power.webhooks.test") || "Test"}
                 aria-label={__t("power.webhooks.test") || "Test"}
                 onClick={() =>
@@ -1648,14 +1616,16 @@ function WebhooksModal({ open, onClose }) {
                 }
               >
                 <Icon.Sparkles size={11} />
-              </button>
-              <button
-                className="icon-btn w-22 h-22 fg-danger"
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                iconOnly
                 aria-label={__t("common.delete") || "Delete"}
                 onClick={() => setHooks(hooks.filter((x) => x.id !== h.id))}
               >
                 <Icon.Trash size={11} />
-              </button>
+              </Button>
             </div>
           </div>
         ))}
@@ -1712,14 +1682,14 @@ function ScheduledReportsModal({ open, onClose }) {
         __t("power.scheduledReports.subtitle") ||
         "Auto-email reports to your team"
       }
-      wide
+      size="lg"
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.close") || "Close"}
-          </button>
-          <button
-            className="btn primary"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => {
               setReports([
                 {
@@ -1740,7 +1710,7 @@ function ScheduledReportsModal({ open, onClose }) {
           >
             <Icon.Plus size={12} />{" "}
             {__t("power.scheduledReports.newSchedule") || "New schedule"}
-          </button>
+          </Button>
         </>
       }
     >
@@ -1752,21 +1722,16 @@ function ScheduledReportsModal({ open, onClose }) {
         >
           <div className="flex justify-between items-center mb-4">
             <div className="fw-600 fs-13">{r.name}</div>
-            <label
-              htmlFor={"report-active-" + r.id}
-              className="inline-flex items-center gap-6 fs-11"
-            >
-              <input
-                id={"report-active-" + r.id}
-                name="reportActive"
-                type="checkbox"
-                className="row-checkbox"
-                defaultChecked={r.active}
-              />
-              <span className="fg-3 font-mono">
-                {__t("power.scheduledReports.active") || "Active"}
-              </span>
-            </label>
+            <Checkbox
+              name="reportActive"
+              className="fs-11"
+              defaultChecked={r.active}
+              label={
+                <span className="fg-3 font-mono">
+                  {__t("power.scheduledReports.active") || "Active"}
+                </span>
+              }
+            />
           </div>
           <div
             className="d-grid gap-10 font-mono fs-11 fg-3"
@@ -1827,14 +1792,14 @@ function EmailParseModal({ open, onClose }) {
         __t("power.emailParse.subtitle") ||
         "Vendor emails with AI-extracted quote data"
       }
-      wide
+      size="lg"
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.close") || "Close"}
-          </button>
-          <button
-            className="btn primary"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => {
               onClose();
               toast(
@@ -1852,7 +1817,7 @@ function EmailParseModal({ open, onClose }) {
           >
             <Icon.Import size={12} />{" "}
             {__t("power.emailParse.importReadyRfqs") || "Import ready RFQs"}
-          </button>
+          </Button>
         </>
       }
     >
@@ -1877,27 +1842,32 @@ function EmailParseModal({ open, onClose }) {
                 </div>
               )}
             </div>
-            <span
-              className="text-center font-mono fs-11"
-              style={{
-                color:
+            <span className="text-center">
+              <Badge
+                tone={
                   e.confidence >= 0.9
-                    ? "var(--ok)"
+                    ? "success"
                     : e.confidence >= 0.7
-                      ? "var(--warn)"
-                      : "var(--danger)",
-              }}
-            >
-              {Math.round(e.confidence * 100)}%
+                      ? "warning"
+                      : "danger"
+                }
+              >
+                {Math.round(e.confidence * 100)}%
+              </Badge>
             </span>
             <span className="text-right">
               {e.status === "ready" ? (
-                <Icon.Check size={14} />
+                <Icon.Check size={14} aria-hidden="true" />
               ) : (
-                <span className="font-mono fs-10 fg-3">
+                <Badge tone="neutral">
                   {__t("power.emailParse.skip") || "SKIP"}
-                </span>
+                </Badge>
               )}
+              <span className="sr-only">
+                {e.status === "ready"
+                  ? __t("power.emailParse.readyToImport") || "Ready to import"
+                  : __t("power.emailParse.skip") || "Skip"}
+              </span>
             </span>
           </div>
         </div>

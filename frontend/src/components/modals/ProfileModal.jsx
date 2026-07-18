@@ -2,7 +2,8 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Modal } from "../../globals";
+import { Icon } from "../../globals";
+import { Modal, Button, Field, Input, Select, Textarea } from "../ui";
 // ============ PROFILE ============
 export default function ProfileModal({ open, onClose }) {
   return (
@@ -12,16 +13,17 @@ export default function ProfileModal({ open, onClose }) {
       icon={<Icon.Parts size={16} />}
       title={__t("modals.profile.title") || "Profile"}
       subtitle={
-        "Elena Chen \u00B7 " +
+        "Elena Chen · " +
         (__t("modals.profile.engineeringLead") || "Engineering Lead")
       }
+      closeLabel={__t("modals.profile.closeDialog") || "Close profile dialog"}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.cancel") || "Cancel"}
-          </button>
-          <button
-            className="btn primary"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => {
               onClose();
               toast(__t("modals.profile.saved") || "Profile saved", {
@@ -30,7 +32,7 @@ export default function ProfileModal({ open, onClose }) {
             }}
           >
             {__t("modals.profile.saveChanges") || "Save changes"}
-          </button>
+          </Button>
         </>
       }
     >
@@ -38,102 +40,90 @@ export default function ProfileModal({ open, onClose }) {
         className="flex items-center gap-14 bg-sunk rounded-r2"
         style={{ marginBottom: 18, padding: 14 }}
       >
-        <span className="avatar fs-20" style={{ width: 56, height: 56 }}>
+        <span className="avatar fs-20" style={{ width: 56, height: 56 }} aria-hidden="true">
           EC
         </span>
         <div className="flex-1">
           <div className="fw-600 fs-14">Elena Chen</div>
           <div className="font-mono fs-11 fg-3">
             {(__t("modals.profile.engineeringLead") || "ENGINEERING LEAD") +
-              " \u00B7 4 " +
+              " · 4 " +
               (__t("modals.profile.projects") || "projects") +
-              " \u00B7 312 " +
+              " · 312 " +
               (__t("modals.profile.contributions") || "contributions")}
           </div>
         </div>
-        <button
-          className="btn small"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() =>
             toast(
               __t("modals.profile.photoUpload") ||
-                "Photo upload \u2014 choose a file",
+                "Photo upload — choose a file",
             )
           }
         >
           {__t("modals.profile.changePhoto") || "Change photo"}
-        </button>
+        </Button>
       </div>
       <div className="field-row">
-        <div className="field">
-          <label htmlFor="profile-name">
-            {__t("modals.profile.fullName") || "Full name"}
-          </label>
-          <input
-            id="profile-name"
-            name="profileName"
-            className="input"
-            defaultValue="Elena Chen"
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="profile-title">
-            {__t("modals.profile.title") || "Title"}
-          </label>
-          <input
+        <Field
+          label={__t("modals.profile.fullName") || "Full name"}
+          htmlFor="profile-name"
+        >
+          <Input id="profile-name" name="profileName" defaultValue="Elena Chen" />
+        </Field>
+        <Field
+          label={__t("modals.profile.title") || "Title"}
+          htmlFor="profile-title"
+        >
+          <Input
             id="profile-title"
             name="profileTitle"
-            className="input"
             defaultValue="Engineering Lead"
           />
-        </div>
+        </Field>
       </div>
       <div className="field-row">
-        <div className="field">
-          <label htmlFor="profile-email">
-            {__t("modals.profile.email") || "Email"}
-          </label>
-          <input
+        <Field
+          label={__t("modals.profile.email") || "Email"}
+          htmlFor="profile-email"
+        >
+          <Input
             id="profile-email"
             name="profileEmail"
-            className="input mono"
+            mono
             defaultValue="elena@blackboxfactories.com"
           />
-        </div>
-        <div className="field">
-          <label htmlFor="profile-phone">
-            {__t("modals.profile.phone") || "Phone"}
-          </label>
-          <input
+        </Field>
+        <Field
+          label={__t("modals.profile.phone") || "Phone"}
+          htmlFor="profile-phone"
+        >
+          <Input
             id="profile-phone"
             name="profilePhone"
-            className="input mono"
+            mono
             defaultValue="+1-555-0142"
           />
-        </div>
+        </Field>
       </div>
-      <div className="field">
-        <label htmlFor="profile-role">
-          {__t("modals.profile.role") || "Role"}
-        </label>
-        <select id="profile-role" name="profileRole" className="select">
+      <Field label={__t("modals.profile.role") || "Role"} htmlFor="profile-role">
+        <Select id="profile-role" name="profileRole" defaultValue="Admin">
           <option>Admin</option>
           <option>Engineering</option>
           <option>Procurement</option>
           <option>Finance</option>
           <option>Viewer</option>
-        </select>
-      </div>
-      <div className="field">
-        <label htmlFor="profile-bio">
-          {__t("modals.profile.bio") || "Bio"}
-        </label>
-        <textarea
+        </Select>
+      </Field>
+      <Field label={__t("modals.profile.bio") || "Bio"} htmlFor="profile-bio">
+        <Textarea
           id="profile-bio"
           name="profileBio"
-          className="input"
           defaultValue="ME/EE generalist. Leading mechanical for ATLAS + HORIZON. Previously @ Boring Co., Skunkworks."
         />
-      </div>
+      </Field>
     </Modal>
   );
 }

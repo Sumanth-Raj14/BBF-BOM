@@ -3,7 +3,21 @@ import { storage } from "../../utils/storage.js";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Modal, api, useAppStore } from "../../globals";
+import { Icon, api, useAppStore } from "../../globals";
+import {
+  Modal,
+  Button,
+  Field,
+  Input,
+  Tabs,
+  TabPanel,
+  Badge,
+  EmptyState,
+  Spinner,
+} from "../ui";
+
+const TABS_ID = "bom-templates-tabs";
+
 function BOMTemplatesModal({ open, onClose }) {
   const [tab, setTab] = React.useState("save");
   const [templateName, setTemplateName] = React.useState("");
@@ -172,6 +186,17 @@ function BOMTemplatesModal({ open, onClose }) {
     }
   };
 
+  const tabItems = [
+    {
+      value: "save",
+      label: __t("bomTemplates.saveCurrent") || "Save current BOM",
+    },
+    {
+      value: "load",
+      label: __t("bomTemplates.loadTemplate") || "Load template",
+    },
+  ];
+
   return (
     <Modal
       open={open}
@@ -179,91 +204,92 @@ function BOMTemplatesModal({ open, onClose }) {
       icon={<Icon.Doc size={16} />}
       title={__t("bomTemplates.title") || "BOM Templates"}
       subtitle={__t("bomTemplates.subtitle") || "Save and load BOM structures"}
-      wide
+      size="lg"
+      closeLabel={
+        __t("bomTemplates.closeDialog") || "Close BOM templates dialog"
+      }
       footer={
-        <>
-          <button className="btn" onClick={onClose}>
-            {__t("common.close") || "Close"}
-          </button>
-        </>
+        <Button variant="secondary" onClick={onClose}>
+          {__t("common.close") || "Close"}
+        </Button>
       }
     >
-      <div className="flex gap-6 mb-14">
-        {[
-          ["save", __t("bomTemplates.saveCurrent") || "Save current BOM"],
-          ["load", __t("bomTemplates.loadTemplate") || "Load template"],
-        ].map(([id, label]) => (
-          <button
-            key={id}
-            className={"btn small " + (tab === id ? "primary" : "")}
-            onClick={() => setTab(id)}
-          >
-            {label}
-          </button>
-        ))}
-        {window.apiConnected && (
-          <span
-            className="font-mono fs-10 fg-ok"
-            style={{ marginLeft: "auto" }}
-          >
-            {__t("bomTemplates.connectedToApi") || "● Connected to API"}
-          </span>
-        )}
-        {!window.apiConnected && (
-          <span className="font-mono fs-10 fg-3" style={{ marginLeft: "auto" }}>
-            {__t("bomTemplates.offlineMode") || "○ Offline mode"}
-          </span>
-        )}
+      <div className="flex items-center gap-8 mb-14">
+        <Tabs
+          id={TABS_ID}
+          items={tabItems}
+          value={tab}
+          onChange={setTab}
+          ariaLabel={__t("bomTemplates.title") || "BOM Templates"}
+        />
+        <span style={{ marginLeft: "auto" }}>
+          {window.apiConnected ? (
+            <Badge tone="success">
+              {__t("bomTemplates.connectedToApi") || "Connected to API"}
+            </Badge>
+          ) : (
+            <Badge tone="neutral">
+              {__t("bomTemplates.offlineMode") || "Offline mode"}
+            </Badge>
+          )}
+        </span>
       </div>
-      {tab === "save" && (
-        <div className="field">
-          <label htmlFor="template-name">
-            {__t("bomTemplates.templateName") || "Template name"}
-          </label>
-          <div className="flex gap-8">
-            <input
-              id="template-name"
-              name="templateName"
-              className="input flex-1"
-              autoFocus
-              value={templateName}
-              onChange={(e) => setTemplateName(e.target.value)}
-              placeholder={
-                __t("bomTemplates.namePlaceholder") ||
-                "e.g. ATLAS chassis template"
+
+      <TabPanel id={TABS_ID} value="save" active={tab === "save"}>
+        <div className="flex gap-8 items-end">
+          <div className="flex-1">
+            <Field
+              label={__t("bomTemplates.templateName") || "Template name"}
+              htmlFor="template-name"
+            >
+              <Input
+                id="template-name"
+                name="templateName"
+                autoFocus
+                value={templateName}
+                onChange={(e) => setTemplateName(e.target.value)}
+                placeholder={
+                  __t("bomTemplates.namePlaceholder") ||
+                  "e.g. ATLAS chassis template"
+                }
+              />
+            </Field>
+          </div>
+          <Button
+            variant="primary"
+            disabled={!templateName.trim() || saving}
+            loading={saving}
+            onClick={saveTemplate}
+          >
+            <Icon.Plus size={12} /> {__t("common.save") || "Save"}
+          </Button>
+        </div>
+        {loading && (
+          <div className="flex items-center gap-8 mt-10 fs-11 fg-3">
+            <Spinner
+              size="sm"
+              label={
+                __t("bomTemplates.loadingTemplates") || "Loading templates…"
               }
             />
-            <button
-              className="btn primary"
-              disabled={!templateName.trim() || saving}
-              onClick={saveTemplate}
-            >
-              {saving ? (
-                __t("bomTemplates.saving") || "Saving..."
-              ) : (
-                <>
-                  <Icon.Plus size={12} /> {__t("common.save") || "Save"}
-                </>
-              )}
-            </button>
-          </div>
-          {loading && (
-            <div className="mt-10 font-mono fs-11 fg-3">
+            <span aria-hidden="true">
               {__t("bomTemplates.loadingTemplates") || "Loading templates..."}
+            </span>
+          </div>
+        )}
+        {!loading && templates.length > 0 && (
+          <div className="mt-14">
+            <div className="font-mono fs-10 uppercase letter-sp-6 fg-3 mb-8">
+              {(
+                __t("bomTemplates.savedTemplates") ||
+                "Saved templates ({count})"
+              ).replace("{count}", templates.length)}
             </div>
-          )}
-          {!loading && templates.length > 0 && (
-            <div className="mt-14">
-              <div className="font-mono fs-10 uppercase letter-sp-6 fg-3 mb-8">
-                {(
-                  __t("bomTemplates.savedTemplates") ||
-                  "Saved templates ({count})"
-                ).replace("{count}", templates.length)}
-              </div>
+            <ul className="flex flex-col gap-4" style={{ listStyle: "none", margin: 0, padding: 0 }}>
               {templates.map((t) => (
-                <div
+                <li
                   key={t.id}
-                  className="flex justify-between items-center border-line rounded-r2 mb-4"
+                  className="flex justify-between items-center border-line rounded-r2"
                   style={{ padding: "8px 10px" }}
                 >
                   <div>
@@ -274,67 +300,90 @@ function BOMTemplatesModal({ open, onClose }) {
                     </div>
                   </div>
                   <span className="inline-flex gap-4">
-                    <button
-                      className="btn small"
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={() => loadTemplate(t)}
                     >
                       {__t("bomTemplates.load") || "Load"}
-                    </button>
-                    <button
-                      className="icon-btn w-22 h-22 fg-danger"
-                      aria-label={__t("common.delete") || "Delete"}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      iconOnly
+                      aria-label={
+                        (__t("common.delete") || "Delete") + " " + t.name
+                      }
                       onClick={() => deleteTemplate(t.id)}
                     >
                       <Icon.Trash size={11} />
-                    </button>
+                    </Button>
                   </span>
-                </div>
+                </li>
               ))}
-            </div>
-          )}
-        </div>
-      )}
-      {tab === "load" &&
-        (loading ? (
-          <div className="text-center fg-3" style={{ padding: 40 }}>
-            {__t("bomTemplates.loadingTemplates") || "Loading templates..."}
+            </ul>
+          </div>
+        )}
+      </TabPanel>
+
+      <TabPanel id={TABS_ID} value="load" active={tab === "load"}>
+        {loading ? (
+          <div
+            className="flex items-center justify-center gap-8 fg-3"
+            style={{ padding: 40 }}
+          >
+            <Spinner
+              size="sm"
+              label={
+                __t("bomTemplates.loadingTemplates") || "Loading templates…"
+              }
+            />
+            <span aria-hidden="true">
+              {__t("bomTemplates.loadingTemplates") || "Loading templates..."}
+            </span>
           </div>
         ) : templates.length === 0 ? (
-          <div className="text-center fg-3" style={{ padding: 40 }}>
-            <div className="fs-32 font-mono mb-6 fg-4">∅</div>
-            <div>
-              {__t("bomTemplates.noTemplates") ||
-                "No saved templates yet. Save a template first."}
-            </div>
-          </div>
+          <EmptyState
+            icon={<span aria-hidden="true">∅</span>}
+            title={
+              __t("bomTemplates.noTemplates") ||
+              "No saved templates yet. Save a template first."
+            }
+          />
         ) : (
-          <div className="flex flex-col gap-6">
+          <ul
+            className="flex flex-col gap-6"
+            style={{ listStyle: "none", margin: 0, padding: 0 }}
+          >
             {templates.map((t) => (
-              <div
-                key={t.id}
-                className="border-line rounded-r2 c-pointer bg-canvas"
-                style={{ padding: 12 }}
-                onClick={() => loadTemplate(t)}
-              >
-                <div className="flex justify-between items-center">
-                  <div>
-                    <div className="fw-600">{t.name}</div>
-                    <div className="font-mono fs-10 fg-3">
-                      {__t("bomTemplates.savedLabel") || "Saved"}{" "}
-                      {formatDate(t.saved || t.createdAt)}
+              <li key={t.id}>
+                <button
+                  type="button"
+                  className="border-line rounded-r2 bg-canvas w-full"
+                  style={{ padding: 12, textAlign: "left", cursor: "pointer" }}
+                  onClick={() => loadTemplate(t)}
+                >
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <div className="fw-600">{t.name}</div>
+                      <div className="font-mono fs-10 fg-3">
+                        {__t("bomTemplates.savedLabel") || "Saved"}{" "}
+                        {formatDate(t.saved || t.createdAt)}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="tag-pill">
+                        {t.partCount || t.rows?.[0]?.children?.length || 0}{" "}
+                        {__t("bomTemplates.parts") || "parts"}
+                      </span>
                     </div>
                   </div>
-                  <div>
-                    <span className="tag-pill">
-                      {t.partCount || t.rows?.[0]?.children?.length || 0}{" "}
-                      {__t("bomTemplates.parts") || "parts"}
-                    </span>
-                  </div>
-                </div>
-              </div>
+                </button>
+              </li>
             ))}
-          </div>
-        ))}
+          </ul>
+        )}
+      </TabPanel>
     </Modal>
   );
 }

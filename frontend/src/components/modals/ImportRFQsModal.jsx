@@ -2,7 +2,25 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { INR, Modal } from "../../globals";
+import { INR, Icon } from "../../globals";
+import { Modal, Button, StatusPill } from "../ui";
+
+const STATUS_TONE = {
+  accepted: "success",
+  rejected: "danger",
+  pending: "warning",
+};
+const STATUS_BORDER = {
+  accepted: "var(--ok)",
+  rejected: "var(--danger)",
+  pending: "var(--line)",
+};
+const STATUS_LABEL = {
+  accepted: () => __t("common.accepted") || "Accepted",
+  rejected: () => __t("common.rejected") || "Rejected",
+  pending: () => __t("common.pending") || "Pending",
+};
+
 // ============ IMPORT RFQs ============
 export default function ImportRFQsModal({ open, onClose }) {
   const [items, setItems] = React.useState([
@@ -49,12 +67,12 @@ export default function ImportRFQsModal({ open, onClose }) {
     next[i].status = "rejected";
     setItems(next);
   };
-  const total = items
-    .filter((i) => i.status === "accepted")
-    .reduce((s, i) => s + i.total, 0);
+  const acceptedItems = items.filter((i) => i.status === "accepted");
+  const rejectedCount = items.filter((i) => i.status === "rejected").length;
+  const total = acceptedItems.reduce((s, i) => s + i.total, 0);
   const submit = () => {
     onClose();
-    const n = items.filter((i) => i.status === "accepted").length;
+    const n = acceptedItems.length;
     if (n > 0)
       toast(
         (
@@ -84,92 +102,107 @@ export default function ImportRFQsModal({ open, onClose }) {
         __t("importRfqs.subtitle") ||
         "4 quotes detected from inbox · {total} accepted"
       ).replace("{total}", INR(total, 0))}
-      wide
+      size="lg"
+      closeLabel={__t("importRfqs.closeDialog") || "Close import RFQs dialog"}
       footer={
         <>
-          <span className="left">
-            {items.filter((i) => i.status === "accepted").length}{" "}
-            {__t("importRfqs.accepted") || "accepted"} ·{" "}
-            {items.filter((i) => i.status === "rejected").length}{" "}
-            {__t("importRfqs.rejected") || "rejected"}
+          <span
+            className="font-mono fs-11 fg-3"
+            style={{ marginRight: "auto" }}
+          >
+            {acceptedItems.length} {__t("importRfqs.accepted") || "accepted"}{" "}
+            · {rejectedCount} {__t("importRfqs.rejected") || "rejected"}
           </span>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.cancel") || "Cancel"}
-          </button>
-          <button className="btn primary" onClick={submit}>
+          </Button>
+          <Button
+            variant="primary"
+            disabled={acceptedItems.length === 0}
+            onClick={submit}
+          >
             {__t("importRfqs.importAccepted") || "Import accepted"} (
-            {items.filter((i) => i.status === "accepted").length})
-          </button>
+            {acceptedItems.length})
+          </Button>
         </>
       }
     >
-      <div className="flex flex-col gap-8">
-        {items.map((it, i) => (
-          <div
-            key={it.pn + "-" + i}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr 80px 100px 110px 80px",
-              gap: 10,
-              alignItems: "center",
-              padding: 12,
-              border:
-                "1px solid " +
-                (it.status === "accepted"
-                  ? "var(--ok)"
-                  : it.status === "rejected"
-                    ? "var(--danger)"
-                    : "var(--line)"),
-              borderRadius: "var(--r-2)",
-              background:
-                it.status === "accepted"
-                  ? "color-mix(in oklch, var(--ok) 6%, var(--bg))"
-                  : it.status === "rejected"
-                    ? "color-mix(in oklch, var(--danger) 6%, var(--bg))"
-                    : "var(--bg)",
-              opacity: it.status === "rejected" ? 0.6 : 1,
-            }}
-          >
-            <div>
-              <div className="font-mono fs-10 fg-3">{it.vendor}</div>
-              <div className="font-mono fs-12 fw-600">{it.pn}</div>
-            </div>
-            <div className="fs-11 fg-2">RFQ-2026-0{120 + i}</div>
-            <div className="font-mono fs-12 text-right">×{it.qty}</div>
-            <div className="font-mono fs-12 text-right">
-              {INR(it.unit, 2)}/ea
-            </div>
-            <div className="font-mono fs-13 fw-700 text-right">
-              {INR(it.total, 0)}
-            </div>
-            <div className="flex gap-4 justify-end">
-              <button
-                className="icon-btn w-26 h-26"
-                style={{
-                  color: it.status === "accepted" ? "var(--ok)" : "var(--fg-3)",
-                }}
-                onClick={() => accept(i)}
-                title={__t("common.accept") || "Accept"}
-                aria-label={__t("common.accept") || "Accept"}
-              >
-                <Icon.Check size={12} />
-              </button>
-              <button
-                className="icon-btn w-26 h-26"
-                style={{
-                  color:
-                    it.status === "rejected" ? "var(--danger)" : "var(--fg-3)",
-                }}
-                onClick={() => reject(i)}
-                title={__t("common.reject") || "Reject"}
-                aria-label={__t("common.reject") || "Reject"}
-              >
-                <Icon.X size={12} />
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+      <ul
+        className="flex flex-col gap-8"
+        style={{ listStyle: "none", margin: 0, padding: 0 }}
+        aria-label={__t("importRfqs.detectedQuotes") || "Detected quotes"}
+      >
+        {items.map((it, i) => {
+          const rfqNumber = `RFQ-2026-0${120 + i}`;
+          return (
+            <li
+              key={it.pn + "-" + i}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 80px 100px 110px 100px 80px",
+                gap: 10,
+                alignItems: "center",
+                padding: 12,
+                border: `1px solid ${STATUS_BORDER[it.status]}`,
+                borderRadius: "var(--radius-md, var(--r-2))",
+                background:
+                  it.status === "accepted"
+                    ? "color-mix(in oklch, var(--ok) 6%, var(--bg))"
+                    : it.status === "rejected"
+                      ? "color-mix(in oklch, var(--danger) 6%, var(--bg))"
+                      : "var(--bg)",
+                opacity: it.status === "rejected" ? 0.7 : 1,
+              }}
+            >
+              <div>
+                <div className="font-mono fs-10 fg-3">{it.vendor}</div>
+                <div className="font-mono fs-12 fw-600">{it.pn}</div>
+              </div>
+              <div className="fs-11 fg-2">{rfqNumber}</div>
+              <div className="font-mono fs-12 text-right">×{it.qty}</div>
+              <div className="font-mono fs-12 text-right">
+                {INR(it.unit, 2)}/ea
+              </div>
+              <div className="font-mono fs-13 fw-700 text-right">
+                {INR(it.total, 0)}
+              </div>
+              <div>
+                <StatusPill
+                  status={it.status}
+                  tone={STATUS_TONE[it.status]}
+                  label={STATUS_LABEL[it.status]()}
+                />
+              </div>
+              <div className="flex gap-4 justify-end">
+                <Button
+                  variant={it.status === "accepted" ? "primary" : "secondary"}
+                  size="sm"
+                  iconOnly
+                  aria-pressed={it.status === "accepted"}
+                  aria-label={
+                    (__t("common.accept") || "Accept") + ` ${it.pn}`
+                  }
+                  onClick={() => accept(i)}
+                >
+                  <Icon.Check size={12} />
+                </Button>
+                <Button
+                  variant={it.status === "rejected" ? "danger" : "secondary"}
+                  size="sm"
+                  iconOnly
+                  aria-pressed={it.status === "rejected"}
+                  aria-label={
+                    (__t("common.reject") || "Reject") + ` ${it.pn}`
+                  }
+                  onClick={() => reject(i)}
+                >
+                  <Icon.X size={12} />
+                </Button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </Modal>
   );
 }

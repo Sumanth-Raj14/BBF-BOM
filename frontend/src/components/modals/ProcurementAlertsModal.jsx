@@ -1,8 +1,19 @@
 import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
-import { toast } from "../../utils/toast";
-import { Modal, api } from "../../globals";
+import { Icon, api } from "../../globals";
+import { Badge, Button, EmptyState, Modal, Spinner, toast } from "../ui";
+
+const LEVEL_META = {
+  critical: { tone: "danger", icon: "🚨" },
+  warning: { tone: "warning", icon: "⚠" },
+  info: { tone: "info", icon: "ℹ" },
+};
+
+function levelMeta(level) {
+  return LEVEL_META[level] || LEVEL_META.info;
+}
+
 function ProcurementAlertsModal({ open, onClose }) {
   const [alerts, setAlerts] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
@@ -25,7 +36,8 @@ function ProcurementAlertsModal({ open, onClose }) {
       .finally(() => setLoading(false));
   }, [open]);
 
-  const icons = { critical: "\uD83D\uDEA8", warning: "\u26A0", info: "\u2139" };
+  const criticalCount = alerts.filter((a) => a.level === "critical").length;
+  const warningCount = alerts.filter((a) => a.level === "warning").length;
 
   return (
     <Modal
@@ -40,22 +52,20 @@ function ProcurementAlertsModal({ open, onClose }) {
               __t("procurementAlerts.subtitle") ||
               "{critical} critical · {warnings} warnings"
             )
-              .replace(
-                "{critical}",
-                alerts.filter((a) => a.level === "critical").length,
-              )
-              .replace(
-                "{warnings}",
-                alerts.filter((a) => a.level === "warning").length,
-              )
+              .replace("{critical}", criticalCount)
+              .replace("{warnings}", warningCount)
+      }
+      closeLabel={
+        __t("procurementAlerts.closeDialog") ||
+        "Close procurement alerts dialog"
       }
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.close") || "Close"}
-          </button>
-          <button
-            className="btn primary"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => {
               onClose();
               toast(
@@ -66,60 +76,122 @@ function ProcurementAlertsModal({ open, onClose }) {
             }}
           >
             {__t("procurementAlerts.markAllReviewed") || "Mark all reviewed"}
-          </button>
+          </Button>
         </>
       }
     >
       {loading ? (
-        <div className="text-center fg-3" style={{ padding: 24 }}>
-          {__t("procurementAlerts.loadingAlerts") || "Loading alerts..."}
+        <div
+          className="flex items-center justify-center gap-8 fg-3"
+          style={{ padding: 30 }}
+        >
+          <Spinner
+            size="sm"
+            label={
+              __t("procurementAlerts.loadingAlerts") || "Loading alerts…"
+            }
+          />
+          <span aria-hidden="true">
+            {__t("procurementAlerts.loadingAlerts") || "Loading alerts..."}
+          </span>
         </div>
+      ) : alerts.length === 0 ? (
+        <EmptyState
+          icon={<Icon.Bell size={28} />}
+          title={
+            __t("procurementAlerts.noAlerts") || "No procurement alerts"
+          }
+          message={
+            __t("procurementAlerts.noAlertsMsg") ||
+            "You're all caught up — nothing needs attention right now."
+          }
+        />
       ) : (
-        <div className="flex flex-col gap-8">
-          {alerts.map((a, i) => (
-            <div
-              key={a.title + "-" + a.level}
-              style={{
-                padding: 12,
-                border:
-                  "1px solid " +
-                  (a.level === "critical"
-                    ? "var(--danger)"
-                    : a.level === "warning"
-                      ? "var(--warn)"
-                      : "var(--line)"),
-                borderRadius: "var(--r-2)",
-                background:
-                  a.level === "critical"
-                    ? "color-mix(in oklch, var(--danger) 6%, var(--bg))"
-                    : "var(--bg)",
-                borderLeft:
-                  "3px solid " +
-                  (a.level === "critical"
-                    ? "var(--danger)"
-                    : a.level === "warning"
-                      ? "var(--warn)"
-                      : "var(--info)"),
-              }}
-            >
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="fw-600 fs-12 flex items-center gap-6">
-                    <span>{icons[a.level] || "\u2139"}</span> {a.title}
+        <ul className="proc-alerts" aria-label={__t("procurementAlerts.title") || "Procurement Alerts"}>
+          {alerts.map((a) => {
+            const meta = levelMeta(a.level);
+            return (
+              <li
+                key={a.title + "-" + a.level}
+                className={`proc-alerts__item proc-alerts__item--${meta.tone}`}
+              >
+                <div className="proc-alerts__body">
+                  <div className="proc-alerts__head">
+                    <span className="proc-alerts__ico" aria-hidden="true">
+                      {meta.icon}
+                    </span>
+                    <span className="proc-alerts__title">{a.title}</span>
+                    <Badge tone={meta.tone}>{a.level}</Badge>
                   </div>
-                  <div className="fs-11 fg-2 mt-4">{a.desc}</div>
+                  <div className="proc-alerts__desc">{a.desc}</div>
                 </div>
-                <button
-                  className="btn small flex-shrink-0 ml-8"
-                  onClick={() => toast(a.action + " \u2014 opening\u2026")}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="proc-alerts__action"
+                  onClick={() => toast(a.action + " — opening…")}
                 >
                   {a.action}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
       )}
+
+      <style>{`
+        .proc-alerts {
+          display: flex;
+          flex-direction: column;
+          gap: var(--sp-2);
+          margin: 0;
+          padding: 0;
+          list-style: none;
+        }
+        .proc-alerts__item {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: var(--sp-3);
+          padding: var(--sp-3);
+          border: 1px solid var(--line);
+          border-left-width: 3px;
+          border-radius: var(--r-2);
+          background: var(--bg);
+        }
+        .proc-alerts__item--danger {
+          border-left-color: var(--danger);
+          background: color-mix(in oklch, var(--danger) 6%, var(--bg));
+        }
+        .proc-alerts__item--warning {
+          border-left-color: var(--warn);
+        }
+        .proc-alerts__item--info {
+          border-left-color: var(--info);
+        }
+        .proc-alerts__body {
+          min-width: 0;
+          flex: 1;
+        }
+        .proc-alerts__head {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-weight: var(--fw-semibold, 600);
+          font-size: var(--fs-200, 12px);
+        }
+        .proc-alerts__title {
+          overflow-wrap: anywhere;
+        }
+        .proc-alerts__desc {
+          margin-top: 4px;
+          font-size: var(--fs-100, 11px);
+          color: var(--text-secondary);
+        }
+        .proc-alerts__action {
+          flex-shrink: 0;
+        }
+      `}</style>
     </Modal>
   );
 }

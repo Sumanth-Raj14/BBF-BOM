@@ -2,14 +2,46 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Modal, useAppStore } from "../../globals";
+import { Icon, useAppStore } from "../../globals";
+import { Button, DataTable, Modal, Select, Textarea } from "../ui";
 // ============ BULK CSV IMPORT ============
+
+const FIELDS = [
+  "pn",
+  "name",
+  "rev",
+  "qty",
+  "uom",
+  "category",
+  "vendor",
+  "cost",
+  "lead",
+  "origin",
+  "status",
+];
+
+const FIELD_LABELS = {
+  pn: "Part No.",
+  name: "Name",
+  rev: "Rev",
+  qty: "Qty",
+  uom: "UoM",
+  category: "Category",
+  vendor: "Vendor",
+  cost: "Unit Cost",
+  lead: "Lead (days)",
+  origin: "Origin",
+  status: "Status",
+};
+
 export default function BulkImportModal({ open, onClose }) {
   const [step, setStep] = React.useState("upload"); // upload | mapping | review
   const [csvText, setCsvText] = React.useState("");
   const [rows, setRows] = React.useState([]);
   const [headers, setHeaders] = React.useState([]);
   const [mapping, setMapping] = React.useState({});
+  const [dragActive, setDragActive] = React.useState(false);
+  const fileInputRef = React.useRef(null);
   const ctx = useAppStore();
 
   React.useEffect(() => {
@@ -19,22 +51,10 @@ export default function BulkImportModal({ open, onClose }) {
       setRows([]);
       setHeaders([]);
       setMapping({});
+      setDragActive(false);
     }
   }, [open]);
 
-  const FIELDS = [
-    "pn",
-    "name",
-    "rev",
-    "qty",
-    "uom",
-    "category",
-    "vendor",
-    "cost",
-    "lead",
-    "origin",
-    "status",
-  ];
   const guess = (h) => {
     const l = h.toLowerCase();
     if (/part.?no|^pn$|sku/.test(l)) return "pn";
@@ -146,6 +166,21 @@ OPT-DIFF-30,Optical Diffuser 30mm,A,1,EA,Optical,Edmund Optics,18.50,21,US,Relea
     );
   };
 
+  const openFilePicker = () => fileInputRef.current?.click();
+
+  const previewColumns = FIELDS.filter((f) => mapping[f] != null).map((f) => ({
+    key: f,
+    header: FIELD_LABELS[f] || f,
+    render: (r) => (
+      <span
+        className="font-mono"
+        style={{ fontWeight: f === "pn" ? 600 : 400 }}
+      >
+        {r[f] || "—"}
+      </span>
+    ),
+  }));
+
   return (
     <Modal
       open={open}
@@ -164,36 +199,36 @@ OPT-DIFF-30,Optical Diffuser 30mm,A,1,EA,Optical,Edmund Optics,18.50,21,US,Relea
                 __t("bulkImport.reviewSubtitle") || "Review {count} rows"
               ).replace("{count}", rows.length)
       }
-      wide
+      size="lg"
       footer={
         step === "mapping" ? (
           <>
-            <button className="btn" onClick={() => setStep("upload")}>
+            <Button variant="secondary" onClick={() => setStep("upload")}>
               {__t("common.back") || "Back"}
-            </button>
-            <button
-              className="btn primary"
+            </Button>
+            <Button
+              variant="primary"
               onClick={() => setStep("review")}
               disabled={!mapping.pn}
             >
               {__t("bulkImport.nextReview") || "Next: Review"}
-            </button>
+            </Button>
           </>
         ) : step === "review" ? (
           <>
-            <span className="left">
+            <span className="fs-12 fg-3" style={{ marginRight: "auto" }}>
               {rows.length}{" "}
               {__t("bulkImport.rowsWillBeAppended") ||
                 "rows will be appended to the active BOM"}
             </span>
-            <button className="btn" onClick={() => setStep("mapping")}>
+            <Button variant="secondary" onClick={() => setStep("mapping")}>
               {__t("common.back") || "Back"}
-            </button>
-            <button className="btn primary" onClick={apply}>
+            </Button>
+            <Button variant="primary" onClick={apply}>
               <Icon.Check size={12} />{" "}
               {__t("bulkImport.importRows") || "Import"} {rows.length}{" "}
               {__t("bulkImport.rows") || "rows"}
-            </button>
+            </Button>
           </>
         ) : null
       }
@@ -201,21 +236,38 @@ OPT-DIFF-30,Optical Diffuser 30mm,A,1,EA,Optical,Edmund Optics,18.50,21,US,Relea
       {step === "upload" && (
         <>
           <div
-            className="dropzone"
+            className={`dropzone${dragActive ? " active" : ""}`}
+            role="button"
+            tabIndex={0}
+            aria-label={
+              (__t("bulkImport.dropzone") ||
+                "Drop CSV here or click to browse") +
+              " — " +
+              (__t("bulkImport.dropzoneHint") ||
+                "First row = headers. Comma-separated. UTF-8.")
+            }
             onDragOver={(e) => {
               e.preventDefault();
-              e.currentTarget.classList.add("active");
+              setDragActive(true);
             }}
-            onDragLeave={(e) => e.currentTarget.classList.remove("active")}
+            onDragLeave={() => setDragActive(false)}
             onDrop={(e) => {
               e.preventDefault();
-              e.currentTarget.classList.remove("active");
+              setDragActive(false);
               const f = e.dataTransfer.files[0];
               if (f) onFileChosen(f);
             }}
-            onClick={() => document.getElementById("__bulk-csv-input")?.click()}
+            onClick={openFilePicker}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                openFilePicker();
+              }
+            }}
           >
-            <div className="big">⤓</div>
+            <div className="big" aria-hidden="true">
+              ⤓
+            </div>
             <div className="l1">
               {__t("bulkImport.dropzone") || "Drop CSV here or click to browse"}
             </div>
@@ -225,10 +277,12 @@ OPT-DIFF-30,Optical Diffuser 30mm,A,1,EA,Optical,Edmund Optics,18.50,21,US,Relea
             </div>
           </div>
           <input
+            ref={fileInputRef}
             type="file"
             id="__bulk-csv-input"
             accept=".csv,text/csv"
             className="d-none"
+            tabIndex={-1}
             onChange={(e) =>
               e.target.files[0] && onFileChosen(e.target.files[0])
             }
@@ -238,18 +292,19 @@ OPT-DIFF-30,Optical Diffuser 30mm,A,1,EA,Optical,Edmund Optics,18.50,21,US,Relea
             className="flex justify-between items-center"
             style={{ margin: "14px 0 8px" }}
           >
-            <span className="hint">
+            <label htmlFor="csv-text" className="hint">
               {__t("bulkImport.orPaste") || "Or paste CSV directly"}
-            </span>
-            <button className="btn small" onClick={loadSample}>
+            </label>
+            <Button variant="ghost" size="sm" onClick={loadSample}>
               <Icon.Sparkles size={11} />{" "}
               {__t("bulkImport.useSampleData") || "Use sample data"}
-            </button>
+            </Button>
           </div>
-          <textarea
+          <Textarea
             id="csv-text"
             name="csvText"
-            className="input font-mono"
+            className="font-mono"
+            rows={7}
             style={{ minHeight: 140 }}
             placeholder={
               __t("bulkImport.csvPlaceholder") ||
@@ -259,13 +314,13 @@ OPT-DIFF-30,Optical Diffuser 30mm,A,1,EA,Optical,Edmund Optics,18.50,21,US,Relea
             onChange={(e) => setCsvText(e.target.value)}
           />
           <div className="mt-10 flex justify-end">
-            <button
-              className="btn primary"
+            <Button
+              variant="primary"
               disabled={!csvText.trim()}
               onClick={() => parseCSV(csvText)}
             >
               {__t("bulkImport.parseCsv") || "Parse CSV →"}
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -286,17 +341,31 @@ OPT-DIFF-30,Optical Diffuser 30mm,A,1,EA,Optical,Edmund Optics,18.50,21,US,Relea
           >
             {FIELDS.map((f) => (
               <React.Fragment key={f}>
-                <div
+                <label
+                  htmlFor={"map-" + f}
                   className="bg-sunk border-line rounded-r2 font-mono fs-12"
-                  style={{ padding: "8px 12px" }}
+                  style={{ padding: "8px 12px", display: "block" }}
                 >
-                  {f} {f === "pn" && <span className="fg-accent">*</span>}
+                  {FIELD_LABELS[f] || f}
+                  {f === "pn" && (
+                    <>
+                      <span className="fg-accent" aria-hidden="true">
+                        {" "}
+                        *
+                      </span>
+                      <span className="sr-only">
+                        {" "}
+                        ({__t("common.required") || "required"})
+                      </span>
+                    </>
+                  )}
+                </label>
+                <div className="text-center fg-3" aria-hidden="true">
+                  ←
                 </div>
-                <div className="text-center fg-3">←</div>
-                <select
+                <Select
                   id={"map-" + f}
                   name={"mapField_" + f}
-                  className="select"
                   value={mapping[f] ?? ""}
                   onChange={(e) =>
                     setMapping({
@@ -314,7 +383,7 @@ OPT-DIFF-30,Optical Diffuser 30mm,A,1,EA,Optical,Edmund Optics,18.50,21,US,Relea
                       {h}
                     </option>
                   ))}
-                </select>
+                </Select>
               </React.Fragment>
             ))}
           </div>
@@ -322,36 +391,14 @@ OPT-DIFF-30,Optical Diffuser 30mm,A,1,EA,Optical,Edmund Optics,18.50,21,US,Relea
       )}
 
       {step === "review" && (
-        <div
-          className="border-line rounded-r2 overflow-x-a"
-          style={{ maxHeight: 400 }}
-        >
-          <table className="bom-table table-auto">
-            <thead>
-              <tr>
-                {FIELDS.filter((f) => mapping[f] != null).map((f) => (
-                  <th key={f} className="pl-12">
-                    {f}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {buildPreview().map((r, i) => (
-                <tr key={"preview-" + i}>
-                  {FIELDS.filter((f) => mapping[f] != null).map((f) => (
-                    <td
-                      key={f}
-                      className="mono pl-12"
-                      style={{ fontWeight: f === "pn" ? 600 : 400 }}
-                    >
-                      {r[f] || "—"}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div style={{ maxHeight: 400, overflow: "auto" }}>
+          <DataTable
+            ariaLabel={__t("bulkImport.reviewSubtitle") || "Review rows"}
+            columns={previewColumns}
+            rows={buildPreview()}
+            dense
+            zebra
+          />
         </div>
       )}
     </Modal>

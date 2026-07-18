@@ -2,7 +2,9 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Modal, api, useAppStore } from "../../globals";
+import { Icon, api, useAppStore } from "../../globals";
+import { Modal, Button, Field, Input, Checkbox, Badge } from "../ui";
+
 function BOMDuplicationModal({ open, onClose }) {
   const ctx = useAppStore();
   const [name, setName] = React.useState("");
@@ -118,37 +120,34 @@ function BOMDuplicationModal({ open, onClose }) {
         __t("bomDuplication.subtitle") ||
         "Create a variant copy of the current BOM"
       }
+      closeLabel={
+        __t("bomDuplication.closeDialog") || "Close duplicate BOM dialog"
+      }
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.cancel") || "Cancel"}
-          </button>
-          <button
-            className="btn primary"
+          </Button>
+          <Button
+            variant="primary"
             disabled={!name.trim() || duplicating}
+            loading={duplicating}
             onClick={duplicate}
           >
-            {duplicating ? (
-              __t("bomDuplication.duplicating") || "Duplicating..."
-            ) : (
-              <>
-                <Icon.Bom size={12} />{" "}
-                {__t("bomDuplication.duplicate") || "Duplicate"}
-              </>
-            )}
-          </button>
+            <Icon.Bom size={12} />{" "}
+            {__t("bomDuplication.duplicate") || "Duplicate"}
+          </Button>
         </>
       }
     >
-      <div className="field">
-        <label htmlFor="dup-name">
-          {__t("bomDuplication.variantName") || "Variant name"}{" "}
-          <span className="req">*</span>
-        </label>
-        <input
+      <Field
+        label={__t("bomDuplication.variantName") || "Variant name"}
+        htmlFor="dup-name"
+        required
+      >
+        <Input
           id="dup-name"
           name="variantName"
-          className="input"
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -157,73 +156,47 @@ function BOMDuplicationModal({ open, onClose }) {
             "e.g. ATLAS - High-temp variant"
           }
         />
+      </Field>
+
+      <div className="flex flex-col gap-8 mt-10">
+        <Checkbox
+          id="dup-rev"
+          name="resetRev"
+          checked={includeRev}
+          onChange={(e) => setIncludeRev(e.target.checked)}
+          label={__t("bomDuplication.resetRev") || "Reset revision to A"}
+        />
+        <Checkbox
+          id="dup-costs"
+          name="includeCosts"
+          checked={includeCosts}
+          onChange={(e) => setIncludeCosts(e.target.checked)}
+          label={
+            __t("bomDuplication.includeCosts") ||
+            "Include cost data (clear for fresh costing)"
+          }
+        />
       </div>
-      <div className="field mt-10">
-        <label
-          htmlFor="dup-rev"
-          className="flex items-center gap-8 cursor-pointer"
-        >
-          <input
-            id="dup-rev"
-            name="resetRev"
-            type="checkbox"
-            className="row-checkbox"
-            checked={includeRev}
-            onChange={(e) => setIncludeRev(e.target.checked)}
-          />
-          <span className="fs-12">
-            {__t("bomDuplication.resetRev") || "Reset revision to A"}
-          </span>
-        </label>
+
+      <div className="flex items-center gap-8 mt-14">
+        <Badge tone={window.apiConnected ? "success" : "neutral"}>
+          {window.apiConnected
+            ? __t("bomDuplication.connected") || "Connected"
+            : __t("bomDuplication.offline") || "Offline"}
+        </Badge>
+        <span className="fs-11 fg-3">
+          {window.apiConnected
+            ? __t("bomDuplication.apiConnectedInfo") ||
+              "Will create a new project and save BOM to server"
+            : __t("bomDuplication.offlineInfo") ||
+              "Offline mode: BOM will be duplicated in browser only"}
+        </span>
       </div>
-      <div className="field">
-        <label
-          htmlFor="dup-costs"
-          className="flex items-center gap-8 cursor-pointer"
-        >
-          <input
-            id="dup-costs"
-            name="includeCosts"
-            type="checkbox"
-            className="row-checkbox"
-            checked={includeCosts}
-            onChange={(e) => setIncludeCosts(e.target.checked)}
-          />
-          <span className="fs-12">
-            {__t("bomDuplication.includeCosts") ||
-              "Include cost data (clear for fresh costing)"}
-          </span>
-        </label>
-      </div>
-      {window.apiConnected && (
-        <div
-          className="mt-14 rounded-r2 fs-11 fg-2 font-mono"
-          style={{
-            padding: 10,
-            background: "color-mix(in oklch, var(--ok) 8%, var(--bg))",
-            border: "1px solid var(--ok)",
-          }}
-        >
-          {__t("bomDuplication.apiConnectedInfo") ||
-            "● Will create a new project and save BOM to server"}
-        </div>
-      )}
-      {!window.apiConnected && (
-        <div
-          className="mt-14 bg-sunk border-line rounded-r2 fs-11 fg-3 font-mono"
-          style={{ padding: 10 }}
-        >
-          {__t("bomDuplication.offlineInfo") ||
-            "○ Offline mode: BOM will be duplicated in browser only"}
-        </div>
-      )}
-      <div
-        className="mt-14 bg-sunk border-line rounded-r2 fs-11 fg-3 font-mono"
-        style={{ padding: 12 }}
-      >
+
+      <p className="fs-11 fg-3 mt-14" style={{ margin: "14px 0 0" }}>
         {__t("bomDuplication.info") ||
           "The duplicated BOM will contain all the same parts and structure. Part IDs will be regenerated to prevent conflicts."}
-      </div>
+      </p>
     </Modal>
   );
 }
