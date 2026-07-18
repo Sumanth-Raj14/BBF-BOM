@@ -1,10 +1,26 @@
 import PropTypes from "prop-types";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
-import { DropdownButton, Modal, cadAPI, useAppStore } from "../globals";
+import { Icon, cadAPI, useAppStore } from "../globals";
+import {
+  ScreenHeader,
+  Button,
+  Field,
+  Input,
+  Card,
+  DataTable,
+  Badge,
+  StatusPill,
+  Modal,
+  Menu,
+  EmptyState,
+  Spinner,
+} from "../components/ui";
 // PDM / CAD Vault feature set: vault tree, check-in/out, CAD revision history,
 // 3D viewer, drawing markup, CAD attribute extraction, bidirectional sync,
 // drawing release workflow, watermarking.
+
+const ME = "E. Chen";
 
 // ============ PDM VAULT SCREEN ============
 function PDMVaultScreen() {
@@ -445,8 +461,7 @@ function PDMVaultScreen() {
 
   const toggleCheckout = (i) => {
     const f = files[i];
-    const me = "E. Chen";
-    if (f.checked_out === me) {
+    if (f.checked_out === ME) {
       const next = files.map((x, j) =>
         j === i ? { ...x, checked_out: null } : x,
       );
@@ -466,7 +481,7 @@ function PDMVaultScreen() {
       );
     } else {
       const next = files.map((x, j) =>
-        j === i ? { ...x, checked_out: me } : x,
+        j === i ? { ...x, checked_out: ME } : x,
       );
       setFilesByPath({ ...filesByPath, [selectedPath]: next });
       toast(
@@ -478,329 +493,347 @@ function PDMVaultScreen() {
     }
   };
 
-  return (
-    <div className="screen-wrap flex h-100p min-h-0 overflow-h" className="p-0">
-      {/* Tree sidebar */}
-      <aside
-        className="w-240 flex-shrink-0 bri-1 bg-elev oy-auto ox-hidden"
-        style={{ padding: 14 }}
-      >
-        <div className="flex justify-between items-center mb-10">
-          <div className="font-mono fs-10 uppercase letter-sp-6 fg-3">
-            {__t("pdm.vault") || "Vault"}
-          </div>
-          <button
-            className="icon-btn w-22 h-22"
-            title={__t("pdm.newFolder") || "New folder"}
-            aria-label={__t("pdm.newFolder") || "New folder"}
-            onClick={() => toast(__t("pdm.newFolder") || "New folder")}
-          >
-            <Icon.Plus size={11} />
-          </button>
-        </div>
-        {tree.map((n) => (
-          <button
-            key={n.path}
-            onClick={() => setSelectedPath(n.path)}
-            className="flex items-center w-100p text-left c-pointer transition-fast"
+  const columns = [
+    {
+      key: "file",
+      header: __t("pdm.file") || "File",
+      render: (f) => (
+        <div className="flex items-center gap-8">
+          <span
+            className="font-mono fs-9 br-2 letter-sp-6"
             style={{
-              padding: `6px 8px 6px ${8 + (n.indent || 0) * 16}px`,
-              background:
-                selectedPath === n.path ? "var(--bg-sunk)" : "transparent",
-              border: "1px solid transparent",
-              borderRadius: "var(--r-2)",
-              color: selectedPath === n.path ? "var(--fg)" : "var(--fg-2)",
-              marginBottom: 2,
-            }}
-            onMouseOver={(e) => {
-              if (selectedPath !== n.path)
-                e.currentTarget.style.background = "var(--bg)";
-            }}
-            onMouseOut={(e) => {
-              if (selectedPath !== n.path)
-                e.currentTarget.style.background = "transparent";
+              padding: "2px 5px",
+              background: "var(--fg)",
+              color: "var(--bg)",
             }}
           >
-            <span
-              style={{
-                marginRight: 8,
-                display: "flex",
-                color:
-                  selectedPath === n.path ? "var(--accent)" : "var(--fg-3)",
-              }}
+            {f.ext}
+          </span>
+          <span className="font-mono fs-12 fw-500">{f.name}</span>
+          {f.checked_out && (
+            <Badge
+              tone="warning"
+              pill
+              title={(__t("pdm.lockedBy") || "Locked by {user}").replace(
+                "{user}",
+                f.checked_out,
+              )}
+              className="font-mono fs-9"
             >
-              {n.icon}
-            </span>
-            <span className="flex-1 fs-12 fw-500">{n.label}</span>
-            {n.count !== undefined && (
-              <span className="font-mono fs-10 fg-4">{n.count}</span>
-            )}
-          </button>
-        ))}
-      </aside>
-
-      {/* Main content */}
-      <div
-        className="flex-1 overflow-x-a min-w-0 min-h-0"
-        style={{ padding: 20 }}
-      >
-        <div className="screen-header">
-          <div>
-            <h1>{__t("pdm.pdmVault") || "PDM Vault"}</h1>
-            <div className="sub font-mono fg-3 fs-11">
-              {selectedPath} · {files.length} {__t("pdm.files") || "files"} · 2{" "}
-              {__t("pdm.checkedOutLower") || "checked out"}
-            </div>
+              <Icon.X size={9} /> {__t("pdm.locked") || "LOCKED"}
+            </Badge>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "rev",
+      header: __t("pdm.rev") || "Rev",
+      render: (f) => <span className="font-mono">{f.rev}</span>,
+    },
+    {
+      key: "size",
+      header: __t("pdm.size") || "Size",
+      render: (f) => <span className="font-mono fg-3">{f.size}</span>,
+    },
+    {
+      key: "checked_out",
+      header: __t("pdm.checkedOutColumn") || "Checked out",
+      render: (f) =>
+        f.checked_out ? (
+          <span
+            className="font-mono fs-11"
+            style={{
+              color: f.checked_out === ME ? "var(--accent-text)" : "var(--warn)",
+            }}
+          >
+            {f.checked_out}
+            {f.checked_out === ME && " " + (__t("pdm.you") || "(you)")}
+          </span>
+        ) : (
+          <span className="fg-4 font-mono fs-11">—</span>
+        ),
+    },
+    {
+      key: "state",
+      header: __t("pdm.state") || "State",
+      render: (f) => <StatusPill status={f.state} label={f.state.toUpperCase()} />,
+    },
+    {
+      key: "modified",
+      header: __t("pdm.modified") || "Modified",
+      render: (f) => (
+        <span className="font-mono fg-3 fs-9">
+          {f.modified}
+          <div>{f.author}</div>
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      render: (f) => {
+        const i = files.indexOf(f);
+        const checkLabel =
+          f.checked_out === ME
+            ? __t("pdm.checkIn") || "Check in"
+            : __t("pdm.checkOut") || "Check out";
+        return (
+          <div
+            className="flex gap-2 items-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              onClick={() => toggleCheckout(i)}
+              title={checkLabel}
+              aria-label={checkLabel}
+            >
+              {f.checked_out === ME ? (
+                <Icon.Check size={11} />
+              ) : (
+                <Icon.X size={11} />
+              )}
+            </Button>
+            <Menu
+              ariaLabel={__t("pdm.moreOptions") || "More options"}
+              align="right"
+              trigger={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  iconOnly
+                  aria-label={__t("pdm.moreOptions") || "More options"}
+                >
+                  <Icon.Dots size={11} />
+                </Button>
+              }
+              items={[
+                {
+                  icon: <Icon.Chevron size={11} />,
+                  label: __t("pdm.previewView3d") || "Preview / View 3D",
+                  onSelect: () => setPreviewFile(f),
+                },
+                {
+                  icon: <Icon.Diff size={11} />,
+                  label: __t("pdm.revisionHistory") || "Revision history",
+                  onSelect: () => ctx?.openModal("cad-revisions", f),
+                },
+                {
+                  icon: <Icon.Search size={11} />,
+                  label: __t("pdm.whereUsedInCad") || "Where used in CAD",
+                  onSelect: () => ctx?.openModal("cad-where-used", f),
+                },
+                {
+                  icon: <Icon.Edit size={11} />,
+                  label: __t("pdm.markupDrawing") || "Markup drawing",
+                  onSelect: () => ctx?.openModal("cad-markup", f),
+                },
+                {
+                  icon: <Icon.Export size={11} />,
+                  label: __t("pdm.download") || "Download",
+                  onSelect: () =>
+                    toast(
+                      (__t("pdm.downloadedToast") || "Downloaded {name}").replace(
+                        "{name}",
+                        f.name,
+                      ),
+                      { kind: "success" },
+                    ),
+                },
+                "divider",
+                {
+                  icon: <Icon.Sparkles size={11} />,
+                  label: __t("pdm.extractAttributes") || "Extract attributes",
+                  onSelect: () => ctx?.openModal("cad-attrs", f),
+                },
+              ]}
+            />
           </div>
-          <div className="flex gap-8">
-            <button className="btn" onClick={() => ctx?.openModal("cad-sync")}>
+        );
+      },
+    },
+  ];
+
+  const statusLine =
+    selectedPath +
+    " · " +
+    files.length +
+    " " +
+    (__t("pdm.files") || "files") +
+    " · 2 " +
+    (__t("pdm.checkedOutLower") || "checked out");
+
+  const stats = [
+    {
+      l: __t("pdm.totalFiles") || "Total files",
+      v: vaultStats?.totalFiles || 182,
+    },
+    {
+      l: __t("pdm.checkedOutColumn") || "Checked out",
+      v: vaultStats?.checkedOut || 2,
+    },
+    {
+      l: __t("pdm.pendingReview") || "Pending review",
+      v: vaultStats?.pendingReview || 1,
+    },
+    {
+      l: __t("pdm.vaultSize") || "Vault size",
+      v: vaultStats?.vaultSize || "412 MB",
+    },
+  ];
+
+  return (
+    <div className="screen-wrap" data-screen-label="PDM Vault">
+      <ScreenHeader
+        title={__t("pdm.pdmVault") || "PDM Vault"}
+        description={statusLine}
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => ctx?.openModal("cad-sync")}
+            >
               <Icon.Import size={12} />{" "}
               {__t("pdm.syncFromCad") || "Sync from CAD"}
-            </button>
-            <button className="btn" onClick={() => ctx?.openModal("upload")}>
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => ctx?.openModal("upload")}
+            >
               <Icon.Plus size={12} /> {__t("pdm.upload") || "Upload"}
-            </button>
-            <button
-              className="btn primary"
+            </Button>
+            <Button
+              variant="primary"
               onClick={() => ctx?.openModal("drawing-release")}
             >
               <Icon.Check size={12} />{" "}
               {__t("pdm.releaseDrawings") || "Release drawings"}
-            </button>
+            </Button>
+          </>
+        }
+      />
+
+      <div className="flex gap-16" style={{ alignItems: "flex-start" }}>
+        {/* Tree sidebar */}
+        <Card
+          className="flex-shrink-0"
+          bodyClassName="p-0"
+          style={{ width: 232 }}
+        >
+          <nav
+            aria-label={__t("pdm.vault") || "Vault"}
+            style={{ padding: 14 }}
+          >
+            <div className="flex justify-between items-center mb-10">
+              <div className="font-mono fs-10 uppercase letter-sp-6 fg-3">
+                {__t("pdm.vault") || "Vault"}
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                iconOnly
+                title={__t("pdm.newFolder") || "New folder"}
+                aria-label={__t("pdm.newFolder") || "New folder"}
+                onClick={() => toast(__t("pdm.newFolder") || "New folder")}
+              >
+                <Icon.Plus size={11} />
+              </Button>
+            </div>
+            {tree.map((n) => (
+              <button
+                key={n.path}
+                onClick={() => setSelectedPath(n.path)}
+                aria-current={selectedPath === n.path ? "true" : undefined}
+                className="flex items-center w-100p text-left c-pointer transition-fast"
+                style={{
+                  padding: `6px 8px 6px ${8 + (n.indent || 0) * 16}px`,
+                  background:
+                    selectedPath === n.path ? "var(--bg-sunk)" : "transparent",
+                  border: "1px solid transparent",
+                  borderRadius: "var(--r-2)",
+                  color: selectedPath === n.path ? "var(--fg)" : "var(--fg-2)",
+                  marginBottom: 2,
+                }}
+                onMouseOver={(e) => {
+                  if (selectedPath !== n.path)
+                    e.currentTarget.style.background = "var(--bg)";
+                }}
+                onMouseOut={(e) => {
+                  if (selectedPath !== n.path)
+                    e.currentTarget.style.background = "transparent";
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    marginRight: 8,
+                    display: "flex",
+                    color:
+                      selectedPath === n.path ? "var(--accent)" : "var(--fg-3)",
+                  }}
+                >
+                  {n.icon}
+                </span>
+                <span className="flex-1 fs-12 fw-500">{n.label}</span>
+                {n.count !== undefined && (
+                  <span className="font-mono fs-10 fg-4">{n.count}</span>
+                )}
+              </button>
+            ))}
+          </nav>
+        </Card>
+
+        {/* Main content */}
+        <div className="flex-1 min-w-0">
+          <Card bodyClassName="p-0">
+            <DataTable
+              dense
+              ariaLabel={
+                (__t("pdm.pdmVault") || "PDM Vault") + " · " + selectedPath
+              }
+              columns={columns}
+              rows={files}
+              getRowKey={(f) => f.name}
+              onRowClick={(f) => setPreviewFile(f)}
+              isRowSelected={(f) => f.checked_out === ME}
+              empty={
+                <EmptyState
+                  title={__t("pdm.noFiles") || "No files"}
+                  message={
+                    __t("pdm.noFilesMsg") || "This folder has no files yet."
+                  }
+                />
+              }
+            />
+          </Card>
+
+          {/* Stats */}
+          <div
+            className="mt-14 d-grid gap-10"
+            style={{ gridTemplateColumns: "repeat(4, 1fr)" }}
+          >
+            {stats.map((k) => (
+              <div key={k.l} className="kpi">
+                <div className="l">{k.l}</div>
+                <div className="v">{k.v}</div>
+              </div>
+            ))}
           </div>
         </div>
 
-        <div className="card">
-          <table className="bom-table table-auto">
-            <thead>
-              <tr>
-                <th className="pl-16">{__t("pdm.file") || "File"}</th>
-                <th>{__t("pdm.rev") || "Rev"}</th>
-                <th>{__t("pdm.size") || "Size"}</th>
-                <th>{__t("pdm.checkedOutColumn") || "Checked out"}</th>
-                <th>{__t("pdm.state") || "State"}</th>
-                <th>{__t("pdm.modified") || "Modified"}</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {files.map((f, i) => (
-                <tr
-                  key={f.name}
-                  onClick={() => setPreviewFile(f)}
-                  className="c-pointer"
-                  style={{
-                    background:
-                      f.checked_out === "E. Chen"
-                        ? "color-mix(in oklch, var(--accent) 6%, var(--bg))"
-                        : undefined,
-                  }}
-                >
-                  <td className="pl-16">
-                    <div className="flex items-center gap-8">
-                      <span
-                        className="font-mono fs-9 br-2 letter-sp-6"
-                        style={{
-                          padding: "2px 5px",
-                          background: "var(--fg)",
-                          color: "var(--bg)",
-                        }}
-                      >
-                        {f.ext}
-                      </span>
-                      <span className="font-mono fs-12 fw-500">{f.name}</span>
-                      {f.checked_out && (
-                        <span
-                          title={(
-                            __t("pdm.lockedBy") || "Locked by {user}"
-                          ).replace("{user}", f.checked_out)}
-                          style={{
-                            fontFamily: "var(--font-mono)",
-                            fontSize: 9,
-                            color: "var(--warn)",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 2,
-                            background:
-                              "color-mix(in oklch, var(--warn) 14%, var(--bg))",
-                            padding: "1px 5px",
-                            borderRadius: 3,
-                            border:
-                              "1px solid color-mix(in oklch, var(--warn) 30%, transparent)",
-                          }}
-                        >
-                          <Icon.X size={9} /> {__t("pdm.locked") || "LOCKED"}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="mono">{f.rev}</td>
-                  <td className="mono fg-3">{f.size}</td>
-                  <td>
-                    {f.checked_out ? (
-                      <span
-                        className="font-mono fs-11"
-                        style={{
-                          color:
-                            f.checked_out === "E. Chen"
-                              ? "var(--accent-text)"
-                              : "var(--warn)",
-                        }}
-                      >
-                        {f.checked_out}
-                        {f.checked_out === "E. Chen" &&
-                          " " + (__t("pdm.you") || "(you)")}
-                      </span>
-                    ) : (
-                      <span className="fg-4 font-mono fs-11">—</span>
-                    )}
-                  </td>
-                  <td>
-                    <span
-                      className={
-                        "status " +
-                        (f.state === "released"
-                          ? "released"
-                          : f.state === "review"
-                            ? "review"
-                            : "draft")
-                      }
-                    >
-                      {f.state.toUpperCase()}
-                    </span>
-                  </td>
-                  <td className="mono fg-3 fs-9">
-                    {f.modified}
-                    <div>{f.author}</div>
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <span className="inline-flex gap-2">
-                      <button
-                        className="icon-btn w-22 h-22"
-                        onClick={() => toggleCheckout(i)}
-                        title={
-                          f.checked_out === "E. Chen"
-                            ? __t("pdm.checkIn") || "Check in"
-                            : __t("pdm.checkOut") || "Check out"
-                        }
-                        aria-label={
-                          f.checked_out === "E. Chen"
-                            ? __t("pdm.checkIn") || "Check in"
-                            : __t("pdm.checkOut") || "Check out"
-                        }
-                      >
-                        {f.checked_out === "E. Chen" ? (
-                          <Icon.Check size={11} />
-                        ) : (
-                          <Icon.X size={11} />
-                        )}
-                      </button>
-                      <DropdownButton
-                        width={180}
-                        trigger={
-                          <button
-                            className="icon-btn w-22 h-22"
-                            aria-label={
-                              __t("pdm.moreOptions") || "More options"
-                            }
-                          >
-                            <Icon.Dots size={11} />
-                          </button>
-                        }
-                        items={[
-                          {
-                            icon: <Icon.Chevron size={11} />,
-                            label:
-                              __t("pdm.previewView3d") || "Preview / View 3D",
-                            onClick: () => setPreviewFile(f),
-                          },
-                          {
-                            icon: <Icon.Diff size={11} />,
-                            label:
-                              __t("pdm.revisionHistory") || "Revision history",
-                            onClick: () => ctx?.openModal("cad-revisions", f),
-                          },
-                          {
-                            icon: <Icon.Search size={11} />,
-                            label:
-                              __t("pdm.whereUsedInCad") || "Where used in CAD",
-                            onClick: () => ctx?.openModal("cad-where-used", f),
-                          },
-                          {
-                            icon: <Icon.Edit size={11} />,
-                            label: __t("pdm.markupDrawing") || "Markup drawing",
-                            onClick: () => ctx?.openModal("cad-markup", f),
-                          },
-                          {
-                            icon: <Icon.Export size={11} />,
-                            label: __t("pdm.download") || "Download",
-                            onClick: () =>
-                              toast(
-                                (
-                                  __t("pdm.downloadedToast") ||
-                                  "Downloaded {name}"
-                                ).replace("{name}", f.name),
-                                { kind: "success" },
-                              ),
-                          },
-                          "divider",
-                          {
-                            icon: <Icon.Sparkles size={11} />,
-                            label:
-                              __t("pdm.extractAttributes") ||
-                              "Extract attributes",
-                            onClick: () => ctx?.openModal("cad-attrs", f),
-                          },
-                        ]}
-                      />
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Stats */}
-        <div
-          className="mt-14 d-grid gap-10"
-          style={{ gridTemplateColumns: "repeat(4, 1fr)" }}
-        >
-          {[
-            {
-              l: __t("pdm.totalFiles") || "Total files",
-              v: vaultStats?.totalFiles || 182,
-            },
-            {
-              l: __t("pdm.checkedOutColumn") || "Checked out",
-              v: vaultStats?.checkedOut || 2,
-            },
-            {
-              l: __t("pdm.pendingReview") || "Pending review",
-              v: vaultStats?.pendingReview || 1,
-            },
-            {
-              l: __t("pdm.vaultSize") || "Vault size",
-              v: vaultStats?.vaultSize || "412 MB",
-            },
-          ].map((k) => (
-            <div key={k.l} className="kpi">
-              <div className="l">{k.l}</div>
-              <div className="v">{k.v}</div>
-            </div>
-          ))}
-        </div>
+        {/* Preview panel */}
+        {previewFile && (
+          <div className="flex-shrink-0" style={{ width: 420 }}>
+            <CADPreview
+              file={previewFile}
+              onClose={() => setPreviewFile(null)}
+            />
+          </div>
+        )}
       </div>
-
-      {/* Preview panel */}
-      {previewFile && (
-        <div
-          className="flex-shrink-0 flex flex-col min-h-0"
-          style={{ width: 460 }}
-        >
-          <CADPreview file={previewFile} onClose={() => setPreviewFile(null)} />
-        </div>
-      )}
     </div>
   );
 }
@@ -840,31 +873,34 @@ function CADPreview({ file, onClose }) {
     };
   }, []);
 
-  // 3D-ish wireframe box rendered using CSS transforms
   return (
-    <div className="flex-1 bl-1 bg-elev flex flex-col min-h-0 overflow-h">
-      <div
-        className="border-bottom flex justify-between items-center"
-        style={{ padding: 12 }}
-      >
-        <div>
-          <div className="fw-600 fs-13">{file.name}</div>
-          <div className="font-mono fs-10 fg-3">
-            {file.ext} · Rev {file.rev} · {file.size}
-          </div>
-        </div>
-        <button
-          className="icon-btn w-26 h-26"
+    <Card
+      title={file.name}
+      subtitle={`${file.ext} · Rev ${file.rev} · ${file.size}`}
+      actions={
+        <Button
+          variant="ghost"
+          size="sm"
+          iconOnly
           aria-label={__t("common.close") || "Close"}
           onClick={onClose}
         >
           <Icon.X size={12} />
-        </button>
-      </div>
-
+        </Button>
+      }
+      bodyClassName="p-0"
+      footer={
+        <div className="font-mono fs-10 fg-3">
+          {__t("pdm.viewerHelp") ||
+            "Drag to rotate · Scroll to zoom · Auto-extracted: 120×80×12mm, 89g, Aluminum 6061-T6"}
+        </div>
+      }
+    >
+      {/* 3D-ish wireframe box rendered using CSS transforms */}
       <div
-        className="flex-1 bg-sunk flex items-center justify-center pos-relative overflow-h"
+        className="bg-sunk flex items-center justify-center pos-relative overflow-h"
         style={{
+          height: 320,
           padding: 20,
           cursor: dragging.current ? "grabbing" : "grab",
           perspective: 1000,
@@ -873,6 +909,7 @@ function CADPreview({ file, onClose }) {
       >
         <div
           ref={dragRef}
+          aria-hidden="true"
           style={{
             width: 200 * zoom,
             height: 140 * zoom,
@@ -914,28 +951,35 @@ function CADPreview({ file, onClose }) {
         <div
           className="pos-absolute font-mono fs-10 fg-3"
           style={{ bottom: 10, left: 10 }}
+          aria-hidden="true"
         >
           <div>X: {rot.x.toFixed(0)}°</div>
           <div>Y: {rot.y.toFixed(0)}°</div>
           <div>Z: {rot.z.toFixed(0)}°</div>
         </div>
         <div className="pos-absolute flex gap-4" style={{ top: 10, right: 10 }}>
-          <button
-            className="icon-btn w-26 h-26"
+          <Button
+            variant="ghost"
+            size="sm"
+            iconOnly
             aria-label={__t("pdm.zoomIn") || "Zoom in"}
             onClick={() => setZoom((z) => Math.min(2, z * 1.2))}
           >
             +
-          </button>
-          <button
-            className="icon-btn w-26 h-26"
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            iconOnly
             aria-label={__t("pdm.zoomOut") || "Zoom out"}
             onClick={() => setZoom((z) => Math.max(0.5, z / 1.2))}
           >
             −
-          </button>
-          <button
-            className="icon-btn w-26 h-26"
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            iconOnly
             aria-label={__t("pdm.resetView") || "Reset view"}
             onClick={() => {
               setRot({ x: -15, y: 25, z: 0 });
@@ -943,15 +987,10 @@ function CADPreview({ file, onClose }) {
             }}
           >
             ⟲
-          </button>
+          </Button>
         </div>
       </div>
-
-      <div className="font-mono fs-10 fg-3 border-top" style={{ padding: 12 }}>
-        {__t("pdm.viewerHelp") ||
-          "Drag to rotate · Scroll to zoom · Auto-extracted: 120×80×12mm, 89g, Aluminum 6061-T6"}
-      </div>
-    </div>
+    </Card>
   );
 }
 CADPreview.propTypes = {
@@ -999,14 +1038,14 @@ function CADRevisionsModal({ open, onClose, file }) {
       subtitle={(
         __t("pdm.revisionsTracked") || "{count} revisions tracked"
       ).replace("{count}", revs.length)}
-      wide
+      size="lg"
     >
       <div className="relative pl-24">
         <div
           className="pos-absolute w-1"
           style={{ left: 9, top: 4, bottom: 4, background: "var(--line)" }}
         />
-        {revs.map((r, i) => (
+        {revs.map((r) => (
           <div
             key={r.rev}
             className="pos-relative mb-16 rounded-r2"
@@ -1029,6 +1068,7 @@ function CADRevisionsModal({ open, onClose, file }) {
                 border:
                   "2px solid " + (r.current ? "var(--accent)" : "var(--fg-3)"),
               }}
+              aria-hidden="true"
             />
             <div className="flex justify-between items-baseline mb-6">
               <div className="flex gap-8 items-baseline">
@@ -1036,9 +1076,9 @@ function CADRevisionsModal({ open, onClose, file }) {
                   {__t("pdm.revLabel") || "Rev"} {r.rev}
                 </span>
                 {r.current && (
-                  <span className="tag-pill bg-accent border-color-accent fg-white">
+                  <Badge tone="accent" pill>
                     {__t("pdm.currentBadge") || "CURRENT"}
-                  </span>
+                  </Badge>
                 )}
               </div>
               <span className="font-mono fs-10 fg-3">
@@ -1047,8 +1087,9 @@ function CADRevisionsModal({ open, onClose, file }) {
             </div>
             <div className="fs-12 fg-2 mb-8">{r.note}</div>
             <div className="flex gap-6">
-              <button
-                className="btn small"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => {
                   toast(
                     (
@@ -1060,9 +1101,10 @@ function CADRevisionsModal({ open, onClose, file }) {
                 }}
               >
                 <Icon.Export size={11} /> {__t("pdm.download") || "Download"}
-              </button>
-              <button
-                className="btn small"
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() =>
                   toast(
                     (
@@ -1080,10 +1122,11 @@ function CADRevisionsModal({ open, onClose, file }) {
                 }
               >
                 <Icon.Diff size={11} /> {__t("pdm.compare") || "Compare"}
-              </button>
+              </Button>
               {!r.current && (
-                <button
-                  className="btn small"
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => {
                     onClose();
                     toast(
@@ -1096,7 +1139,7 @@ function CADRevisionsModal({ open, onClose, file }) {
                   }}
                 >
                   {__t("pdm.restoreAsCurrent") || "Restore as current"}
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -1197,7 +1240,7 @@ function CADMarkupModal({ open, onClose, file }) {
   }, [open]);
   if (!open || !file) return null;
 
-  const onClick = (e) => {
+  const onSvgClick = (e) => {
     const r = svgRef.current.getBoundingClientRect();
     const x = e.clientX - r.left;
     const y = e.clientY - r.top;
@@ -1232,6 +1275,29 @@ function CADMarkupModal({ open, onClose, file }) {
       ]);
   };
 
+  const commitPendingText = () => {
+    if (!textValue.trim()) return;
+    setMarks([
+      ...marks,
+      {
+        type: "text",
+        x: pendingText.x,
+        y: pendingText.y,
+        text: textValue,
+        color: "var(--danger)",
+        id: Date.now(),
+      },
+    ]);
+    setPendingText(null);
+    setTextValue("");
+  };
+
+  const tools = [
+    ["rect", __t("pdm.toolBox") || "□ Box"],
+    ["text", __t("pdm.toolText") || "T Text"],
+    ["arrow", __t("pdm.toolArrow") || "→ Arrow"],
+  ];
+
   return (
     <Modal
       open={open}
@@ -1245,17 +1311,17 @@ function CADMarkupModal({ open, onClose, file }) {
         __t("pdm.markupSubtitle") ||
         "{count} annotations · click drawing to add"
       ).replace("{count}", marks.length)}
-      wide
+      size="xl"
       footer={
         <>
-          <button className="btn" onClick={() => setMarks([])}>
+          <Button variant="secondary" onClick={() => setMarks([])}>
             {__t("bomShell.clearAll") || "Clear all"}
-          </button>
-          <button className="btn" onClick={onClose}>
+          </Button>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.cancel") || "Cancel"}
-          </button>
-          <button
-            className="btn primary"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => {
               onClose();
               toast(
@@ -1271,30 +1337,37 @@ function CADMarkupModal({ open, onClose, file }) {
               "{count}",
               marks.length,
             )}
-          </button>
+          </Button>
         </>
       }
     >
-      <div className="flex gap-6 mb-10">
-        {[
-          ["rect", __t("pdm.toolBox") || "□ Box"],
-          ["text", __t("pdm.toolText") || "T Text"],
-          ["arrow", __t("pdm.toolArrow") || "→ Arrow"],
-        ].map(([k, l]) => (
-          <button
+      <div
+        className="flex gap-6 mb-10"
+        role="group"
+        aria-label={__t("pdm.markupToolsLabel") || "Markup tools"}
+      >
+        {tools.map(([k, l]) => (
+          <Button
             key={k}
-            className={"btn small " + (tool === k ? "primary" : "")}
+            variant={tool === k ? "primary" : "secondary"}
+            size="sm"
+            aria-pressed={tool === k}
             onClick={() => setTool(k)}
           >
             {l}
-          </button>
+          </Button>
         ))}
       </div>
       <svg
         ref={svgRef}
         viewBox="0 0 600 360"
-        onClick={onClick}
+        onClick={onSvgClick}
         className="w-100p h-400 border-line rounded-r2 bg-white"
+        role="img"
+        aria-label={
+          __t("pdm.markupCanvasLabel") ||
+          "Drawing canvas — click to add an annotation"
+        }
       >
         {/* Background drawing */}
         {Array.from({ length: 31 }).map((_, i) => (
@@ -1418,62 +1491,38 @@ function CADMarkupModal({ open, onClose, file }) {
         })}
       </svg>
       {pendingText && (
-        <div className="flex gap-4 items-center mt-8">
-          <input
-            autoFocus
-            className="twk-field flex-1"
-            value={textValue}
-            onChange={(e) => setTextValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && textValue.trim()) {
-                setMarks([
-                  ...marks,
-                  {
-                    type: "text",
-                    x: pendingText.x,
-                    y: pendingText.y,
-                    text: textValue,
-                    color: "var(--danger)",
-                    id: Date.now(),
-                  },
-                ]);
-                setPendingText(null);
-                setTextValue("");
-              }
-            }}
-            placeholder={__t("pdm.enterMarkupText") || "Enter markup text..."}
-          />
-          <button
-            className="btn small primary"
-            onClick={() => {
-              if (textValue.trim()) {
-                setMarks([
-                  ...marks,
-                  {
-                    type: "text",
-                    x: pendingText.x,
-                    y: pendingText.y,
-                    text: textValue,
-                    color: "var(--danger)",
-                    id: Date.now(),
-                  },
-                ]);
-                setPendingText(null);
-                setTextValue("");
-              }
-            }}
-          >
+        <div className="flex gap-4 items-end mt-8">
+          <div className="flex-1">
+            <Field label={__t("pdm.markupTextLabel") || "Markup text"}>
+              <Input
+                autoFocus
+                value={textValue}
+                onChange={(e) => setTextValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitPendingText();
+                  }
+                }}
+                placeholder={
+                  __t("pdm.enterMarkupText") || "Enter markup text..."
+                }
+              />
+            </Field>
+          </div>
+          <Button variant="primary" size="sm" onClick={commitPendingText}>
             {__t("common.add") || "Add"}
-          </button>
-          <button
-            className="btn small"
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => {
               setPendingText(null);
               setTextValue("");
             }}
           >
             {__t("common.cancel") || "Cancel"}
-          </button>
+          </Button>
         </div>
       )}
     </Modal>
@@ -1516,11 +1565,11 @@ function CADAttrsModal({ open, onClose, file }) {
           } else {
             setAttrs({
               material: "Aluminum 6061-T6",
-              density: "2.70 g/cm\u00B3",
+              density: "2.70 g/cm³",
               mass: "89.4 g",
-              volume: "33.1 cm\u00B3",
-              bounding_box: "120 \u00D7 80 \u00D7 12 mm",
-              surface_area: "264 cm\u00B2",
+              volume: "33.1 cm³",
+              bounding_box: "120 × 80 × 12 mm",
+              surface_area: "264 cm²",
               center_of_mass: "(60.0, 40.0, 6.0) mm",
               file_format: file?.ext + " (ASCII)",
               sw_version: "SolidWorks 2026 SP2",
@@ -1554,11 +1603,11 @@ function CADAttrsModal({ open, onClose, file }) {
       footer={
         attrs && (
           <>
-            <button className="btn" onClick={onClose}>
+            <Button variant="secondary" onClick={onClose}>
               {__t("common.close") || "Close"}
-            </button>
-            <button
-              className="btn primary"
+            </Button>
+            <Button
+              variant="primary"
               onClick={() => {
                 onClose();
                 toast(
@@ -1569,17 +1618,27 @@ function CADAttrsModal({ open, onClose, file }) {
               }}
             >
               <Icon.Check size={12} /> {__t("pdm.syncToPart") || "Sync to part"}
-            </button>
+            </Button>
           </>
         )
       }
     >
       {extracting && (
-        <div style={{ padding: 40 }}>
-          <span className="spinner text-center" />{" "}
-          {(
-            __t("pdm.parsingMetadata") || "Parsing {ext} metadata\u2026"
-          ).replace("{ext}", file.ext)}
+        <div
+          className="flex items-center gap-8 fg-3 fs-12"
+          style={{ padding: 40 }}
+        >
+          <Spinner
+            size="sm"
+            label={(
+              __t("pdm.parsingMetadata") || "Parsing {ext} metadata…"
+            ).replace("{ext}", file.ext)}
+          />
+          <span aria-hidden="true">
+            {(
+              __t("pdm.parsingMetadata") || "Parsing {ext} metadata…"
+            ).replace("{ext}", file.ext)}
+          </span>
         </div>
       )}
       {attrs && (
@@ -1602,9 +1661,7 @@ function CADAttrsModal({ open, onClose, file }) {
                   <dt className="font-mono fs-10 uppercase letter-sp-4 fg-3">
                     {k.replace(/_/g, " ")}
                   </dt>
-                  <dd className="font-mono" className="m-0">
-                    {v}
-                  </dd>
+                  <dd className="font-mono m-0">{v}</dd>
                 </React.Fragment>
               ))}
           </dl>
@@ -1624,9 +1681,7 @@ function CADAttrsModal({ open, onClose, file }) {
                 <dt className="font-mono fs-10 uppercase letter-sp-4 fg-3">
                   {k.replace(/_/g, " ")}
                 </dt>
-                <dd className="font-mono" className="m-0">
-                  {v}
-                </dd>
+                <dd className="font-mono m-0">{v}</dd>
               </React.Fragment>
             ))}
           </dl>
@@ -1643,7 +1698,6 @@ CADAttrsModal.propTypes = {
 
 // ============ BIDIRECTIONAL CAD SYNC ============
 function CADSyncModal({ open, onClose }) {
-  if (!open) return null;
   const [diffs, setDiffs] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
   const [synced, setSynced] = React.useState(false);
@@ -1666,6 +1720,8 @@ function CADSyncModal({ open, onClose }) {
     }
   }, [open]);
 
+  if (!open) return null;
+
   return (
     <Modal
       open={open}
@@ -1680,14 +1736,14 @@ function CADSyncModal({ open, onClose }) {
               "{count} changes detected · review and apply each direction"
             ).replace("{count}", diffs.length)
       }
-      wide
+      size="xl"
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.cancel") || "Cancel"}
-          </button>
-          <button
-            className="btn primary"
+          </Button>
+          <Button
+            variant="primary"
             disabled={loading || synced}
             onClick={() => {
               setSynced(true);
@@ -1703,14 +1759,22 @@ function CADSyncModal({ open, onClose }) {
           >
             <Icon.Check size={12} />{" "}
             {__t("pdm.applyAllChanges") || "Apply all changes"}
-          </button>
+          </Button>
         </>
       }
     >
       {loading ? (
-        <div style={{ padding: 40 }}>
-          <span className="spinner text-center" />{" "}
-          {__t("pdm.comparingCadBomData") || "Comparing CAD and BOM data..."}
+        <div
+          className="flex items-center gap-8 fg-3 fs-12"
+          style={{ padding: 40 }}
+        >
+          <Spinner
+            size="sm"
+            label={__t("pdm.comparingCadBomData") || "Comparing CAD and BOM data..."}
+          />
+          <span aria-hidden="true">
+            {__t("pdm.comparingCadBomData") || "Comparing CAD and BOM data..."}
+          </span>
         </div>
       ) : (
         <>
@@ -1743,8 +1807,8 @@ function CADSyncModal({ open, onClose }) {
               </div>
               <div className="text-center fg-accent font-mono fs-14 fw-700">
                 {d.direction === "pull"
-                  ? "\u2192 " + (__t("pdm.pull") || "pull")
-                  : "\u2190 " + (__t("pdm.push") || "push")}
+                  ? "→ " + (__t("pdm.pull") || "pull")
+                  : "← " + (__t("pdm.push") || "push")}
               </div>
               <div style={{ opacity: d.direction === "push" ? 1 : 0.4 }}>
                 <div className="fw-600 fs-12">{d.pn}</div>
@@ -1801,6 +1865,72 @@ function DrawingReleaseModal({ open, onClose }) {
       watermark: "RELEASED",
     },
   ];
+
+  const columns = [
+    {
+      key: "name",
+      header: __t("pdm.drawing") || "Drawing",
+      render: (d) => <span className="font-mono fw-500">{d.name}</span>,
+    },
+    {
+      key: "rev",
+      header: __t("pdm.rev") || "Rev",
+      render: (d) => <span className="font-mono">{d.rev}</span>,
+    },
+    {
+      key: "state",
+      header: __t("pdm.state") || "State",
+      render: (d) => <StatusPill status={d.state} label={d.state} />,
+    },
+    {
+      key: "watermark",
+      header: __t("pdm.watermark") || "Watermark",
+      render: (d) => {
+        const tone =
+          d.state === "approved"
+            ? "success"
+            : d.state === "review"
+              ? "warning"
+              : "neutral";
+        return (
+          <Badge tone={tone} className="font-mono fs-10">
+            {d.watermark}
+          </Badge>
+        );
+      },
+    },
+    {
+      key: "reviewer",
+      header: __t("pdm.reviewer") || "Reviewer",
+      render: (d) => <span className="font-mono fg-3">{d.reviewer}</span>,
+    },
+    {
+      key: "date",
+      header: __t("pdm.date") || "Date",
+      render: (d) => <span className="font-mono fg-3">{d.date}</span>,
+    },
+    {
+      key: "actions",
+      header: "",
+      render: (d) => (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() =>
+            toast(
+              (__t("pdm.previewToast") || "Preview: {name} [{watermark}]")
+                .replace("{name}", d.name)
+                .replace("{watermark}", d.watermark),
+              { kind: "info" },
+            )
+          }
+        >
+          {__t("pdm.previewBtn") || "Preview"}
+        </Button>
+      ),
+    },
+  ];
+
   return (
     <Modal
       open={open}
@@ -1811,14 +1941,14 @@ function DrawingReleaseModal({ open, onClose }) {
         __t("pdm.separateSignoff") ||
         "Separate sign-off for drawings before production"
       }
-      wide
+      size="xl"
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.cancel") || "Cancel"}
-          </button>
-          <button
-            className="btn primary"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => {
               onClose();
               toast(
@@ -1830,91 +1960,25 @@ function DrawingReleaseModal({ open, onClose }) {
           >
             <Icon.Check size={12} />{" "}
             {__t("pdm.releaseApprovedDrawings") || "Release approved drawings"}
-          </button>
+          </Button>
         </>
       }
     >
-      <div className="card overflow-vis">
-        <table className="bom-table table-auto">
-          <thead>
-            <tr>
-              <th className="pl-16">{__t("pdm.drawing") || "Drawing"}</th>
-              <th>{__t("pdm.rev") || "Rev"}</th>
-              <th>{__t("pdm.state") || "State"}</th>
-              <th>{__t("pdm.watermark") || "Watermark"}</th>
-              <th>{__t("pdm.reviewer") || "Reviewer"}</th>
-              <th>{__t("pdm.date") || "Date"}</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {drawings.map((d) => (
-              <tr key={d.name}>
-                <td className="mono pl-16 fw-500">{d.name}</td>
-                <td className="mono">{d.rev}</td>
-                <td>
-                  <span
-                    className={
-                      "status " +
-                      (d.state === "approved"
-                        ? "released"
-                        : d.state === "review"
-                          ? "review"
-                          : "draft")
-                    }
-                  >
-                    {d.state}
-                  </span>
-                </td>
-                <td>
-                  <span
-                    className="font-mono fs-10 br-2"
-                    style={{
-                      padding: "2px 6px",
-                      background:
-                        d.state === "approved"
-                          ? "var(--ok)"
-                          : d.state === "review"
-                            ? "var(--warn)"
-                            : "var(--fg-3)",
-                      color: "white",
-                      letterSpacing: "0.05em",
-                    }}
-                  >
-                    {d.watermark}
-                  </span>
-                </td>
-                <td className="mono fg-3">{d.reviewer}</td>
-                <td className="mono fg-3">{d.date}</td>
-                <td>
-                  <button
-                    className="btn small"
-                    onClick={() =>
-                      toast(
-                        (
-                          __t("pdm.previewToast") ||
-                          "Preview: {name} [{watermark}]"
-                        )
-                          .replace("{name}", d.name)
-                          .replace("{watermark}", d.watermark),
-                        { kind: "info" },
-                      )
-                    }
-                  >
-                    {__t("pdm.previewBtn") || "Preview"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        dense
+        ariaLabel={
+          __t("pdm.drawingReleaseWorkflow") || "Drawing Release Workflow"
+        }
+        columns={columns}
+        rows={drawings}
+        getRowKey={(d) => d.name}
+      />
       <div
         className="mt-12 bg-sunk border-line rounded-r2 fs-11 fg-3 font-mono"
         style={{ padding: 10 }}
       >
         {__t("pdm.releasedInfo") ||
-          "\uD83D\uDCA1 Released drawings are watermarked, locked from edit, and immutable. Reissuing creates a new revision."}
+          "💡 Released drawings are watermarked, locked from edit, and immutable. Reissuing creates a new revision."}
       </div>
     </Modal>
   );
