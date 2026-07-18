@@ -49,6 +49,16 @@ class ClickUpClient:
                     return u.get("id")
         return None
 
+    async def verify(self) -> dict:
+        """Lightweight, read-only credential check: GET /user (the authenticated
+        member). Never creates/modifies anything, so it's safe to call on every
+        "Test connection" click. Raises httpx.HTTPStatusError (e.g. 401) on bad
+        credentials — callers must not swallow that into a fake success."""
+        r = await self._http.get(f"{BASE}/user", headers=self._headers())
+        r.raise_for_status()
+        u = (r.json() or {}).get("user", {})
+        return {"id": u.get("id"), "username": u.get("username")}
+
     async def ensure_list(self, space_id, name):
         r = await self._http.get(f"{BASE}/space/{space_id}/list", headers=self._headers())
         r.raise_for_status()

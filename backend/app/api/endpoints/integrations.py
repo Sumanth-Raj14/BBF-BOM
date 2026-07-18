@@ -1,5 +1,7 @@
+from datetime import UTC, datetime
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -9,7 +11,12 @@ from app.core.deps import get_current_superuser, get_current_user
 from app.db.session import get_db
 from app.integrations.crypto import encrypt_secret
 from app.integrations.events import emit_integration_event
-from app.integrations.worker import deliver_pending
+# _build_client/_mark_health/_sanitize_error are the same helpers the outbox
+# worker uses to build provider clients, record connection health, and redact
+# secrets/URLs from error text — reused here so the live "test connection"
+# check and the delivery pipeline can never disagree about what's safe to
+# persist/return.
+from app.integrations.worker import _build_client, _mark_health, _sanitize_error, deliver_pending
 from app.models.integration import IntegrationConnection, IntegrationOutbox
 from app.models.user import User
 
@@ -87,6 +94,67 @@ async def send_test(provider: str, db: AsyncSession = Depends(get_db), user: Use
     # Scope delivery to this tenant so a test never drains other tenants' pending rows.
     result = await deliver_pending(db, limit=5, tenant_id=user.tenantId)
     return {"enqueued": n, "delivery": result}
+
+
+@router.post("/{provider}/test-connection")
+async def test_connection(provider: str, db: AsyncSession = Depends(get_db),
+                          user: User = Depends(get_current_superuser)):
+    """Live, synchronous credential check — separate from `/test` (which enqueues
+    a real delivery through the outbox pipeline for observability). This makes
+    ONE lightweight authenticated call via the existing provider client and
+    reports an honest ok/fail result immediately. It never returns the raw
+    secret, and it never fabricates a success: a missing credential is reported
+    as `not_configured`, not `ok`.
+    """
+    if provider not in _PROVIDERS:
+        raise HTTPException(422, "unknown provider")
+    row = (await db.execute(select(IntegrationConnection).where(
+        IntegrationConnection.tenantId == user.tenantId,
+        IntegrationConnection.provider == provider))).scalar_one_or_none()
+    checked_at = datetime.now(UTC)
+
+    if row is None or not row.auth:
+        return {
+            "provider": provider, "ok": False, "reason": "not_configured",
+            "detail": "No credentials saved for this provider yet.",
+            "checked_at": checked_at.isoformat(),
+        }
+
+    client = _build_client(row, provider)
+    try:
+        await client.verify()
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code
+        reason = "auth_failed" if code in (401, 403) else "http_error"
+        detail = f"Provider rejected the request (HTTP {code})."
+        _mark_health(row, ok=False, error=_sanitize_error(e))
+        await db.commit()
+        return {"provider": provider, "ok": False, "reason": reason,
+                "detail": detail, "checked_at": row.last_checked_at.isoformat()}
+    except httpx.TimeoutException:
+        _mark_health(row, ok=False, error="timeout")
+        await db.commit()
+        return {"provider": provider, "ok": False, "reason": "timeout",
+                "detail": "Connection to the provider timed out.",
+                "checked_at": row.last_checked_at.isoformat()}
+    except httpx.HTTPError as e:
+        err = _sanitize_error(e)
+        _mark_health(row, ok=False, error=err)
+        await db.commit()
+        return {"provider": provider, "ok": False, "reason": "network_error",
+                "detail": "Could not reach the provider.",
+                "checked_at": row.last_checked_at.isoformat()}
+    except Exception as e:  # noqa: BLE001 — never let an unexpected error leak raw secrets
+        _mark_health(row, ok=False, error=_sanitize_error(e))
+        await db.commit()
+        return {"provider": provider, "ok": False, "reason": "error",
+                "detail": "Connection check failed.",
+                "checked_at": row.last_checked_at.isoformat()}
+
+    _mark_health(row, ok=True)
+    await db.commit()
+    return {"provider": provider, "ok": True, "reason": "ok",
+            "detail": "Credentials verified.", "checked_at": row.last_checked_at.isoformat()}
 
 
 @router.get("/deliveries")
