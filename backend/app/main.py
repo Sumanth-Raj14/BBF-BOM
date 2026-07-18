@@ -621,3 +621,73 @@ async def health_check():
         "backup": backup.get("status"),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Desktop bundle: serve the built frontend (guarded, off by default).
+#
+# Local-first desktop deployment bundles the built React app alongside this
+# backend so ONE process (uvicorn) serves both the API and the SPA. This is
+# intentionally opt-in so normal dev/test runs (no dist dir, no env var) are
+# completely unaffected:
+#   - enabled automatically if a built `frontend/dist` (or FRONTEND_DIST_DIR)
+#     is found on disk, e.g. INSTALL_DIR\frontend in the installed app, OR
+#   - forced on/off via SERVE_FRONTEND=1 / SERVE_FRONTEND=0.
+# Registered LAST so it never shadows "/", "/health", or the "/api/*" and
+# "/ws/*" routes above (Starlette matches routes in registration order).
+# ---------------------------------------------------------------------------
+def _resolve_frontend_dist_dir() -> str:
+    env_dir = os.environ.get("FRONTEND_DIST_DIR")
+    if env_dir:
+        return os.path.abspath(env_dir)
+    # Dev/repo layout: backend/app/main.py -> ../../frontend/dist
+    return os.path.abspath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "frontend", "dist")
+    )
+
+
+_frontend_dist_dir = _resolve_frontend_dist_dir()
+_serve_frontend_flag = os.environ.get("SERVE_FRONTEND", "").strip().lower()
+if _serve_frontend_flag in ("0", "false", "no"):
+    _serve_frontend = False
+elif _serve_frontend_flag in ("1", "true", "yes"):
+    _serve_frontend = True
+else:
+    _serve_frontend = os.path.isdir(_frontend_dist_dir)
+
+if _serve_frontend and os.path.isdir(_frontend_dist_dir) and os.path.isfile(
+    os.path.join(_frontend_dist_dir, "index.html")
+):
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    _frontend_assets_dir = os.path.join(_frontend_dist_dir, "assets")
+    if os.path.isdir(_frontend_assets_dir):
+        app.mount(
+            "/assets", StaticFiles(directory=_frontend_assets_dir), name="frontend-assets"
+        )
+
+    _API_PREFIX = settings.API_V1_STR.lstrip("/") + "/"
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_frontend(full_path: str):
+        # Never intercept API, docs, health, or websocket paths -- let them
+        # 404 normally if no earlier route matched.
+        if (
+            full_path.startswith(_API_PREFIX)
+            or full_path.startswith("ws/")
+            or full_path in ("health", "ws")
+        ):
+            raise StarletteHTTPException(status_code=404, detail="Not Found")
+        candidate = os.path.join(_frontend_dist_dir, full_path) if full_path else None
+        if candidate and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        return FileResponse(os.path.join(_frontend_dist_dir, "index.html"))
+
+    logger.info("Serving built frontend from %s", _frontend_dist_dir)
+else:
+    logger.debug(
+        "Frontend static serving disabled (dist=%s, SERVE_FRONTEND=%r)",
+        _frontend_dist_dir,
+        _serve_frontend_flag or "<unset>",
+    )

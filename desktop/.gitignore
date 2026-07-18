@@ -1,0 +1,11 @@
+# Build outputs and downloaded runtimes — never committed
+build/
+dist/
+pgsql/
+*.exe
+*.msi
+
+# Python artifacts
+__pycache__/
+*.pyc
+.pytest_cache/

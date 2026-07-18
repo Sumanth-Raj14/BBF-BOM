@@ -1,0 +1,79 @@
+# Blackbox BOM -- postgresql.conf template for the bundled desktop Postgres
+# cluster (DATA_DIR\pgdata\postgresql.conf).
+#
+# The launcher writes this file (with %DATA_DIR% substituted) into
+# DATA_DIR\pgdata the first time it runs `initdb`. It is NOT overwritten on
+# subsequent runs or app updates, so any manual tuning here survives updates
+# but is only applied on a fresh install. See DURABILITY.md for the
+# reasoning behind these settings.
+#
+# Placeholders substituted by the launcher at first-run:
+#   %DATA_DIR%  -> the ProgramData install path, e.g.
+#                  C:\ProgramData\BlackboxBOM  (forward slashes for Postgres,
+#                  e.g. C:/ProgramData/BlackboxBOM)
+
+# ---------------------------------------------------------------------------
+# Connectivity -- local-only, single desktop machine
+# ---------------------------------------------------------------------------
+listen_addresses = 'localhost'
+port = 5432
+max_connections = 50
+
+# ---------------------------------------------------------------------------
+# Crash safety / durability (power-outage safe)
+# ---------------------------------------------------------------------------
+# fsync + synchronous_commit + full_page_writes together are what make
+# PostgreSQL's WAL durable across a hard power loss: every committed
+# transaction's WAL record is physically on disk (fsync), the client is not
+# told "committed" until that fsync succeeds (synchronous_commit), and torn
+# pages from a mid-write power loss are repaired from the WAL's full-page
+# image on the next replay (full_page_writes). Do not disable any of these
+# on a machine without a battery-backed/UPS-protected disk cache.
+fsync = on
+synchronous_commit = on
+full_page_writes = on
+
+# wal_level = replica is required for archive_mode/archive_command (WAL
+# archiving) below; 'minimal' would disable PITR.
+wal_level = replica
+
+# ---------------------------------------------------------------------------
+# WAL archiving -- enables point-in-time recovery (PITR)
+# ---------------------------------------------------------------------------
+archive_mode = on
+# Windows: use `copy` (not `cp`) and quote paths; %f/%p are substituted by
+# Postgres. This mirrors backend/scripts/pitr_restore.py's expectations
+# (WAL_ARCHIVE_DIR = DATA_DIR\wal_archive).
+archive_command = 'copy "%p" "%DATA_DIR%\\wal_archive\\%f"'
+archive_timeout = 300
+
+# ---------------------------------------------------------------------------
+# Checkpointing -- spread I/O, avoid checkpoint storms on a single-disk
+# desktop machine
+# ---------------------------------------------------------------------------
+checkpoint_timeout = 15min
+checkpoint_completion_target = 0.9
+max_wal_size = 1GB
+min_wal_size = 80MB
+
+# ---------------------------------------------------------------------------
+# Logging -- kept modest for a desktop app; rotated by Postgres itself into
+# DATA_DIR\pgdata\log
+# ---------------------------------------------------------------------------
+logging_collector = on
+log_directory = 'log'
+log_filename = 'postgresql-%Y-%m-%d.log'
+log_rotation_age = 1d
+log_rotation_size = 50MB
+log_min_messages = warning
+log_checkpoints = on
+
+# ---------------------------------------------------------------------------
+# Memory -- conservative defaults sized for a single-user desktop deployment,
+# not a shared server. Increase shared_buffers if the target machine has
+# generous RAM and BOM datasets are large.
+# ---------------------------------------------------------------------------
+shared_buffers = 256MB
+work_mem = 16MB
+maintenance_work_mem = 64MB
+effective_cache_size = 1GB
