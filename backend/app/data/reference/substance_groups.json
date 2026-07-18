@@ -1,0 +1,9 @@
+{
+  "_comment": "Frozen scope per spec 10.8: PBB, PBDE, the four-phthalate family, and lead compounds. No open-ended metal-compound SVHC families.",
+  "groups": [
+    { "code": "PBB", "name": "Polybrominated biphenyls" },
+    { "code": "PBDE", "name": "Polybrominated diphenyl ethers" },
+    { "code": "PHTHALATES_4", "name": "Phthalates (DEHP, BBP, DBP, DIBP)" },
+    { "code": "LEAD_COMPOUNDS", "name": "Lead and its compounds" }
+  ]
+}

@@ -1040,6 +1040,25 @@
     "searchAlternates": "[ES] Search alternates",
     "rowsCount": "[ES] {{current}} rows - {{unique}} unique"
   },
+  "complianceRollup": {
+    "bySubassembly": "[ES] Compliance roll-up - by assembly",
+    "colRohs": "[ES] RoHS status",
+    "colReach": "[ES] REACH status",
+    "colFidelity": "[ES] Data fidelity",
+    "colObligations": "[ES] REACH obligations",
+    "fidelity": {
+      "COMPUTED_FROM_FMD": "[ES] Computed (FMD)",
+      "ASSERTED_FROM_SUMMARY": "[ES] Asserted (summary)",
+      "NO_DATA": "[ES] No data"
+    }
+  },
+  "complianceStatus": {
+    "COMPLIANT": "[ES] Compliant",
+    "COMPLIANT_WITH_EXEMPTION": "[ES] Compliant (exemption)",
+    "UNKNOWN": "[ES] Unknown",
+    "NON_COMPLIANT": "[ES] Non-compliant",
+    "NOT_APPLICABLE": "[ES] Not applicable"
+  },
   "approvals": {
     "title": "[ES] Approvals Inbox",
     "subtitle": "[ES] {{count}} pending across BOMs, POs, vendors, and parts",

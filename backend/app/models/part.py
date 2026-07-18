@@ -10,6 +10,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     PrimaryKeyConstraint,
+    SmallInteger,
     String,
     Table,
     Text,
@@ -88,6 +89,21 @@ class Part(Base, TenantAwareMixin):
         String, default="Released"
     )  # Draft, Review, Released, Deprecated, Obsolete, Archived
     assembly = Column(Boolean, default=False)  # Whether this part has children (is a BOM)
+
+    # RoHS/REACH substance-compliance identity (migration 043).
+    # is_article: REACH article identity (leaf physical component). Assemblies/
+    #   phantoms = False. NO blanket default=True — set explicitly by the 043
+    #   backfill from part_kind so existing assemblies are not mis-flagged (P4).
+    # eee_category: RoHS category 1-11 of the FINISHED product; meaningful on
+    #   top-level assemblies, NULL on leaf/shared parts (inherited during rollup, P3).
+    # part_kind: PURCHASED/MANUFACTURED/ASSEMBLY/RAW_MATERIAL/PHANTOM. STEP 0/P13 —
+    #   no existing parts column carries this procurement/structural kind (the
+    #   existing `category` is discipline-based and `assembly` is only has-children),
+    #   so it is added here; enum is validated at the service layer (no DB CHECK, to
+    #   keep the 043 ALTER SQLite-compatible without a table rebuild).
+    is_article = Column(Boolean)
+    eee_category = Column(SmallInteger)
+    part_kind = Column(String, index=True)
 
     # Technical specs
     barcode = Column(String, index=True)  # unique per tenant
