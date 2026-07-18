@@ -2,7 +2,9 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Modal, api, useAppStore } from "../../globals";
+import { Icon, api, useAppStore } from "../../globals";
+import { Modal, Button, Badge, Spinner, EmptyState } from "../ui";
+
 function RollbackModal({ open, onClose }) {
   const ctx = useAppStore();
   const [selectedRev, setSelectedRev] = React.useState(null);
@@ -117,6 +119,9 @@ function RollbackModal({ open, onClose }) {
     }
   };
 
+  const listLabel =
+    __t("rollback.listLabel") || "Select a revision to roll back to";
+
   return (
     <Modal
       open={open}
@@ -127,14 +132,16 @@ function RollbackModal({ open, onClose }) {
         __t("rollback.subtitle") ||
         "Restore a previous revision as the active BOM"
       }
+      closeLabel={__t("rollback.closeDialog") || "Close rollback dialog"}
       footer={
         <>
-          <button className="btn bg-warn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.cancel") || "Cancel"}
-          </button>
-          <button
-            className="btn fg-white"
+          </Button>
+          <Button
+            variant="danger"
             disabled={!selectedRev || rollingBack}
+            loading={rollingBack}
             onClick={rollback}
           >
             {rollingBack ? (
@@ -146,7 +153,7 @@ function RollbackModal({ open, onClose }) {
                 {selectedRev?.ver || "..."}
               </>
             )}
-          </button>
+          </Button>
         </>
       }
     >
@@ -154,59 +161,149 @@ function RollbackModal({ open, onClose }) {
         {__t("rollback.description") ||
           "Rolling back replaces the current BOM data with the selected revision. The current state is not lost — it remains as the latest revision in history."}
       </p>
-      {window.apiConnected && (
-        <div className="mb-12 font-mono fs-10 fg-ok">
-          {__t("rollback.loadingFromServer") ||
-            "● Loading revisions from server"}
-        </div>
-      )}
-      {!window.apiConnected && (
-        <div className="mb-12 font-mono fs-10 fg-3">
-          {__t("rollback.usingDefaultHistory") ||
-            "○ Using default revision history"}
-        </div>
-      )}
+      <div className="mb-12">
+        {window.apiConnected ? (
+          <Badge tone="success">
+            {__t("rollback.loadingFromServer") ||
+              "Loading revisions from server"}
+          </Badge>
+        ) : (
+          <Badge tone="neutral">
+            {__t("rollback.usingDefaultHistory") ||
+              "Using default revision history"}
+          </Badge>
+        )}
+      </div>
       {loading ? (
         <div
-          className="text-center fg-3 font-mono fs-11"
+          className="flex items-center justify-center gap-8 fg-3"
           style={{ padding: 30 }}
         >
-          {__t("rollback.loadingRevisions") || "Loading revisions..."}
-        </div>
-      ) : (
-        <div className="relative pl-24">
-          <div
-            className="pos-absolute w-1"
-            style={{ left: 9, top: 4, bottom: 4, background: "var(--line)" }}
+          <Spinner
+            size="sm"
+            label={__t("rollback.loadingRevisions") || "Loading revisions…"}
           />
-          {revs.map((r, i) => (
-            <div
-              key={r.ver || r.id || i}
-              onClick={() => setSelectedRev(r)}
-              className="pos-relative"
-            >
-              <div className="pos-absolute" />
-              <div className="flex justify-between items-baseline">
-                <span className="font-mono fw-700">{r.ver}</span>
-                <span className="font-mono fs-10 fg-3">
-                  {formatDate(r.date)} · {r.author}
-                </span>
-              </div>
-              <div className="fs-11 fg-2 mt-4">{r.changes}</div>
-              {r.bomSnapshot && (
-                <div className="fs-10 fg-accent mt-4">
-                  {__t("rollback.containsSnapshot") || "Contains BOM snapshot"}
-                </div>
-              )}
-            </div>
-          ))}
-          {revs.length === 0 && !loading && (
-            <div className="text-center fg-3 fs-12" style={{ padding: 20 }}>
-              {__t("rollback.noRevisions") || "No revisions found"}
-            </div>
-          )}
+          <span aria-hidden="true">
+            {__t("rollback.loadingRevisions") || "Loading revisions..."}
+          </span>
         </div>
+      ) : revs.length === 0 ? (
+        <EmptyState
+          icon={<Icon.Diff size={28} />}
+          title={__t("rollback.noRevisions") || "No revisions found"}
+        />
+      ) : (
+        <fieldset className="rollback__list" aria-label={listLabel}>
+          <legend className="sr-only">{listLabel}</legend>
+          {revs.map((r, i) => {
+            const inputId = `rollback-rev-${i}`;
+            const selected = selectedRev === r;
+            return (
+              <label
+                key={r.ver || r.id || i}
+                htmlFor={inputId}
+                className={
+                  "rollback__item" +
+                  (selected ? " rollback__item--selected" : "")
+                }
+              >
+                <input
+                  type="radio"
+                  id={inputId}
+                  name="rollback-revision"
+                  className="rollback__radio"
+                  checked={selected}
+                  onChange={() => setSelectedRev(r)}
+                />
+                <span className="rollback__body">
+                  <span className="rollback__head">
+                    <span className="rollback__ver">{r.ver}</span>
+                    <span className="rollback__meta">
+                      {formatDate(r.date)} · {r.author}
+                    </span>
+                  </span>
+                  <span className="rollback__changes">{r.changes}</span>
+                  {r.bomSnapshot && (
+                    <span className="rollback__snapshot">
+                      <Badge tone="accent">
+                        {__t("rollback.containsSnapshot") ||
+                          "Contains BOM snapshot"}
+                      </Badge>
+                    </span>
+                  )}
+                </span>
+              </label>
+            );
+          })}
+        </fieldset>
       )}
+
+      <style>{`
+        .rollback__list {
+          display: flex;
+          flex-direction: column;
+          gap: var(--sp-2);
+          margin: 0;
+          padding: 0;
+          border: 0;
+        }
+        .rollback__item {
+          display: flex;
+          align-items: flex-start;
+          gap: var(--sp-3);
+          padding: var(--sp-3);
+          border: 1px solid var(--border-subtle);
+          border-radius: var(--radius-md);
+          background: var(--bg-canvas);
+          cursor: pointer;
+        }
+        .rollback__item:hover {
+          border-color: var(--focus);
+        }
+        .rollback__item--selected {
+          border-color: var(--focus);
+          background: color-mix(in srgb, var(--accent-interactive) 8%, var(--bg-canvas));
+        }
+        .rollback__radio {
+          margin-top: 2px;
+          accent-color: var(--focus);
+          flex: none;
+        }
+        .rollback__radio:focus-visible {
+          outline: 2px solid var(--focus);
+          outline-offset: 2px;
+        }
+        .rollback__body {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          min-width: 0;
+        }
+        .rollback__head {
+          display: flex;
+          justify-content: space-between;
+          align-items: baseline;
+          gap: var(--sp-2);
+        }
+        .rollback__ver {
+          font-family: var(--font-mono);
+          font-weight: var(--fw-semibold);
+          color: var(--text-primary);
+        }
+        .rollback__meta {
+          font-family: var(--font-mono);
+          font-size: var(--fs-50);
+          color: var(--text-muted);
+          white-space: nowrap;
+        }
+        .rollback__changes {
+          font-size: var(--fs-200);
+          color: var(--text-secondary);
+        }
+        .rollback__snapshot {
+          margin-top: 2px;
+        }
+      `}</style>
     </Modal>
   );
 }
