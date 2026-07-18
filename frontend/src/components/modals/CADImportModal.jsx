@@ -2,7 +2,13 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Modal } from "../../globals";
+import { Modal } from "../ui/Modal.jsx";
+import { Button } from "../ui/Button.jsx";
+import { Input } from "../ui/Field.jsx";
+import { Checkbox } from "../ui/Choice.jsx";
+import { Badge, StatusPill } from "../ui/Badge.jsx";
+import { DataTable } from "../ui/DataTable.jsx";
+
 // ============ CAD IMPORT (SolidWorks-style sync) ============
 export default function CADImportModal({ open, onClose }) {
   const [step, setStep] = React.useState("upload"); // upload | scanning | review
@@ -46,7 +52,7 @@ export default function CADImportModal({ open, onClose }) {
         (__t("modals.cadImport.unsupportedFile") || "Unsupported file type") +
           ": ." +
           ext +
-          " \u2014 " +
+          " — " +
           (__t("modals.cadImport.useFormats") ||
             "use .sldasm, .step, or .iges"),
         { kind: "warn" },
@@ -66,7 +72,7 @@ export default function CADImportModal({ open, onClose }) {
         file.name +
         " (" +
         sizeMB +
-        " MB) \u2014 " +
+        " MB) — " +
         (__t("modals.cadImport.willBeProcessed") ||
           "will be processed when backend is available"),
       { kind: "success" },
@@ -147,7 +153,7 @@ export default function CADImportModal({ open, onClose }) {
     ).length;
     toast(
       (__t("modals.cadImport.imported") || "Imported") +
-        " \u00B7 " +
+        " · " +
         newCount +
         " " +
         (__t("modals.cadImport.newParts") || "new parts") +
@@ -159,6 +165,75 @@ export default function CADImportModal({ open, onClose }) {
     );
   };
 
+  const toggleRow = (pn) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(pn) ? next.delete(pn) : next.add(pn);
+      return next;
+    });
+  };
+
+  const allSelected =
+    foundParts.length > 0 && selected.size === foundParts.length;
+
+  const reviewColumns = [
+    {
+      key: "sel",
+      header: (
+        <Checkbox
+          checked={allSelected}
+          onChange={(e) =>
+            setSelected(
+              e.target.checked ? new Set(foundParts.map((p) => p.pn)) : new Set(),
+            )
+          }
+          aria-label={
+            __t("modals.cadImport.selectAll") || "Select all found parts"
+          }
+        />
+      ),
+      render: (row) => (
+        <Checkbox
+          checked={selected.has(row.pn)}
+          onChange={() => toggleRow(row.pn)}
+          aria-label={
+            (__t("modals.cadImport.selectPart") || "Select") + " " + row.pn
+          }
+        />
+      ),
+    },
+    {
+      key: "pn",
+      header: __t("part.partNumber") || "Part No.",
+      render: (row) => (
+        <span className="cad-import__mono">{row.pn}</span>
+      ),
+    },
+    { key: "name", header: __t("part.name") || "Name" },
+    {
+      key: "qty",
+      header: __t("part.quantity") || "Qty",
+      align: "num",
+      render: (row) => row.qty,
+    },
+    {
+      key: "status",
+      header: __t("part.status") || "Status",
+      render: (row) =>
+        row.status === "matched" ? (
+          <StatusPill
+            status={row.status}
+            tone="success"
+            label={__t("modals.cadImport.matched") || "Matched"}
+          />
+        ) : (
+          <Badge tone="accent" pill>
+            {__t("modals.cadImport.new") || "New"}
+          </Badge>
+        ),
+    },
+  ];
+
   return (
     <Modal
       open={open}
@@ -167,37 +242,37 @@ export default function CADImportModal({ open, onClose }) {
       title={__t("modals.cadImport.title") || "Import from SolidWorks"}
       subtitle={
         __t("modals.cadImport.subtitle") ||
-        "Sync assembly BOM \u2192 component library"
+        "Sync assembly BOM → component library"
       }
-      wide
+      size="lg"
       footer={
         step === "review" ? (
           <>
-            <span className="left">
+            <span className="cad-import__footer-count">
               {selected.size} {__t("modals.cadImport.of") || "of"}{" "}
               {foundParts.length}{" "}
               {__t("modals.cadImport.partsWillBeImported") ||
                 "parts will be imported"}
             </span>
-            <button className="btn" onClick={onClose}>
+            <Button variant="secondary" onClick={onClose}>
               {__t("common.cancel") || "Cancel"}
-            </button>
-            <button
-              className="btn primary"
+            </Button>
+            <Button
+              variant="primary"
               onClick={apply}
               disabled={selected.size === 0}
             >
               <Icon.Check size={12} />{" "}
               {__t("modals.cadImport.import") || "Import"} {selected.size}{" "}
               {__t("modals.cadImport.parts") || "parts"}
-            </button>
+            </Button>
           </>
         ) : null
       }
     >
       {step === "upload" && (
         <>
-          <p className="fs-12 fg-3" style={{ margin: "0 0 14px" }}>
+          <p className="cad-import__intro">
             {__t("modals.cadImport.uploadDesc") ||
               "Connect to SolidWorks, upload an assembly file, or paste a PDM link."}
           </p>
@@ -211,15 +286,12 @@ export default function CADImportModal({ open, onClose }) {
             onChange={handleFileSelect}
             aria-label={__t("modals.cadImport.uploadAria") || "Upload CAD file"}
           />
-          <div
-            className="d-grid gap-10 mb-14"
-            style={{ gridTemplateColumns: "1fr 1fr 1fr" }}
-          >
+          <div className="cad-import__sources">
             {[
               {
                 l: __t("modals.cadImport.solidworks") || "SolidWorks",
                 s: __t("modals.cadImport.liveApi") || "Live API connection",
-                icon: "\u230C",
+                icon: "⌌",
                 action: function () {
                   startScan("SolidWorks Assembly");
                 },
@@ -229,7 +301,7 @@ export default function CADImportModal({ open, onClose }) {
                 s:
                   __t("modals.cadImport.sldasmUpload") ||
                   ".sldasm or .step upload",
-                icon: "\u2913",
+                icon: "⤓",
                 action: function () {
                   fileInputRef.current && fileInputRef.current.click();
                 },
@@ -237,7 +309,7 @@ export default function CADImportModal({ open, onClose }) {
               {
                 l: __t("modals.cadImport.pdmLink") || "PDM link",
                 s: __t("modals.cadImport.pasteUrl") || "Paste assembly URL",
-                icon: "\uD83D\uDD17",
+                icon: "🔗",
                 action: function () {
                   setImportSource("pdm");
                 },
@@ -246,77 +318,58 @@ export default function CADImportModal({ open, onClose }) {
               return (
                 <button
                   key={opt.l}
+                  type="button"
+                  className="cad-import__tile"
                   onClick={opt.action}
-                  style={{
-                    padding: 18,
-                    border: "1.5px solid var(--line)",
-                    borderRadius: "var(--r-3)",
-                    background: "var(--bg)",
-                    cursor: "pointer",
-                    textAlign: "center",
-                    transition: "border-color 0.1s, background 0.1s",
-                  }}
-                  onMouseEnter={function (e) {
-                    e.currentTarget.style.borderColor = "var(--accent)";
-                    e.currentTarget.style.background = "var(--bg-elev)";
-                  }}
-                  onMouseLeave={function (e) {
-                    e.currentTarget.style.borderColor = "var(--line)";
-                    e.currentTarget.style.background = "var(--bg)";
-                  }}
                 >
-                  <div className="font-mono fs-26 fg-3 mb-6">{opt.icon}</div>
-                  <div className="fw-600 fs-13">{opt.l}</div>
-                  <div className="font-mono fs-10 fg-3 mt-2">{opt.s}</div>
+                  <div className="cad-import__tile-icon" aria-hidden="true">
+                    {opt.icon}
+                  </div>
+                  <div className="cad-import__tile-label">{opt.l}</div>
+                  <div className="cad-import__tile-sub">{opt.s}</div>
                 </button>
               );
             })}
           </div>
           {selectedFile && (
-            <div
-              className="mb-14 rounded-r2 bg-elev"
-              style={{ padding: 14, border: "1.5px solid var(--ok)" }}
-            >
-              <div className="flex items-center gap-10">
-                <span
-                  className="font-mono fs-9 br-2 letter-sp-6"
-                  style={{
-                    padding: "3px 6px",
-                    background: "var(--fg)",
-                    color: "var(--bg)",
-                  }}
-                >
+            <div className="cad-import__file">
+              <div className="cad-import__file-row">
+                <Badge tone="neutral" pill>
                   {selectedFile.ext}
-                </span>
-                <span className="flex-1 font-mono fs-12 fw-600">
+                </Badge>
+                <span className="cad-import__file-name">
                   {selectedFile.name}
                 </span>
-                <span className="font-mono fs-11 fg-3">
+                <span className="cad-import__file-size">
                   {selectedFile.size}
                 </span>
               </div>
-              <div className="mt-8 fs-11 fg-ok font-mono">
-                \u2713{" "}
-                {__t("modals.cadImport.fileSelected") ||
-                  "File selected \u2014 will be processed when backend is available"}
+              <div className="cad-import__file-ok">
+                <span aria-hidden="true">{"✓"}</span>
+                <span>
+                  {__t("modals.cadImport.fileSelected") ||
+                    "File selected — will be processed when backend is available"}
+                </span>
               </div>
-              <button
-                className="btn primary mt-10"
+              <Button
+                variant="primary"
+                className="cad-import__file-action"
                 onClick={function () {
                   startScan(selectedFile.name);
                 }}
               >
                 <Icon.Import size={12} />{" "}
                 {__t("modals.cadImport.processNow") || "Process now"}
-              </button>
+              </Button>
             </div>
           )}
           {importSource === "pdm" && !selectedFile && (
-            <div className="mb-14 flex gap-8">
-              <input
+            <div className="cad-import__pdm">
+              <Input
                 id="pdm-url-input"
                 name="pdmUrl"
                 type="url"
+                mono
                 placeholder={
                   __t("modals.cadImport.pdmPlaceholder") ||
                   "https://pdm.company.com/assembly/..."
@@ -325,14 +378,13 @@ export default function CADImportModal({ open, onClose }) {
                 onChange={function (e) {
                   setPdmUrl(e.target.value);
                 }}
-                className="flex-1 rounded-r2 bg-canvas font-mono fs-12"
-                style={{
-                  padding: "8px 12px",
-                  border: "1.5px solid var(--line)",
-                }}
+                aria-label={
+                  __t("modals.cadImport.pdmAria") || "PDM assembly URL"
+                }
+                className="cad-import__pdm-input"
               />
-              <button
-                className="btn primary"
+              <Button
+                variant="primary"
                 disabled={!pdmUrl}
                 onClick={function () {
                   startScan(pdmUrl.split("/").pop() || "PDM Assembly");
@@ -340,57 +392,49 @@ export default function CADImportModal({ open, onClose }) {
               >
                 <Icon.Import size={12} />{" "}
                 {__t("modals.cadImport.fetch") || "Fetch"}
-              </button>
+              </Button>
             </div>
           )}
-          <div
-            className="bg-sunk border-line rounded-r2 fs-12 fg-3"
-            style={{ padding: 12 }}
-          >
-            <div className="font-mono fs-10 fg-3 letter-sp-6 uppercase mb-4">
-              {__t("modals.cadImport.recentImports") || "RECENT IMPORTS"}
+          <div className="cad-import__recent">
+            <div className="cad-import__recent-title">
+              {__t("modals.cadImport.recentImports") || "Recent imports"}
             </div>
-            <div
-              className="flex justify-between font-mono fs-11"
-              style={{ padding: "4px 0" }}
-            >
+            <div className="cad-import__recent-row">
               <span>ATL-MFR-A_v3.2.sldasm</span>
-              <span className="fg-3">5 days ago \u00B7 87 parts</span>
+              <span>5 days ago {"·"} 87 parts</span>
             </div>
-            <div
-              className="flex justify-between font-mono fs-11"
-              style={{ padding: "4px 0" }}
-            >
+            <div className="cad-import__recent-row">
               <span>HZN-POD-CTL_v1.4.sldasm</span>
-              <span className="fg-3">12 days ago \u00B7 24 parts</span>
+              <span>12 days ago {"·"} 24 parts</span>
             </div>
           </div>
         </>
       )}
 
       {step === "scanning" && (
-        <div className="text-center" style={{ padding: "40px 20px" }}>
-          <div className="font-mono fg-accent mb-14" style={{ fontSize: 36 }}>
-            ⌬
+        <div
+          className="cad-import__scan"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="cad-import__scan-icon" aria-hidden="true">
+            {"⬬"}
           </div>
-          <div className="fs-14 fw-600 mb-6">
-            {__t("modals.cadImport.scanning") || "Scanning assembly\u2026"}
+          <div className="cad-import__scan-title">
+            {__t("modals.cadImport.scanning") || "Scanning assembly…"}
           </div>
-          <div className="font-mono fs-11 fg-3 mb-20">
+          <div className="cad-import__scan-desc">
             {__t("modals.cadImport.scanningDesc") ||
-              "Walking tree \u00B7 extracting parts \u00B7 matching against library"}
+              "Walking tree · extracting parts · matching against library"}
           </div>
-          <div style={{ maxWidth: 360, margin: "0 auto" }}>
-            <div className="h-8 bg-sunk br-4 overflow-h">
+          <div className="cad-import__progress-wrap">
+            <div className="cad-import__progress-track">
               <div
-                className="h-100p bg-accent"
-                style={{
-                  width: Math.min(100, progress) + "%",
-                  transition: "width 0.25s ease-out",
-                }}
+                className="cad-import__progress-fill"
+                style={{ width: Math.min(100, progress) + "%" }}
               />
             </div>
-            <div className="font-mono fs-10 fg-3 mt-6 flex justify-between">
+            <div className="cad-import__progress-meta">
               <span>
                 {progress >= 30
                   ? __t("modals.cadImport.walkingSub") ||
@@ -401,25 +445,17 @@ export default function CADImportModal({ open, onClose }) {
               <span>{Math.round(Math.min(100, progress))}%</span>
             </div>
           </div>
-          <div
-            className="font-mono fs-10 fg-4 text-left"
-            style={{
-              marginTop: 30,
-              lineHeight: 1.8,
-              maxWidth: 480,
-              margin: "30px auto 0",
-            }}
-          >
-            {progress > 10 && <div>✓ Loaded ATL-MFR-A_v3.2.sldasm</div>}
+          <div className="cad-import__log">
+            {progress > 10 && <div>{"✓"} Loaded ATL-MFR-A_v3.2.sldasm</div>}
             {progress > 30 && (
-              <div>✓ Walked 4 subassemblies · 87 part references</div>
+              <div>{"✓"} Walked 4 subassemblies {"·"} 87 part references</div>
             )}
             {progress > 55 && (
-              <div>✓ Captured isometric thumbnails (S3 → /atlas/v3.2/)</div>
+              <div>{"✓"} Captured isometric thumbnails (S3 {"→"} /atlas/v3.2/)</div>
             )}
-            {progress > 75 && <div>✓ Matched 64 parts to library</div>}
+            {progress > 75 && <div>{"✓"} Matched 64 parts to library</div>}
             {progress > 90 && (
-              <div>✓ Identified 3 new parts requiring review</div>
+              <div>{"✓"} Identified 3 new parts requiring review</div>
             )}
           </div>
         </div>
@@ -427,93 +463,236 @@ export default function CADImportModal({ open, onClose }) {
 
       {step === "review" && (
         <>
-          <div className="flex items-center justify-between mb-12">
+          <div className="cad-import__summary">
             <div className="fs-13">
-              <strong className="fg-ok">
+              <strong className="cad-import__summary-ok">
                 {foundParts.filter((p) => p.status === "matched").length}{" "}
                 {__t("modals.cadImport.matched") || "matched"}
               </strong>{" "}
-              \u00B7{" "}
-              <strong className="fg-accent">
+              {"·"}{" "}
+              <strong className="cad-import__summary-new">
                 {foundParts.filter((p) => p.status === "new").length}{" "}
                 {__t("modals.cadImport.new") || "new"}
               </strong>
             </div>
-            <div className="font-mono fs-11 fg-3">
+            <div className="cad-import__meta">
               {foundParts.length} {__t("modals.cadImport.total") || "total"}{" "}
-              \u00B7 8.4 MB
+              {"·"} 8.4 MB
             </div>
           </div>
-          <div className="border-line rounded-r2 overflow-h">
-            <table className="bom-table table-auto">
-              <thead>
-                <tr>
-                  <th className="col-check">
-                    <input
-                      id="cad-select-all"
-                      name="cadSelectAll"
-                      type="checkbox"
-                      className="row-checkbox"
-                      checked={selected.size === foundParts.length}
-                      onChange={(e) =>
-                        setSelected(
-                          e.target.checked
-                            ? new Set(foundParts.map((p) => p.pn))
-                            : new Set(),
-                        )
-                      }
-                    />
-                  </th>
-                  <th>{__t("part.partNumber") || "Part No."}</th>
-                  <th>{__t("part.name") || "Name"}</th>
-                  <th className="num">{__t("part.quantity") || "Qty"}</th>
-                  <th>{__t("part.status") || "Status"}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {foundParts.map((p) => (
-                  <tr key={p.pn}>
-                    <td className="col-check">
-                      <input
-                        id={"cad-select-" + p.pn}
-                        name="cadSelected"
-                        type="checkbox"
-                        className="row-checkbox"
-                        checked={selected.has(p.pn)}
-                        onChange={() => {
-                          const next = new Set(selected);
-                          next.has(p.pn) ? next.delete(p.pn) : next.add(p.pn);
-                          setSelected(next);
-                        }}
-                      />
-                    </td>
-                    <td className="mono">{p.pn}</td>
-                    <td>{p.name}</td>
-                    <td className="num mono">{p.qty}</td>
-                    <td>
-                      {p.status === "matched" ? (
-                        <span className="status released">Matched</span>
-                      ) : (
-                        <span
-                          className="font-mono fs-10 fg-accent"
-                          style={{
-                            padding: "1px 6px",
-                            background: "var(--accent-soft)",
-                            border: "1px solid var(--accent)",
-                            borderRadius: 99,
-                          }}
-                        >
-                          NEW
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={reviewColumns}
+            rows={foundParts}
+            getRowKey={(row) => row.pn}
+            isRowSelected={(row) => selected.has(row.pn)}
+            ariaLabel={
+              __t("modals.cadImport.reviewTableLabel") ||
+              "Parts found in assembly"
+            }
+            dense
+          />
         </>
       )}
+
+      <style>{`
+        .cad-import__intro {
+          margin: 0 0 var(--sp-4);
+          font-size: var(--fs-200);
+          color: var(--text-secondary);
+        }
+        .cad-import__sources {
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: var(--sp-3);
+          margin-bottom: var(--sp-4);
+        }
+        .cad-import__tile {
+          padding: var(--sp-4);
+          border: 1.5px solid var(--border-subtle);
+          border-radius: var(--radius-md);
+          background: var(--bg-surface);
+          cursor: pointer;
+          text-align: center;
+          font: inherit;
+          transition: border-color var(--dur-fast, 120ms) var(--ease-standard, ease),
+            background var(--dur-fast, 120ms) var(--ease-standard, ease);
+        }
+        .cad-import__tile:hover {
+          border-color: var(--accent-interactive);
+          background: var(--bg-hover);
+        }
+        .cad-import__tile:focus-visible {
+          outline: 2px solid var(--focus);
+          outline-offset: 2px;
+        }
+        .cad-import__tile-icon {
+          font-family: var(--font-mono);
+          font-size: 24px;
+          color: var(--text-muted);
+          margin-bottom: var(--sp-2);
+        }
+        .cad-import__tile-label {
+          font-weight: var(--fw-semibold);
+          font-size: var(--fs-200);
+          color: var(--text-primary);
+        }
+        .cad-import__tile-sub {
+          font-family: var(--font-mono);
+          font-size: var(--fs-50);
+          color: var(--text-muted);
+          margin-top: 2px;
+        }
+        .cad-import__file {
+          margin-bottom: var(--sp-4);
+          padding: var(--sp-3);
+          border: 1.5px solid var(--ok);
+          border-radius: var(--radius-md);
+          background: var(--bg-subtle);
+        }
+        .cad-import__file-row {
+          display: flex;
+          align-items: center;
+          gap: var(--sp-2);
+        }
+        .cad-import__file-name {
+          flex: 1;
+          min-width: 0;
+          font-family: var(--font-mono);
+          font-size: var(--fs-200);
+          font-weight: var(--fw-semibold);
+          color: var(--text-primary);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .cad-import__file-size {
+          font-family: var(--font-mono);
+          font-size: var(--fs-100);
+          color: var(--text-muted);
+        }
+        .cad-import__file-ok {
+          display: flex;
+          align-items: center;
+          gap: var(--sp-1);
+          margin-top: var(--sp-2);
+          font-size: var(--fs-100);
+          color: var(--ok-text);
+        }
+        .cad-import__file-action {
+          margin-top: var(--sp-3);
+        }
+        .cad-import__pdm {
+          display: flex;
+          gap: var(--sp-2);
+          margin-bottom: var(--sp-4);
+        }
+        .cad-import__pdm-input {
+          flex: 1;
+        }
+        .cad-import__recent {
+          padding: var(--sp-3);
+          border: 1px solid var(--border-subtle);
+          border-radius: var(--radius-md);
+          background: var(--bg-subtle);
+        }
+        .cad-import__recent-title {
+          font-family: var(--font-mono);
+          font-size: var(--fs-50);
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+          color: var(--text-muted);
+          margin-bottom: var(--sp-1);
+        }
+        .cad-import__recent-row {
+          display: flex;
+          justify-content: space-between;
+          font-family: var(--font-mono);
+          font-size: var(--fs-100);
+          color: var(--text-primary);
+          padding: 4px 0;
+        }
+        .cad-import__recent-row span:last-child {
+          color: var(--text-muted);
+        }
+        .cad-import__scan {
+          text-align: center;
+          padding: var(--sp-8) var(--sp-5);
+        }
+        .cad-import__scan-icon {
+          font-family: var(--font-mono);
+          color: var(--accent-text);
+          font-size: 36px;
+          margin-bottom: var(--sp-4);
+        }
+        .cad-import__scan-title {
+          font-size: var(--fs-300);
+          font-weight: var(--fw-semibold);
+          margin-bottom: var(--sp-1);
+        }
+        .cad-import__scan-desc {
+          font-family: var(--font-mono);
+          font-size: var(--fs-100);
+          color: var(--text-muted);
+          margin-bottom: var(--sp-5);
+        }
+        .cad-import__progress-wrap {
+          max-width: 360px;
+          margin: 0 auto;
+        }
+        .cad-import__progress-track {
+          height: 8px;
+          background: var(--bg-subtle);
+          border-radius: 4px;
+          overflow: hidden;
+        }
+        .cad-import__progress-fill {
+          height: 100%;
+          background: var(--accent-interactive);
+          transition: width 0.25s ease-out;
+        }
+        .cad-import__progress-meta {
+          display: flex;
+          justify-content: space-between;
+          font-family: var(--font-mono);
+          font-size: var(--fs-50);
+          color: var(--text-muted);
+          margin-top: var(--sp-2);
+        }
+        .cad-import__log {
+          font-family: var(--font-mono);
+          font-size: var(--fs-50);
+          color: var(--text-muted);
+          text-align: left;
+          line-height: 1.8;
+          max-width: 480px;
+          margin: var(--sp-7) auto 0;
+        }
+        .cad-import__summary {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: var(--sp-3);
+        }
+        .cad-import__summary-ok { color: var(--ok-text); }
+        .cad-import__summary-new { color: var(--accent-text); }
+        .cad-import__meta {
+          font-family: var(--font-mono);
+          font-size: var(--fs-100);
+          color: var(--text-muted);
+        }
+        .cad-import__mono { font-family: var(--font-mono); }
+        .cad-import__footer-count {
+          margin-right: auto;
+          font-size: var(--fs-100);
+          color: var(--text-secondary);
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .cad-import__tile,
+          .cad-import__progress-fill {
+            transition: none;
+          }
+        }
+      `}</style>
     </Modal>
   );
 }
