@@ -26,6 +26,12 @@ down:
 stop: down
 
 uninstall:
+	@echo "WARNING: this will PERMANENTLY DELETE the database, uploaded files, and RSA"
+	@echo "signing keys stored in this stack's Docker volumes. This cannot be undone"
+	@echo "unless you have a backup (scripts/backup-data.ps1 / scripts/backup-data.sh)."
+	@printf "Type YES (all caps) to confirm permanent data deletion: "; \
+	read confirm; \
+	if [ "$$confirm" != "YES" ]; then echo "Aborted -- no changes made."; exit 1; fi
 	docker compose down --volumes --rmi local
 
 logs:
