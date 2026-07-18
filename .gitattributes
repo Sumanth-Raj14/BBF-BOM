@@ -1,0 +1,9 @@
+# Force LF line endings for files that run inside Linux containers or are
+# executed directly as scripts, regardless of the checking-out platform's
+# core.autocrlf setting. A CRLF shebang line (e.g. `#!/bin/sh\r`) fails with
+# "bad interpreter" inside the container.
+*.sh text eol=lf
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf
+docker-compose*.yml text eol=lf
+*.dockerignore text eol=lf

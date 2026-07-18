@@ -2,6 +2,7 @@
 import React from "react";
 import PropTypes from "prop-types";
 import { toast } from "../utils/toast";
+import config from "../config.js";
 export const CollabContext = React.createContext(null);
 export function CollabProvider({ channel, children, onPresence, onDocUpdate }) {
   const wsRef = React.useRef(null);
@@ -17,9 +18,10 @@ export function CollabProvider({ channel, children, onPresence, onDocUpdate }) {
     handlersRef.current = { onPresence, onDocUpdate };
   }, [onPresence, onDocUpdate]);
   const connect = React.useCallback(() => {
-    const wsBase =
-      (window.__BBOX_CONFIG && window.__BBOX_CONFIG.WS_BASE) ||
-      "ws://localhost:8001/ws";
+    // Same-origin WS_BASE from config.js (derived from window.location by
+    // default — see config.js) so this always targets whatever reverse
+    // proxy served the page, matching frontend/nginx.conf's /ws/ route.
+    const wsBase = config.WS_BASE;
     const url = wsBase + "/" + encodeURIComponent(channel || "bom-editor");
     const ws = new WebSocket(url);
     ws.onopen = () => {
