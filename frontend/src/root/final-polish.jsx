@@ -2,12 +2,26 @@ import PropTypes from "prop-types";
 import { storage } from "../utils/storage.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import {
+  Button,
+  Field,
+  Textarea,
+  Checkbox,
+  DataTable,
+  Badge,
+  StatusPill,
+  Tabs,
+  Modal,
+  EmptyState,
+  ScreenHeader,
+} from "../components/ui";
 // Final polish layer: Approvals inbox, Roadmap, Bulk vendor import,
 // Offline indicator, URL-synced filters, Saved searches, Notif prefs, PO PDF.
 // ============ APPROVALS INBOX ============
+const APPROVALS_FILTER_TABS_ID = "approvals-filter-tabs";
 function ApprovalsScreen() {
   const ctx = useAppStore();
-  const [filter, setFilter] = React.useState("All");
+  const [filter, setFilter] = React.useState("all");
   const approvalsList = React.useMemo(() => {
     const out = [];
     if (ctx?.approvals) {
@@ -76,13 +90,26 @@ function ApprovalsScreen() {
     );
     return out;
   }, [ctx?.approvals]);
-  const filtered = approvalsList.filter((a) =>
-    filter === "All"
-      ? true
-      : filter === "Mine"
-        ? ["engineering"].includes(a.role)
-        : filter.toLowerCase() === a.role,
-  );
+  const matchesFilter = (a, f) =>
+    f === "all" ? true : f === "mine" ? a.role === "engineering" : a.role === f;
+  const FILTERS = [
+    { value: "all", label: __t("approvals.filterAll") || "All" },
+    { value: "mine", label: __t("approvals.filterMine") || "Mine" },
+    {
+      value: "engineering",
+      label: __t("approvals.filterEngineering") || "Engineering",
+    },
+    {
+      value: "procurement",
+      label: __t("approvals.filterProcurement") || "Procurement",
+    },
+    { value: "finance", label: __t("approvals.filterFinance") || "Finance" },
+  ];
+  const tabItems = FILTERS.map((f) => ({
+    ...f,
+    count: approvalsList.filter((a) => matchesFilter(a, f.value)).length,
+  }));
+  const filtered = approvalsList.filter((a) => matchesFilter(a, filter));
   const act = (a, action) => {
     if (
       action === "approve" &&
@@ -94,138 +121,130 @@ function ApprovalsScreen() {
       ctx.setApprovals(next);
     }
     toast(
-      `${action === "approve" ? __t("common.approved") || "Approved" : __t("common.rejected") || "Rejected"} \u00B7 ${a.target}`,
+      `${action === "approve" ? __t("common.approved") || "Approved" : __t("common.rejected") || "Rejected"} · ${a.target}`,
       { kind: action === "approve" ? "success" : "warn" },
     );
   };
-  return (
-    <div className="screen-wrap">
-      <div className="screen-header">
+  const columns = [
+    {
+      key: "kind",
+      header: __t("approvals.columnType") || "Type",
+      render: (a) => (
+        <Badge tone="neutral" pill>
+          {a.kind}
+        </Badge>
+      ),
+    },
+    {
+      key: "target",
+      header: __t("approvals.columnItem") || "Item",
+      render: (a) => (
         <div>
-          <h1>{__t("approvals.title") || "Approvals Inbox"}</h1>
-          <div className="sub">
-            {__t("approvals.subtitle", { count: filtered.length }) ||
-              `${filtered.length} pending across BOMs, POs, vendors, and parts`}
+          <div className="fw-600 fs-13">{a.target}</div>
+          <div className="font-mono fs-10 fg-3 mt-2">
+            {__t("approvals.requestInfo", {
+              requester: a.requester,
+              date: a.date,
+              role: a.role.toUpperCase(),
+            }) ||
+              `Requested by ${a.requester} · ${a.date} · Awaiting ${a.role.toUpperCase()}`}
+            {a.value && (
+              <>
+                {" "}
+                · <strong className="fg">{INR(a.value, 0)}</strong>
+              </>
+            )}
           </div>
         </div>
-        <div className="flex gap-8">
-          <button
-            className="btn"
-            onClick={() =>
-              toast(
-                __t("approvals.subscribed") ||
-                  "Subscribed \u00B7 email + Slack alerts on",
-              )
-            }
-          >
-            <Icon.Bell size={12} />{" "}
-            {__t("approvals.notifySettings") || "Notify settings"}
-          </button>
-          <button
-            className="btn primary"
-            onClick={() => {
-              filtered.forEach((a) => act(a, "approve"));
-              toast(
-                __t("approvals.bulkApproved", { count: filtered.length }) ||
-                  `Bulk approved ${filtered.length} items`,
-                { kind: "success" },
-              );
-            }}
-          >
-            <Icon.Check size={12} />{" "}
-            {__t("approvals.approveAll") || "Approve all visible"}
-          </button>
+      ),
+    },
+    {
+      key: "status",
+      header: __t("approvals.columnStatus") || "Status",
+      render: (a) => <StatusPill status={a.status} />,
+    },
+    {
+      key: "actions",
+      header: "",
+      render: (a) => (
+        <div className="flex gap-6 justify-end">
+          <Button variant="secondary" size="sm" onClick={() => act(a, "reject")}>
+            {__t("common.reject") || "Reject"}
+          </Button>
+          <Button variant="primary" size="sm" onClick={() => act(a, "approve")}>
+            <Icon.Check size={11} /> {__t("common.approve") || "Approve"}
+          </Button>
         </div>
-      </div>
-      <div className="flex gap-6 mb-14" style={{ flexWrap: "wrap" }}>
-        {[
-          __t("approvals.filterAll") || "All",
-          __t("approvals.filterMine") || "Mine",
-          __t("approvals.filterEngineering") || "Engineering",
-          __t("approvals.filterProcurement") || "Procurement",
-          __t("approvals.filterFinance") || "Finance",
-        ].map((f) => (
-          <span
-            key={f}
-            className={(
-              "chip " +
-              (f === filter ? "active" : "") +
-              " cursor-pointer"
-            ).trim()}
-            onClick={() => setFilter(f)}
-          >
-            {f}{" "}
-            <span className="fg-4 ml-4">
-              {
-                approvalsList.filter((a) =>
-                  f === "All"
-                    ? true
-                    : f === "Mine"
-                      ? a.role === "engineering"
-                      : a.role === f.toLowerCase(),
-                ).length
+      ),
+    },
+  ];
+  return (
+    <div className="screen-wrap" data-screen-label="Approvals">
+      <ScreenHeader
+        title={__t("approvals.title") || "Approvals Inbox"}
+        description={
+          __t("approvals.subtitle", { count: filtered.length }) ||
+          `${filtered.length} pending across BOMs, POs, vendors, and parts`
+        }
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                toast(
+                  __t("approvals.subscribed") ||
+                    "Subscribed · email + Slack alerts on",
+                )
               }
-            </span>
-          </span>
-        ))}
+            >
+              <Icon.Bell size={12} />{" "}
+              {__t("approvals.notifySettings") || "Notify settings"}
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                filtered.forEach((a) => act(a, "approve"));
+                toast(
+                  __t("approvals.bulkApproved", { count: filtered.length }) ||
+                    `Bulk approved ${filtered.length} items`,
+                  { kind: "success" },
+                );
+              }}
+            >
+              <Icon.Check size={12} />{" "}
+              {__t("approvals.approveAll") || "Approve all visible"}
+            </Button>
+          </>
+        }
+      />
+      <div className="mb-14">
+        <Tabs
+          id={APPROVALS_FILTER_TABS_ID}
+          ariaLabel={__t("approvals.filterBy") || "Filter approvals"}
+          value={filter}
+          onChange={setFilter}
+          items={tabItems}
+        />
       </div>
       {filtered.length === 0 ? (
         <EmptyState
           icon="✓"
           title={__t("approvals.emptyTitle") || "Inbox zero"}
-          description={
+          message={
             __t("approvals.emptyDescription") ||
             "You're all caught up. New approval requests will appear here."
           }
         />
       ) : (
-        <div
-          className="flex flex-col gap-8 oy-auto"
-          style={{ maxHeight: "calc(100vh - 200px)" }}
-        >
-          {filtered.map((a) => (
-            <div
-              key={a.target + "-" + a.kind}
-              className="d-grid gap-14 bg-canvas border-line rounded-r3 items-center"
-              style={{
-                gridTemplateColumns: "120px 1fr 130px auto",
-                padding: 14,
-              }}
-            >
-              <span className="tag-pill" style={{ justifySelf: "start" }}>
-                {a.kind}
-              </span>
-              <div>
-                <div className="fw-600 fs-13">{a.target}</div>
-                <div className="font-mono fs-10 fg-3 mt-2">
-                  {__t("approvals.requestInfo", {
-                    requester: a.requester,
-                    date: a.date,
-                    role: a.role.toUpperCase(),
-                  }) ||
-                    `Requested by ${a.requester} \u00B7 ${a.date} \u00B7 Awaiting ${a.role.toUpperCase()}`}
-                  {a.value && (
-                    <>
-                      {" "}
-                      \u00B7 <strong className="fg">{INR(a.value, 0)}</strong>
-                    </>
-                  )}
-                </div>
-              </div>
-              <span className="status review">{a.status}</span>
-              <div className="flex gap-6">
-                <button className="btn small" onClick={() => act(a, "reject")}>
-                  {__t("common.reject") || "Reject"}
-                </button>
-                <button
-                  className="btn small primary"
-                  onClick={() => act(a, "approve")}
-                >
-                  <Icon.Check size={11} /> {__t("common.approve") || "Approve"}
-                </button>
-              </div>
-            </div>
-          ))}
+        <div style={{ maxHeight: "calc(100vh - 260px)", overflow: "auto" }}>
+          <DataTable
+            columns={columns}
+            rows={filtered}
+            getRowKey={(a) => a.target + "-" + a.kind}
+            ariaLabel={__t("approvals.title") || "Approvals Inbox"}
+          />
         </div>
       )}
     </div>
@@ -284,7 +303,7 @@ function RoadmapModal({ open, onClose }) {
       icon={<Icon.Sparkles size={16} />}
       title={__t("roadmap.title") || "Product Roadmap"}
       subtitle={__t("roadmap.subtitle") || "What we're building next"}
-      wide
+      size="xl"
     >
       <div
         className="d-grid gap-12"
@@ -315,17 +334,20 @@ function RoadmapModal({ open, onClose }) {
               </div>
             ))}
             {col.q.startsWith("Future") && (
-              <button
-                className="btn small w-100p mt-8 justify-center"
+              <Button
+                variant="secondary"
+                size="sm"
+                block
+                className="mt-8 justify-center"
                 onClick={() =>
                   toast(
                     __t("roadmap.voteRecorded") ||
-                      "Vote recorded \u00B7 we'll prioritize based on demand",
+                      "Vote recorded · we'll prioritize based on demand",
                   )
                 }
               >
                 <Icon.Sparkles size={11} /> {__t("roadmap.vote") || "Vote"}
-              </button>
+              </Button>
             )}
           </div>
         ))}
@@ -335,18 +357,19 @@ function RoadmapModal({ open, onClose }) {
         style={{ padding: 12, border: "1px dashed var(--line)" }}
       >
         {__t("roadmap.suggestPrefix") || "Have an idea?"}{" "}
-        <a
-          className="fg-accent cursor-pointer"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => {
             onClose();
             toast(
               __t("roadmap.ideaSubmitted") ||
-                "Idea submitted \u00B7 thank you!",
+                "Idea submitted · thank you!",
             );
           }}
         >
-          {__t("roadmap.suggestAction") || "Suggest a feature \u2192"}
-        </a>
+          {__t("roadmap.suggestAction") || "Suggest a feature →"}
+        </Button>
       </div>
     </Modal>
   );
@@ -405,7 +428,7 @@ LCSC Electronics,CN,7,1,4.2,Prepaid,Med`;
       const newVendors = rows.map((r, i) => ({
         id: "vi" + Date.now() + i,
         name: r[mapping.name] || __t("vendor.unnamed") || "Unnamed",
-        country: r[mapping.country] || "\u2014",
+        country: r[mapping.country] || "—",
         lead: Number(r[mapping.lead]) || 14,
         moq: Number(r[mapping.moq]) || 1,
         rating: Number(r[mapping.rating]) || 4.0,
@@ -423,6 +446,11 @@ LCSC Electronics,CN,7,1,4.2,Prepaid,Med`;
       { kind: "success" },
     );
   };
+  const reviewColumns = FIELDS.map((f) => ({
+    key: f,
+    header: f,
+    render: (r) => r[mapping[f]] || "—",
+  }));
   return (
     <Modal
       open={open}
@@ -436,78 +464,67 @@ LCSC Electronics,CN,7,1,4.2,Prepaid,Med`;
           : __t("vendor.bulkImport.reviewSubtitle", { count: rows.length }) ||
             `Review ${rows.length} vendors`
       }
-      wide
+      size="xl"
       footer={
         step === "review" ? (
           <>
-            <button className="btn" onClick={() => setStep("upload")}>
+            <Button variant="secondary" onClick={() => setStep("upload")}>
               {__t("common.back") || "Back"}
-            </button>
-            <button className="btn primary" onClick={apply}>
+            </Button>
+            <Button variant="primary" onClick={apply}>
               <Icon.Check size={12} />{" "}
               {__t("vendor.bulkImport.import", { count: rows.length }) ||
                 `Import ${rows.length}`}
-            </button>
+            </Button>
           </>
         ) : null
       }
     >
       {step === "upload" && (
         <>
-          <textarea
-            id="vendor-csv"
-            name="vendorCsv"
-            className="input font-mono"
-            style={{ minHeight: 180 }}
-            placeholder={
-              __t("vendor.bulkImport.csvPlaceholder") ||
-              "Vendor Name,Country,Lead Days,MOQ,Rating,Terms,Risk"
-            }
-            value={csvText}
-            onChange={(e) => setCsvText(e.target.value)}
-          />
+          <Field
+            label={__t("vendor.bulkImport.csvLabel") || "Vendor CSV"}
+            htmlFor="vendor-csv"
+          >
+            <Textarea
+              id="vendor-csv"
+              name="vendorCsv"
+              className="font-mono"
+              style={{ minHeight: 180 }}
+              placeholder={
+                __t("vendor.bulkImport.csvPlaceholder") ||
+                "Vendor Name,Country,Lead Days,MOQ,Rating,Terms,Risk"
+              }
+              value={csvText}
+              onChange={(e) => setCsvText(e.target.value)}
+            />
+          </Field>
           <div className="flex justify-between mt-12">
-            <button className="btn small" onClick={loadSample}>
+            <Button variant="secondary" size="sm" onClick={loadSample}>
               <Icon.Sparkles size={11} />{" "}
               {__t("vendor.bulkImport.useSample") || "Use sample data"}
-            </button>
-            <button
-              className="btn primary"
+            </Button>
+            <Button
+              variant="primary"
               onClick={() => parseCSV(csvText)}
               disabled={!csvText.trim()}
             >
-              {__t("vendor.bulkImport.parse") || "Parse \u2192"}
-            </button>
+              {__t("vendor.bulkImport.parse") || "Parse →"}
+            </Button>
           </div>
         </>
       )}
       {step === "review" && (
-        <div
-          className="border-line rounded-r2 overflow-x-a"
-          style={{ maxHeight: 360 }}
-        >
-          <table className="bom-table table-auto">
-            <thead>
-              <tr>
-                {FIELDS.map((f) => (
-                  <th key={f} className="pl-12">
-                    {f}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={r.pn ? r.pn : "row-" + i}>
-                  {FIELDS.map((f) => (
-                    <td key={f} className="mono pl-12">
-                      {r[mapping[f]] || "\u2014"}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div style={{ maxHeight: 360, overflow: "auto" }}>
+          <DataTable
+            columns={reviewColumns}
+            rows={rows}
+            getRowKey={(r, i) => "row-" + i}
+            dense
+            ariaLabel={
+              __t("vendor.bulkImport.reviewTable") || "Vendors to import"
+            }
+          />
         </div>
       )}
     </Modal>
@@ -594,12 +611,12 @@ function NotifPrefsModal({ open, onClose }) {
       }
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {__t("common.cancel") || "Cancel"}
-          </button>
-          <button className="btn primary" onClick={save}>
+          </Button>
+          <Button variant="primary" onClick={save}>
             {__t("notifications.savePrefs") || "Save preferences"}
-          </button>
+          </Button>
         </>
       }
     >
@@ -645,14 +662,12 @@ function NotifPrefsModal({ open, onClose }) {
             {["inapp", "email", "slack"].map((ch) => (
               <div
                 key={ch}
-                className="text-center"
+                className="flex justify-center"
                 style={{ padding: 10, borderTop: "1px solid var(--line-soft)" }}
               >
-                <input
+                <Checkbox
                   id={"notif-" + key + "-" + ch}
                   name={"notif_" + key + "_" + ch}
-                  type="checkbox"
-                  className="row-checkbox w-16 h-16"
                   checked={prefs[key][ch]}
                   onChange={() => toggle(key, ch)}
                   aria-label={name + " " + ch}
@@ -669,7 +684,7 @@ function NotifPrefsModal({ open, onClose }) {
         <span>{__t("notifications.quietHours") || "Quiet hours"}</span>
         <span className="font-mono">
           {__t("notifications.quietHoursValue") ||
-            "8pm \u2014 8am IST \u00B7 weekends off"}
+            "8pm — 8am IST · weekends off"}
         </span>
       </div>
     </Modal>
@@ -703,6 +718,8 @@ function NetworkBadge() {
   if (effective) return null;
   return (
     <div
+      role="status"
+      aria-live="polite"
       style={{
         position: "fixed",
         bottom: 12,
@@ -723,6 +740,7 @@ function NetworkBadge() {
       }}
     >
       <span
+        aria-hidden="true"
         className="w-8 h-8"
         style={{
           borderRadius: 99,
@@ -731,20 +749,17 @@ function NetworkBadge() {
         }}
       />
       {__t("network.offline") ||
-        "OFFLINE \u00B7 Changes saved locally and will sync when reconnected"}
+        "OFFLINE · Changes saved locally and will sync when reconnected"}
       {simulate && (
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => setSimulate(false)}
-          className="ml-6 b-0 fs-10 c-pointer"
-          style={{
-            background: "rgba(255,255,255,0.25)",
-            color: "white",
-            borderRadius: 3,
-            padding: "2px 8px",
-          }}
+          className="ml-6"
+          style={{ color: "white" }}
         >
           {__t("network.reconnect") || "Reconnect"}
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -761,7 +776,7 @@ window.printPO = function (item, vendor) {
     "0",
   );
   const poTitle = item.pn
-    ? "PO \u00B7 " + item.pn
+    ? "PO · " + item.pn
     : __t("printPo.title") || "Purchase Order";
   const h = escapeHtml;
   const html =
@@ -828,9 +843,9 @@ window.printPO = function (item, vendor) {
     "<div class='party'><h3>" +
     h(__t("printPo.shipTo") || "Ship to") +
     "</h3><div class='name'>" +
-    h(__t("printPo.shipToName") || "Blackbox Factories \u00B7 Receiving") +
+    h(__t("printPo.shipToName") || "Blackbox Factories · Receiving") +
     "</div>" +
-    "<div>2451 Engineering Way</div><div>Mountain View, CA 94043 \u00B7 USA</div><div>" +
+    "<div>2451 Engineering Way</div><div>Mountain View, CA 94043 · USA</div><div>" +
     h(__t("printPo.attn") || "Attn: Receiving Dock") +
     "</div></div>" +
     "</div>" +
@@ -841,9 +856,9 @@ window.printPO = function (item, vendor) {
     "</th><th class='r'>" +
     h(__t("printPo.table.qty") || "Qty") +
     "</th><th class='r'>" +
-    h(__t("printPo.table.unit") || "Unit (\u20B9)") +
+    h(__t("printPo.table.unit") || "Unit (₹)") +
     "</th><th class='r'>" +
-    h(__t("printPo.table.ext") || "Ext. (\u20B9)") +
+    h(__t("printPo.table.ext") || "Ext. (₹)") +
     "</th></tr></thead>" +
     "<tbody><tr><td style='font-weight:600'>" +
     h(item.pn) +
@@ -852,12 +867,12 @@ window.printPO = function (item, vendor) {
     "</td><td class='r'>" +
     h(item.qty) +
     "</td>" +
-    "<td class='r'>\u20B9" +
+    "<td class='r'>₹" +
     ((item.cost || 12) * (window.INR_RATE || 83)).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     }) +
     "</td>" +
-    "<td class='r' style='font-weight:600'>\u20B9" +
+    "<td class='r' style='font-weight:600'>₹" +
     (lineCost * (window.INR_RATE || 83)).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     }) +
@@ -865,28 +880,28 @@ window.printPO = function (item, vendor) {
     "<div class='totals'><table>" +
     "<tr><td>" +
     h(__t("printPo.subtotal") || "Subtotal") +
-    "</td><td class='r'>\u20B9" +
+    "</td><td class='r'>₹" +
     (lineCost * (window.INR_RATE || 83)).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     }) +
     "</td></tr>" +
     "<tr><td>" +
     h(__t("printPo.tax") || "Tax (GST 18%)") +
-    "</td><td class='r'>\u20B9" +
+    "</td><td class='r'>₹" +
     (tax * (window.INR_RATE || 83)).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     }) +
     "</td></tr>" +
     "<tr><td>" +
     h(__t("printPo.shipping") || "Shipping") +
-    "</td><td class='r'>\u20B9" +
+    "</td><td class='r'>₹" +
     (ship * (window.INR_RATE || 83)).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     }) +
     "</td></tr>" +
     "<tr class='total'><td>" +
     h(__t("printPo.total") || "TOTAL") +
-    "</td><td class='r'>\u20B9" +
+    "</td><td class='r'>₹" +
     (total * (window.INR_RATE || 83)).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     }) +
@@ -903,18 +918,18 @@ window.printPO = function (item, vendor) {
     "<div class='sign-row'><div class='sig'>" +
     h(
       __t("printPo.authorizedBy") ||
-        "Authorized by Buyer \u00B7 K. Singh, Procurement Lead",
+        "Authorized by Buyer · K. Singh, Procurement Lead",
     ) +
     "</div><div class='sig'>" +
-    h(__t("printPo.acknowledgedBy") || "Acknowledged by Vendor \u00B7 Date") +
+    h(__t("printPo.acknowledgedBy") || "Acknowledged by Vendor · Date") +
     "</div></div>" +
     "<div class='foot'><span>" +
     h(
       __t("printPo.footerLeft") ||
-        "Blackbox Factories \u00B7 GST 29AABCB1234C1Z5",
+        "Blackbox Factories · GST 29AABCB1234C1Z5",
     ) +
     "</span><span>" +
-    h(__t("printPo.footerRight") || "Page 1 of 1 \u00B7 Generated ") +
+    h(__t("printPo.footerRight") || "Page 1 of 1 · Generated ") +
     new Date().toLocaleString() +
     "</span></div>" +
     "<script>setTimeout(function(){window.print()},400)<\/script></body></html>";
