@@ -22,6 +22,8 @@ export default function IntegrationsScreen() {
   const [conns, setConns] = React.useState({});
   const [deliveries, setDeliveries] = React.useState([]);
   const [draft, setDraft] = React.useState({});
+  const [checks, setChecks] = React.useState({});
+  const [checking, setChecking] = React.useState({});
 
   const load = React.useCallback(async () => {
     try {
@@ -62,6 +64,26 @@ export default function IntegrationsScreen() {
       load();
     } catch (e) {
       toast("Test failed: " + (e.message || ""), { kind: "error" });
+    }
+  };
+
+  // Live credential check — separate from `test()` above (which sends a real
+  // delivery through the outbox for observability). This makes one lightweight
+  // authenticated call and reports an honest ok/fail result immediately,
+  // without enqueuing anything or requiring the connection to be enabled.
+  const testConnection = async (p) => {
+    setChecking((s) => ({ ...s, [p.id]: true }));
+    try {
+      const r = await apiRequest(`/integrations/${p.id}/test-connection`, {
+        method: "POST",
+      });
+      setChecks((s) => ({ ...s, [p.id]: r }));
+      toast(`${p.name}: ${r.detail}`, { kind: r.ok ? "success" : "error" });
+      load();
+    } catch (e) {
+      toast("Test connection failed: " + (e.message || ""), { kind: "error" });
+    } finally {
+      setChecking((s) => ({ ...s, [p.id]: false }));
     }
   };
 
@@ -163,6 +185,14 @@ export default function IntegrationsScreen() {
                   <Button
                     variant="secondary"
                     size="md"
+                    onClick={() => testConnection(p)}
+                    disabled={!c.has_credentials || checking[p.id]}
+                  >
+                    {checking[p.id] ? "Checking…" : "Test connection"}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="md"
                     onClick={() => test(p)}
                     disabled={!c.is_enabled}
                   >
@@ -170,6 +200,23 @@ export default function IntegrationsScreen() {
                   </Button>
                 </div>
               </div>
+              {checks[p.id] && (
+                <div
+                  style={{
+                    marginTop: "var(--sp-2, 8px)",
+                    fontSize: "var(--fs-sm, 13px)",
+                    color: checks[p.id].ok ? "var(--success)" : "var(--danger)",
+                  }}
+                >
+                  {checks[p.id].ok ? "Verified" : "Not verified"}:{" "}
+                  {checks[p.id].detail}
+                  {checks[p.id].checked_at
+                    ? ` (checked ${new Date(
+                        checks[p.id].checked_at,
+                      ).toLocaleTimeString()})`
+                    : ""}
+                </div>
+              )}
             </Card>
           );
         })}
