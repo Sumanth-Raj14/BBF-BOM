@@ -1,5 +1,6 @@
 import PropTypes from "prop-types";
 
+import { AppContext } from "../../context/AppCtx.jsx";
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
 import { Icon } from "../../globals";
@@ -13,6 +14,7 @@ import {
   Menu,
   StatusPill,
   Card,
+  Switch,
   DataTable,
 } from "../ui";
 
@@ -31,6 +33,8 @@ const boolCell = (value) => (
 );
 
 export default function SettingsModal({ open, onClose }) {
+  const ctx = React.useContext(AppContext);
+  const { a11yModes = [], toggleA11yMode } = ctx || {};
   const [tab, setTab] = React.useState("general");
   const navRefs = React.useRef([]);
 
@@ -430,6 +434,58 @@ export default function SettingsModal({ open, onClose }) {
                   defaultValue="Internal BOM, procurement, and vendor management for Blackbox internal product dev."
                 />
               </Field>
+
+              <h3 className="fs-14" style={{ margin: "20px 0 4px" }}>
+                {__t("workspace.accessibility") || "Accessibility"}
+              </h3>
+              <p
+                className="fs-11"
+                style={{ color: "var(--text-muted)", margin: "0 0 12px" }}
+              >
+                {__t("workspace.accessibilityDesc") ||
+                  "Applies on top of your light/dark theme — both can be on at once."}
+              </p>
+              <div
+                className="flex items-center justify-between"
+                style={{
+                  padding: "var(--sp-2) 0",
+                  borderBottom: "1px solid var(--border-subtle)",
+                }}
+              >
+                <div>
+                  <div className="fs-12 fw-500">
+                    {__t("workspace.highContrast") || "High-contrast mode"}
+                  </div>
+                  <div className="fs-10" style={{ color: "var(--text-muted)" }}>
+                    {__t("workspace.highContrastDesc") ||
+                      "Stronger borders, higher text contrast, heavier focus rings."}
+                  </div>
+                </div>
+                <Switch
+                  checked={a11yModes.includes("high-contrast")}
+                  onChange={(v) => toggleA11yMode?.("high-contrast", v)}
+                  label={__t("workspace.highContrast") || "High-contrast mode"}
+                />
+              </div>
+              <div
+                className="flex items-center justify-between"
+                style={{ padding: "var(--sp-2) 0" }}
+              >
+                <div>
+                  <div className="fs-12 fw-500">
+                    {__t("workspace.colorblindSafe") || "Colorblind-safe mode"}
+                  </div>
+                  <div className="fs-10" style={{ color: "var(--text-muted)" }}>
+                    {__t("workspace.colorblindSafeDesc") ||
+                      "Distinct status palette plus icons/shapes so status is never color-only."}
+                  </div>
+                </div>
+                <Switch
+                  checked={a11yModes.includes("colorblind-safe")}
+                  onChange={(v) => toggleA11yMode?.("colorblind-safe", v)}
+                  label={__t("workspace.colorblindSafe") || "Colorblind-safe mode"}
+                />
+              </div>
             </>
           )}
           {tab === "members" && (

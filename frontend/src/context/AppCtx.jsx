@@ -71,6 +71,24 @@ function AppCtxProvider({ children }) {
     storage.theme.set(v);
     setThemePrefState(v);
   }, []);
+  // Accessibility modes: array of "high-contrast" / "colorblind-safe" flags
+  // (both/either/neither active at once), persisted via storage.a11y and
+  // composed onto the root as `data-a11y="high-contrast colorblind-safe"`
+  // (see styles.css [data-a11y~=...] rules) — independent of, and layered
+  // on top of, the light/dark theme above.
+  const [a11yModes, setA11yModesState] = React.useState(() =>
+    storage.a11y.get(),
+  );
+  const toggleA11yMode = React.useCallback((mode, enabled) => {
+    setA11yModesState((prev) => {
+      const has = prev.includes(mode);
+      const want = enabled === undefined ? !has : !!enabled;
+      if (want === has) return prev;
+      const next = want ? [...prev, mode] : prev.filter((m) => m !== mode);
+      storage.a11y.set(next);
+      return next;
+    });
+  }, []);
   const [showMobileScan, setShowMobileScan] = React.useState(false);
   const [userRole, setUserRole] = React.useState(() => storage.role.get());
   const [authChecking, setAuthChecking] = React.useState(false);
@@ -264,6 +282,18 @@ function AppCtxProvider({ children }) {
     document.documentElement.setAttribute("data-theme", resolvedTheme);
   }, [resolvedTheme]);
 
+  // Stamp data-a11y before paint, same rationale as data-theme above. An
+  // empty modes array clears the attribute entirely rather than leaving
+  // `data-a11y=""` (both are inert for the [data-a11y~="..."] selectors,
+  // but an absent attribute is cleaner to inspect/debug).
+  React.useLayoutEffect(() => {
+    if (a11yModes.length > 0) {
+      document.documentElement.setAttribute("data-a11y", a11yModes.join(" "));
+    } else {
+      document.documentElement.removeAttribute("data-a11y");
+    }
+  }, [a11yModes]);
+
   React.useEffect(() => {
     document.documentElement.setAttribute("data-density", t.density);
     // Accent-preset AA rethread: a chosen preset must move the *whole* accent
@@ -426,6 +456,8 @@ function AppCtxProvider({ children }) {
     themePref,
     setThemePref,
     resolvedTheme,
+    a11yModes,
+    toggleA11yMode,
     selectedRow,
     setSelectedRow,
     search,

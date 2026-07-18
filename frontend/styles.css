@@ -332,6 +332,155 @@ html, body, .app, .topbar, .navrail, .main, .drawer, .screen-wrap,
   --cell-pad-x: var(--sp-4);  /* 16px */
 }
 
+/* ============================================
+   Accessibility modes — [data-a11y]
+   Space-separated tokens ("high-contrast" and/or
+   "colorblind-safe"), stamped on <html> by AppCtx.jsx
+   and persisted via utils/storage.js (a11y.get/set).
+   Layers on top of [data-theme] and [data-density] —
+   both modes work in light and dark, and either/both
+   can be active at once.
+   ============================================ */
+
+/* ── High-contrast ─────────────────────────────────
+   Stronger borders, higher text/bg contrast (AAA where
+   feasible), heavier focus rings. Theme-scoped (rather
+   than a single un-scoped block) so the boosted values
+   are correct for the surface actually in effect,
+   independent of source order relative to the
+   [data-theme="dark"] block above. */
+:root[data-theme="light"][data-a11y~="high-contrast"] {
+  --border-strong: #5C5C5C;   /* was #CCCCCC */
+  --border-subtle: #8A8A8A;   /* was #E5E5E5 */
+  --text-secondary: #2B2B2B;  /* was #5D5D5D — ~13:1 on white (AAA) */
+  --text-muted: #454545;      /* was #6A6A6A — ~8.4:1 on white (AAA) */
+  --bg-hover: rgba(0, 0, 0, 0.10);
+  --bg-subtle: #E7E7E7;
+  --focus: #8A2E00;           /* darker orange — heavier-contrast ring on white */
+}
+:root[data-theme="dark"][data-a11y~="high-contrast"] {
+  --border-strong: #9A9A9E;
+  --border-subtle: #6C6C70;
+  --text-secondary: #F5F5F3;
+  --text-muted: #DADADC;
+  --bg-hover: rgba(255, 255, 255, 0.16);
+  --bg-subtle: #2E2E32;
+  --focus: #FFB088;
+}
+[data-a11y~="high-contrast"] {
+  --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 5px var(--focus);
+}
+/* Higher-specificity :root[...] compound beats component rules like
+   `.btn:focus-visible { outline: 1px solid ...; }` regardless of the
+   two blocks' relative order in the cascade. */
+:root[data-a11y~="high-contrast"] :focus-visible {
+  outline-width: 3px;
+  outline-offset: 2px;
+}
+[data-a11y~="high-contrast"] .btn,
+[data-a11y~="high-contrast"] .ui-btn,
+[data-a11y~="high-contrast"] .ui-input,
+[data-a11y~="high-contrast"] .ui-select,
+[data-a11y~="high-contrast"] .ui-textarea,
+[data-a11y~="high-contrast"] .ui-card,
+[data-a11y~="high-contrast"] .ui-badge,
+[data-a11y~="high-contrast"] .chip,
+[data-a11y~="high-contrast"] .cat,
+[data-a11y~="high-contrast"] .status {
+  border-width: 1.5px;
+}
+
+/* ── Colorblind-safe ────────────────────────────────
+   Okabe–Ito inspired status palette: four hues chosen to
+   stay distinguishable under protanopia/deuteranopia/
+   tritanopia (not a red/green pair), each still meeting
+   AA text contrast via the paired *-text token. Also
+   drives non-color indicators (shape + glyph) on status
+   dots/badges below so status is never conveyed by hue
+   alone. */
+:root[data-a11y~="colorblind-safe"] {
+  --status-success: #009E73;
+  --status-warning: #C98700;
+  --status-danger:  #D55E00;
+  --status-info:    #0072B2;
+  --status-success-text: #00694F;
+  --status-warning-text: #7A5100;
+  --status-danger-text:  #9A4000;
+  --status-info-text:    #00507A;
+  --ok: var(--status-success);
+  --warn: var(--status-warning);
+  --danger: var(--status-danger);
+  --info: var(--status-info);
+  --ok-text: var(--status-success-text);
+  --warn-text: var(--status-warning-text);
+  --danger-text: var(--status-danger-text);
+  --info-text: var(--status-info-text);
+}
+:root[data-theme="dark"][data-a11y~="colorblind-safe"] {
+  /* Brightened text variants only — same pattern as the base
+     [data-theme="dark"] block: solid fills stay constant, only the
+     *-text tokens (used as actual text color) need to re-clear AA
+     against dark surfaces. */
+  --status-success-text: #4DD9B0;
+  --status-warning-text: #FFC24D;
+  --status-danger-text:  #FF9457;
+  --status-info-text:    #6EC1FF;
+  --ok-text: var(--status-success-text);
+  --warn-text: var(--status-warning-text);
+  --danger-text: var(--status-danger-text);
+  --info-text: var(--status-info-text);
+}
+
+/* Non-color indicators — .ui-status (StatusPill) dot gains a shape
+   (rounded square, not a plain circle) + a per-tone glyph. */
+[data-a11y~="colorblind-safe"] .ui-status__dot {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+}
+[data-a11y~="colorblind-safe"] .ui-status__dot::before { content: "\2022"; }
+[data-a11y~="colorblind-safe"] .ui-status--success .ui-status__dot::before { content: "\2713"; }
+[data-a11y~="colorblind-safe"] .ui-status--warning .ui-status__dot::before { content: "!"; }
+[data-a11y~="colorblind-safe"] .ui-status--danger  .ui-status__dot::before { content: "\00D7"; }
+[data-a11y~="colorblind-safe"] .ui-status--info    .ui-status__dot::before { content: "i"; font-style: italic; }
+[data-a11y~="colorblind-safe"] .ui-status--accent  .ui-status__dot::before { content: "\2605"; font-size: 7px; }
+
+/* Non-color indicators — .ui-badge gains a leading glyph per tone. */
+[data-a11y~="colorblind-safe"] .ui-badge--success::before { content: "\2713\00A0 "; }
+[data-a11y~="colorblind-safe"] .ui-badge--warning::before { content: "!\00A0 "; }
+[data-a11y~="colorblind-safe"] .ui-badge--danger::before  { content: "\00D7\00A0 "; }
+[data-a11y~="colorblind-safe"] .ui-badge--info::before    { content: "i\00A0 "; font-style: italic; }
+
+/* Non-color indicators — legacy BOM-table .status pill dot (styles.css,
+   used by the parts/BOM grid) gets the same shape + glyph treatment. */
+[data-a11y~="colorblind-safe"] .status::before {
+  border-radius: var(--radius-xs);
+  width: 11px;
+  height: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 800;
+  line-height: 1;
+}
+[data-a11y~="colorblind-safe"] .status.released::before   { content: "\2713"; }
+[data-a11y~="colorblind-safe"] .status.approved::before   { content: "i"; font-style: italic; }
+[data-a11y~="colorblind-safe"] .status.review::before     { content: "!"; }
+[data-a11y~="colorblind-safe"] .status.deprecated::before { content: "\00D7"; }
+[data-a11y~="colorblind-safe"] .status.draft::before,
+[data-a11y~="colorblind-safe"] .status.obsolete::before   { content: "\2022"; }
+
 * { box-sizing: border-box; }
 
 html, body {
