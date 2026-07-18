@@ -1,6 +1,15 @@
 import PropTypes from "prop-types";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import {
+  Button,
+  Menu,
+  ScreenHeader,
+  DataTable,
+  StatusPill,
+  Modal,
+  Skeleton,
+} from "../components/ui/index.js";
 // Production-tier additions: error/404/offline screens, Inventory module,
 // In-app guided tour, Pricing/plans modal, optimistic-update retry toast,
 // skeleton/empty illustrations.
@@ -70,9 +79,9 @@ function ErrorScreen({ kind = "error", title, body, action, onAction }) {
       <h2>{p.title}</h2>
       <p>{p.body}</p>
       {action && (
-        <button className="btn primary mt-14" onClick={onAction}>
+        <Button variant="primary" className="mt-14" onClick={onAction}>
           {action}
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -165,9 +174,9 @@ function EmptyState({ icon = "\u2205", title, body, action, onAction }) {
           "Get started by creating your first item."}
       </p>
       {action && (
-        <button className="btn primary mt-16" onClick={onAction}>
+        <Button variant="primary" className="mt-16" onClick={onAction}>
           {action}
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -188,14 +197,7 @@ function SkeletonRows({ count = 6, cols = [80, 200, 80, 60, 100, 80] }) {
           <tr key={"skel-" + i}>
             {cols.map((w, j) => (
               <td key={"sc-" + j} style={{ padding: "10px 12px" }}>
-                <span
-                  className="skeleton"
-                  style={{
-                    display: "inline-block",
-                    width: w + "px",
-                    height: 10,
-                  }}
-                />
+                <Skeleton variant="line" width={w} height={10} />
               </td>
             ))}
           </tr>
@@ -250,83 +252,82 @@ function InventoryScreen() {
   };
   return (
     <div className="screen-wrap">
-      <div className="screen-header">
-        <div>
-          <h1>{__t("inventory.title") || "Inventory"}</h1>
-          <div className="sub">
-            {__t("inventory.subtitle", {
-              count: inventory.length,
-              value: (
-                (totals.value * (window.INR_RATE || 83)) /
-                100000
-              ).toFixed(1),
-            }) ||
-              `${inventory.length} SKUs \u00B7 \u20B9${(totals.value * (window.INR_RATE || 83)).toLocaleString("en-IN", { maximumFractionDigits: 0 })} on hand \u00B7 6 warehouses`}
-          </div>
-        </div>
-        <div className="flex gap-8">
-          <div className="search w-220 h-32">
-            <Icon.Search size={12} />
-            <input
-              id="inv-sku-search"
-              name="skuSearch"
-              placeholder={
-                __t("inventory.searchPlaceholder") || "Search SKU\u2026"
+      <ScreenHeader
+        title={__t("inventory.title") || "Inventory"}
+        description={
+          __t("inventory.subtitle", {
+            count: inventory.length,
+            value: ((totals.value * (window.INR_RATE || 83)) / 100000).toFixed(
+              1,
+            ),
+          }) ||
+          `${inventory.length} SKUs \u00B7 \u20B9${(totals.value * (window.INR_RATE || 83)).toLocaleString("en-IN", { maximumFractionDigits: 0 })} on hand \u00B7 6 warehouses`
+        }
+        actions={
+          <>
+            <div className="search w-220 h-32">
+              <Icon.Search size={12} />
+              <input
+                id="inv-sku-search"
+                name="skuSearch"
+                placeholder={
+                  __t("inventory.searchPlaceholder") || "Search SKU\u2026"
+                }
+                value={iSearch}
+                onChange={(e) => setISearch(e.target.value)}
+                aria-label={__t("inventory.searchAriaLabel") || "Search SKU"}
+              />
+            </div>
+            <Menu
+              ariaLabel={__t("inventory.receiveStock") || "Receive stock"}
+              trigger={
+                <Button variant="secondary">
+                  <Icon.Scan size={12} />{" "}
+                  {__t("inventory.receiveStock") || "Receive stock"}{" "}
+                  <Icon.ChevronDown size={10} />
+                </Button>
               }
-              value={iSearch}
-              onChange={(e) => setISearch(e.target.value)}
-              aria-label={__t("inventory.searchAriaLabel") || "Search SKU"}
-            />
-          </div>
-          <DropdownButton
-            width={180}
-            trigger={
-              <button className="btn">
-                <Icon.Scan size={12} />{" "}
-                {__t("inventory.receiveStock") || "Receive stock"}{" "}
-                <Icon.ChevronDown size={10} />
-              </button>
-            }
-            items={[
-              {
-                icon: <Icon.Scan size={11} />,
-                label: __t("inventory.scanInbound") || "Scan inbound",
-                onClick: () => ctx?.openModal("barcode-scan"),
-              },
-              {
-                icon: <Icon.Import size={11} />,
-                label: __t("inventory.bulkCsv") || "Bulk CSV",
-                onClick: () => ctx?.openModal("bulk-import"),
-              },
-              {
-                icon: <Icon.Plus size={11} />,
-                label: __t("inventory.manualAdjust") || "Manual adjust",
-                onClick: () =>
-                  toast(__t("inventory.adjustStock") || "Adjust stock"),
-              },
-            ]}
-          />
-          <button
-            className="btn primary"
-            onClick={() =>
-              toast(
-                __t("inventory.reorderReport") ||
-                  "Reorder report drafted \u00B7 4 SKUs flagged",
+              items={[
                 {
-                  kind: "success",
-                  action: {
-                    label: __t("inventory.openPo") || "Open PO",
-                    onClick: () => ctx?.openModal("new-po"),
-                  },
+                  icon: <Icon.Scan size={11} />,
+                  label: __t("inventory.scanInbound") || "Scan inbound",
+                  onSelect: () => ctx?.openModal("barcode-scan"),
                 },
-              )
-            }
-          >
-            <Icon.Cart size={12} />{" "}
-            {__t("inventory.reorderLow") || "Reorder low"}
-          </button>
-        </div>
-      </div>
+                {
+                  icon: <Icon.Import size={11} />,
+                  label: __t("inventory.bulkCsv") || "Bulk CSV",
+                  onSelect: () => ctx?.openModal("bulk-import"),
+                },
+                {
+                  icon: <Icon.Plus size={11} />,
+                  label: __t("inventory.manualAdjust") || "Manual adjust",
+                  onSelect: () =>
+                    toast(__t("inventory.adjustStock") || "Adjust stock"),
+                },
+              ]}
+            />
+            <Button
+              variant="primary"
+              onClick={() =>
+                toast(
+                  __t("inventory.reorderReport") ||
+                    "Reorder report drafted \u00B7 4 SKUs flagged",
+                  {
+                    kind: "success",
+                    action: {
+                      label: __t("inventory.openPo") || "Open PO",
+                      onClick: () => ctx?.openModal("new-po"),
+                    },
+                  },
+                )
+              }
+            >
+              <Icon.Cart size={12} />{" "}
+              {__t("inventory.reorderLow") || "Reorder low"}
+            </Button>
+          </>
+        }
+      />
       <div
         className="kpi-grid"
         style={{ gridTemplateColumns: "repeat(4, 1fr)" }}
@@ -371,15 +372,17 @@ function InventoryScreen() {
           __t("inventory.filterLow") || "Low",
           __t("inventory.filterOut") || "Out",
         ].map((s) => (
-          <span
+          <button
             key={s}
-            className={(
-              (
-                "chip " +
-                (s === statusFilter ? "active" : "") +
-                " cursor-pointer"
-              ).trim() + " fg-4 ml-4"
-            ).trim()}
+            type="button"
+            className={[
+              "chip",
+              s === statusFilter ? "active" : "",
+              "fg-4 ml-4",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            aria-pressed={s === statusFilter}
             onClick={() => setStatusFilter(s)}
           >
             {s}{" "}
@@ -388,136 +391,155 @@ function InventoryScreen() {
                 ? inventory.length
                 : totals[s.toLowerCase()]}
             </span>
-          </span>
+          </button>
         ))}
       </div>
-      {filtered.length === 0 ? (
-        <EmptyState
-          icon={"\u2205"}
-          title={__t("inventory.emptyTitle") || "No inventory items match"}
-          body={
-            __t("inventory.emptyBody") ||
-            "Try clearing filters or scanning new stock in."
-          }
-        />
-      ) : (
-        <div className="card overflow-vis">
-          <table className="bom-table table-auto">
-            <thead>
-              <tr>
-                <th className="pl-16">
-                  {__t("inventory.table.partNo") || "Part No."}
-                </th>
-                <th>{__t("inventory.table.name") || "Name"}</th>
-                <th>{__t("inventory.table.bin") || "Bin"}</th>
-                <th className="num">
-                  {__t("inventory.table.onHand") || "On hand"}
-                </th>
-                <th className="num">
-                  {__t("inventory.table.reorderPt") || "Reorder pt"}
-                </th>
-                <th className="num">
-                  {__t("inventory.table.unitCost") || "Unit cost"}
-                </th>
-                <th className="num">
-                  {__t("inventory.table.value") || "Value"}
-                </th>
-                <th>{__t("inventory.table.status") || "Status"}</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => (
-                <tr key={r.id}>
-                  <td className="mono pl-16 fw-600">{r.pn}</td>
-                  <td>{r.name}</td>
-                  <td className="mono fg-3">
-                    {"\uD83D\uDCCD"} {r.bin}
-                  </td>
-                  <td
-                    className="num mono fw-700"
-                    style={{
-                      color:
-                        r.status === "out"
-                          ? "var(--danger)"
-                          : r.status === "low"
-                            ? "var(--warn)"
-                            : "var(--fg)",
-                    }}
+      <DataTable
+        ariaLabel={__t("inventory.title") || "Inventory"}
+        columns={[
+          {
+            key: "pn",
+            header: __t("inventory.table.partNo") || "Part No.",
+            render: (r) => <span className="mono fw-600">{r.pn}</span>,
+          },
+          {
+            key: "name",
+            header: __t("inventory.table.name") || "Name",
+          },
+          {
+            key: "bin",
+            header: __t("inventory.table.bin") || "Bin",
+            render: (r) => (
+              <span className="mono fg-3">
+                {"\uD83D\uDCCD"} {r.bin}
+              </span>
+            ),
+          },
+          {
+            key: "stock",
+            header: __t("inventory.table.onHand") || "On hand",
+            align: "num",
+            render: (r) => (
+              <span
+                className="mono fw-700"
+                style={{
+                  color:
+                    r.status === "out"
+                      ? "var(--danger)"
+                      : r.status === "low"
+                        ? "var(--warn)"
+                        : "var(--fg)",
+                }}
+              >
+                {r.stock}
+              </span>
+            ),
+          },
+          {
+            key: "reorder",
+            header: __t("inventory.table.reorderPt") || "Reorder pt",
+            align: "num",
+            render: (r) => <span className="mono fg-3">{r.reorder}</span>,
+          },
+          {
+            key: "cost",
+            header: __t("inventory.table.unitCost") || "Unit cost",
+            align: "num",
+            render: (r) => <span className="mono">{INR(r.cost, 2)}</span>,
+          },
+          {
+            key: "value",
+            header: __t("inventory.table.value") || "Value",
+            align: "num",
+            render: (r) => (
+              <span className="mono fw-600">
+                {INR(r.stock * (r.cost || 0), 0)}
+              </span>
+            ),
+          },
+          {
+            key: "status",
+            header: __t("inventory.table.status") || "Status",
+            render: (r) => (
+              <StatusPill
+                tone={
+                  r.status === "ok"
+                    ? "success"
+                    : r.status === "low"
+                      ? "warning"
+                      : "danger"
+                }
+                label={
+                  r.status === "ok"
+                    ? __t("inventory.statusInStock") || "In stock"
+                    : r.status === "low"
+                      ? __t("inventory.statusLow") || "Low"
+                      : __t("inventory.statusOut") || "Out"
+                }
+              />
+            ),
+          },
+          {
+            key: "actions",
+            header: "",
+            render: (r) => (
+              <Menu
+                ariaLabel={__t("inventory.moreOptions") || "More options"}
+                align="right"
+                trigger={
+                  <button
+                    className="icon-btn w-22 h-22"
+                    aria-label={
+                      __t("inventory.moreOptions") || "More options"
+                    }
                   >
-                    {r.stock}
-                  </td>
-                  <td className="num mono fg-3">{r.reorder}</td>
-                  <td className="num mono">{INR(r.cost, 2)}</td>
-                  <td className="num mono fw-600">
-                    {INR(r.stock * (r.cost || 0), 0)}
-                  </td>
-                  <td>
-                    <span
-                      className={
-                        "status " +
-                        (r.status === "ok"
-                          ? "released"
-                          : r.status === "low"
-                            ? "review"
-                            : "deprecated")
-                      }
-                    >
-                      {r.status === "ok"
-                        ? __t("inventory.statusInStock") || "In stock"
-                        : r.status === "low"
-                          ? __t("inventory.statusLow") || "Low"
-                          : __t("inventory.statusOut") || "Out"}
-                    </span>
-                  </td>
-                  <td>
-                    <DropdownButton
-                      width={180}
-                      trigger={
-                        <button
-                          className="icon-btn w-22 h-22"
-                          aria-label={
-                            __t("inventory.moreOptions") || "More options"
-                          }
-                        >
-                          <Icon.Dots size={11} />
-                        </button>
-                      }
-                      items={[
-                        {
-                          icon: <Icon.Cart size={11} />,
-                          label: __t("inventory.reorder") || "Reorder",
-                          onClick: () =>
-                            toast(
-                              __t("inventory.draftedPo", { pn: r.pn }) ||
-                                "Drafted PO for " + r.pn,
-                            ),
-                        },
-                        {
-                          icon: <Icon.Edit size={11} />,
-                          label: __t("inventory.adjustStock") || "Adjust stock",
-                          onClick: () =>
-                            toast(__t("inventory.adjusted") || "Adjusted"),
-                        },
-                        {
-                          icon: <Icon.Scan size={11} />,
-                          label:
-                            __t("inventory.printBinLabel") || "Print bin label",
-                          onClick: () =>
-                            toast(
-                              __t("inventory.printing", { bin: r.bin }) ||
-                                "Printing " + r.bin,
-                            ),
-                        },
-                      ]}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+                    <Icon.Dots size={11} />
+                  </button>
+                }
+                items={[
+                  {
+                    icon: <Icon.Cart size={11} />,
+                    label: __t("inventory.reorder") || "Reorder",
+                    onSelect: () =>
+                      toast(
+                        __t("inventory.draftedPo", { pn: r.pn }) ||
+                          "Drafted PO for " + r.pn,
+                      ),
+                  },
+                  {
+                    icon: <Icon.Edit size={11} />,
+                    label: __t("inventory.adjustStock") || "Adjust stock",
+                    onSelect: () =>
+                      toast(__t("inventory.adjusted") || "Adjusted"),
+                  },
+                  {
+                    icon: <Icon.Scan size={11} />,
+                    label:
+                      __t("inventory.printBinLabel") || "Print bin label",
+                    onSelect: () =>
+                      toast(
+                        __t("inventory.printing", { bin: r.bin }) ||
+                          "Printing " + r.bin,
+                      ),
+                  },
+                ]}
+              />
+            ),
+          },
+        ]}
+        rows={filtered}
+        getRowKey={(r) => r.id}
+        empty={
+          <EmptyState
+            icon={"\u2205"}
+            title={__t("inventory.emptyTitle") || "No inventory items match"}
+            body={
+              __t("inventory.emptyBody") ||
+              "Try clearing filters or scanning new stock in."
+            }
+          />
+        }
+      />
     </div>
   );
 }
@@ -602,7 +624,7 @@ function PricingModal({ open, onClose }) {
       subtitle={
         __t("pricing.subtitle") || "Choose the plan that fits your team"
       }
-      wide
+      size="xl"
     >
       <div
         className="d-grid gap-10"
@@ -651,23 +673,24 @@ function PricingModal({ open, onClose }) {
             >
               {p.features.map((f) => (
                 <li key={f} className="flex gap-6" style={{ padding: "3px 0" }}>
-                  <span className="fg-ok">\u2713</span> {f}
+                  <span className="fg-ok" aria-hidden="true">
+                    {"\u2713"}
+                  </span>{" "}
+                  {f}
                 </li>
               ))}
             </ul>
-            <button
-              className={(
-                "btn " +
-                (p.best ? "primary" : "") +
-                " w-100p justify-center"
-              ).trim()}
+            <Button
+              variant={p.best ? "primary" : "secondary"}
+              block
+              className="justify-center"
               onClick={() => {
                 onClose();
                 toast(p.cta + " \u00B7 " + p.name);
               }}
             >
               {p.cta}
-            </button>
+            </Button>
           </div>
         ))}
       </div>
@@ -776,20 +799,22 @@ function ProductTour({ onClose }) {
           {stepData.body}
         </div>
         <div className="flex justify-between items-center">
-          <button
-            onClick={onClose}
-            className="bg-transparent b-0 fg-3 fs-11 c-pointer"
-          >
+          <Button variant="ghost" size="sm" onClick={onClose}>
             {__t("tour.skip") || "Skip tour"}
-          </button>
+          </Button>
           <div className="flex gap-6">
             {step > 0 && (
-              <button className="btn small" onClick={() => setStep(step - 1)}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setStep(step - 1)}
+              >
                 {__t("common.back") || "Back"}
-              </button>
+              </Button>
             )}
-            <button
-              className="btn primary small"
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() =>
                 step === TOUR_STEPS.length - 1 ? onClose() : setStep(step + 1)
               }
@@ -797,7 +822,7 @@ function ProductTour({ onClose }) {
               {step === TOUR_STEPS.length - 1
                 ? __t("tour.finish") || "Finish"
                 : __t("common.next") || "Next \u2192"}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
