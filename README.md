@@ -54,9 +54,35 @@ re-running `docker compose up` on an existing install is safe and won't
 re-seed or touch your data. Named volumes (`pgdata`, `backend_backups`,
 `backend_uploads`, `rsa_keys`) persist across restarts and rebuilds.
 
-To move the app to a new PC: copy the repo (or `git clone`) + your `.env`
-(keep it secret, never commit it), install Docker, and run the two commands
-above again.
+**To move the app to a new PC (fresh, no existing data):** copy the repo
+(or `git clone`) + your `.env` (keep it secret, never commit it), install
+Docker, and run the two commands above again — a brand-new, empty, migrated
+database is created automatically.
+
+**To move the app to a new PC WITH your existing data** (database + uploaded
+files + RSA signing keys): on the OLD machine, with the stack running, take
+a data snapshot with the included backup script —
+
+```bash
+./scripts/backup-data.sh        # or: .\scripts\backup-data.ps1 on Windows
+```
+
+— this writes `backups/<timestamp>/` (`db.dump`, `uploads.tar.gz`,
+`rsa_keys.tar.gz`). Copy the repo + your `.env` + that `backups/<timestamp>/`
+folder to the NEW machine, install Docker, bring up a fresh stack, then load
+the snapshot into it:
+
+```bash
+docker compose up --build -d
+./scripts/restore-data.sh backups/<timestamp>   # or restore-data.ps1
+```
+
+This replaces the new stack's (still-empty) database, uploads, and RSA keys
+with the ones from the old machine, so existing accounts, data, and signed
+sessions/tokens carry over. See `scripts/backup-data.sh` /
+`scripts/restore-data.sh` for details — both are plain Docker Compose calls
+(`pg_dump`/`pg_restore` + tar over `docker compose cp`), no extra tooling
+required.
 
 ### Docker (Production, full stack — monitoring/MinIO/pgBackRest)
 ```bash

@@ -4,7 +4,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 RUN groupadd -r bom && useradd -r -g bom -d /app -s /sbin/nologin bom && \
-    mkdir -p /backups /rsa_keys /wal_archive /app/logs && \
+    mkdir -p /backups /rsa_keys /wal_archive /app/logs /app/uploads && \
     chown -R bom:bom /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
