@@ -12,6 +12,7 @@ import {
   Badge,
   StatusPill,
   Tabs,
+  TabPanel,
   EmptyState,
   ScreenHeader,
 } from "../components/ui/index.js";
@@ -411,6 +412,7 @@ function ERPConnectorsScreen() {
   );
 }
 // ============ WEBHOOK MANAGEMENT ============
+const WEBHOOKS_TABS_ID = "webhooks-tabs";
 function WebhooksScreen() {
   const [subscriptions, setSubscriptions] = React.useState([]);
   const [deliveries, setDeliveries] = React.useState([]);
@@ -656,6 +658,7 @@ function WebhooksScreen() {
         }
       />
       <Tabs
+        id={WEBHOOKS_TABS_ID}
         className="mb-12"
         ariaLabel={__t("integrations.webhooks.title") || "Webhooks"}
         value={activeTab}
@@ -716,7 +719,11 @@ function WebhooksScreen() {
           </div>
         </Card>
       )}
-      {activeTab === "subscriptions" ? (
+      <TabPanel
+        id={WEBHOOKS_TABS_ID}
+        value="subscriptions"
+        active={activeTab === "subscriptions"}
+      >
         <Card bodyClassName="p-0">
           {loading ? (
             SkeletonTable({ rows: 3, cols: 5 })
@@ -737,7 +744,12 @@ function WebhooksScreen() {
             />
           )}
         </Card>
-      ) : (
+      </TabPanel>
+      <TabPanel
+        id={WEBHOOKS_TABS_ID}
+        value="deliveries"
+        active={activeTab === "deliveries"}
+      >
         <Card bodyClassName="p-0">
           {deliveriesLoading ? (
             SkeletonTable({ rows: 5, cols: 6 })
@@ -756,7 +768,7 @@ function WebhooksScreen() {
             />
           )}
         </Card>
-      )}
+      </TabPanel>
       {confirmDeleteId !== null && (
         <window.ConfirmModal
           open
@@ -1360,6 +1372,7 @@ function SupplierPortalScreen() {
   );
 }
 // ============ AI & AUTOMATION ============
+const AI_AUTOMATION_TABS_ID = "ai-automation-tabs";
 function AIFeaturesScreen() {
   const [tab, setTab] = React.useState("forecast");
   const [forecasts, setForecasts] = React.useState([]);
@@ -1483,6 +1496,7 @@ function AIFeaturesScreen() {
         }
       />
       <Tabs
+        id={AI_AUTOMATION_TABS_ID}
         className="mb-12"
         ariaLabel={__t("integrations.ai.title") || "AI & Automation"}
         value={tab}
@@ -1494,7 +1508,7 @@ function AIFeaturesScreen() {
           { value: "automation", label: __t("integrations.ai.tabAutomation") || "Approval Automation" },
         ]}
       />
-      {tab === "forecast" && (
+      <TabPanel id={AI_AUTOMATION_TABS_ID} value="forecast" active={tab === "forecast"}>
         <Card>
           <div className="flex justify-between items-center px-16 py-10">
             <span className="fw-600 fs-11 uppercase letter-sp-6 fg-3">
@@ -1560,8 +1574,8 @@ function AIFeaturesScreen() {
             </table>
           )}
         </Card>
-      )}
-      {tab === "interchange" && (
+      </TabPanel>
+      <TabPanel id={AI_AUTOMATION_TABS_ID} value="interchange" active={tab === "interchange"}>
         <Card>
           <div className="flex justify-between items-center px-16 py-10">
             <span className="fw-600 fs-11 uppercase letter-sp-6 fg-3">
@@ -1646,8 +1660,8 @@ function AIFeaturesScreen() {
             </table>
           )}
         </Card>
-      )}
-      {tab === "validation" && (
+      </TabPanel>
+      <TabPanel id={AI_AUTOMATION_TABS_ID} value="validation" active={tab === "validation"}>
         <Card>
           <div className="flex justify-between items-center px-16 py-10">
             <span className="fw-600 fs-11 uppercase letter-sp-6 fg-3">
@@ -1724,8 +1738,8 @@ function AIFeaturesScreen() {
             </table>
           )}
         </Card>
-      )}
-      {tab === "automation" && (
+      </TabPanel>
+      <TabPanel id={AI_AUTOMATION_TABS_ID} value="automation" active={tab === "automation"}>
         <Card title={__t("integrations.ai.automationSection") || "Approval Automation Rules"}>
           {loading ? (
             SkeletonCards({ count: 4 })
@@ -1762,7 +1776,7 @@ function AIFeaturesScreen() {
             </div>
           )}
         </Card>
-      )}
+      </TabPanel>
     </div>
   );
 }

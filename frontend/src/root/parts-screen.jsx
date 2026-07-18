@@ -10,6 +10,7 @@ import {
   EmptyState,
   DataTable,
   Tabs,
+  TabPanel,
 } from "../components/ui/index.js";
 // Component Library — full catalog with facets, search, grid/list, dups.
 // Keyboard operability for the active-filter removal chips (role="button"
@@ -288,6 +289,7 @@ function detectDuplicates(parts) {
     });
   return groups;
 }
+const PARTS_VIEW_TABS_ID = "parts-view-tabs";
 function PartsScreen({ openModal, onOpenDetail }) {
   PartsScreen.propTypes = {
     openModal: PropTypes.func,
@@ -517,6 +519,7 @@ function PartsScreen({ openModal, onOpenDetail }) {
           )}
         </div>
         <Tabs
+          id={PARTS_VIEW_TABS_ID}
           ariaLabel={__t("parts.viewMode") || "View mode"}
           value={view}
           onChange={setView}
@@ -1005,25 +1008,38 @@ function PartsScreen({ openModal, onOpenDetail }) {
                 </Button>
               }
             />
-          ) : view === "grid" ? (
-            <PartsGrid
-              parts={filtered}
-              selectedIds={selectedIds}
-              setSelectedIds={setSelectedIds}
-              onOpenDetail={onOpenDetail}
-              dupGroups={dupGroups}
-              addPartToBom={addPartToBom}
-            />
           ) : (
-            <PartsList
-              parts={filtered}
-              selectedIds={selectedIds}
-              setSelectedIds={setSelectedIds}
-              onOpenDetail={onOpenDetail}
-              toggleSelectAll={toggleSelectAll}
-              dupGroups={dupGroups}
-              addPartToBom={addPartToBom}
-            />
+            <>
+              <TabPanel
+                id={PARTS_VIEW_TABS_ID}
+                value="grid"
+                active={view === "grid"}
+              >
+                <PartsGrid
+                  parts={filtered}
+                  selectedIds={selectedIds}
+                  setSelectedIds={setSelectedIds}
+                  onOpenDetail={onOpenDetail}
+                  dupGroups={dupGroups}
+                  addPartToBom={addPartToBom}
+                />
+              </TabPanel>
+              <TabPanel
+                id={PARTS_VIEW_TABS_ID}
+                value="list"
+                active={view === "list"}
+              >
+                <PartsList
+                  parts={filtered}
+                  selectedIds={selectedIds}
+                  setSelectedIds={setSelectedIds}
+                  onOpenDetail={onOpenDetail}
+                  toggleSelectAll={toggleSelectAll}
+                  dupGroups={dupGroups}
+                  addPartToBom={addPartToBom}
+                />
+              </TabPanel>
+            </>
           )}
         </main>
       </div>

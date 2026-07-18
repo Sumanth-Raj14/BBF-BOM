@@ -6,12 +6,14 @@ import {
   Badge,
   StatusPill,
   Tabs,
+  TabPanel,
   Card,
   Field,
   Textarea,
   EmptyState,
 } from "../components/ui/index.js";
 // Component Detail Drawer — opens when a row is selected.
+const DRAWER_TABS_ID = "detail-drawer-tabs";
 function Drawer({ row, onClose, data, openModal, overlay }) {
   const ctx = useAppStore();
   const [tab, setTab] = React.useState("specs");
@@ -119,6 +121,7 @@ function Drawer({ row, onClose, data, openModal, overlay }) {
           </Button>
         </div>
         <Tabs
+          id={DRAWER_TABS_ID}
           ariaLabel={__t("detailDrawer.tabs") || "Component detail tabs"}
           value={tab}
           onChange={setTab}
@@ -140,22 +143,32 @@ function Drawer({ row, onClose, data, openModal, overlay }) {
           ]}
         />
         <div className="drawer-body">
-          {tab === "specs" && (
+          <TabPanel id={DRAWER_TABS_ID} value="specs" active={tab === "specs"}>
             <SpecsTab
               row={row}
               ext={ext}
               approval={approval}
               approvalKey={approvalKey}
             />
-          )}
-          {tab === "vendors" && (
+          </TabPanel>
+          <TabPanel id={DRAWER_TABS_ID} value="vendors" active={tab === "vendors"}>
             <VendorsTab row={row} data={data} openModal={openModal} />
-          )}
-          {tab === "where-used" && <WhereUsedTab row={row} />}
-          {tab === "files" && <FilesTab row={row} openModal={openModal} />}
-          {tab === "barcode" && <BarcodeTab row={row} />}
-          {tab === "comments" && <CommentsTab row={row} />}
-          {tab === "history" && <HistoryTab row={row} />}
+          </TabPanel>
+          <TabPanel id={DRAWER_TABS_ID} value="where-used" active={tab === "where-used"}>
+            <WhereUsedTab row={row} />
+          </TabPanel>
+          <TabPanel id={DRAWER_TABS_ID} value="files" active={tab === "files"}>
+            <FilesTab row={row} openModal={openModal} />
+          </TabPanel>
+          <TabPanel id={DRAWER_TABS_ID} value="barcode" active={tab === "barcode"}>
+            <BarcodeTab row={row} />
+          </TabPanel>
+          <TabPanel id={DRAWER_TABS_ID} value="comments" active={tab === "comments"}>
+            <CommentsTab row={row} />
+          </TabPanel>
+          <TabPanel id={DRAWER_TABS_ID} value="history" active={tab === "history"}>
+            <HistoryTab row={row} />
+          </TabPanel>
         </div>
       </div>
     </>
