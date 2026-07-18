@@ -53,6 +53,7 @@ from app.api.endpoints import (
     should_cost,
     solidworks_integration,
     sso,
+    substance_compliance_api,
     supplier_portal,
     supplier_scorecard,
     teams,

@@ -284,6 +284,14 @@ api_router.include_router(
     tags=["compliance"],
 )
 
+# RoHS/REACH substance compliance (substance catalog, part composition,
+# derived part/BOM compliance) — see frontend/api.js substanceComplianceAPI.
+api_router.include_router(
+    endpoints.substance_compliance_api.router,
+    prefix="/substance-compliance",
+    tags=["substance-compliance"],
+)
+
 # API Key Management
 api_router.include_router(
     endpoints.api_keys.router,
