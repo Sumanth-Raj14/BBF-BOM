@@ -221,9 +221,37 @@ async def _zoho_po_body(db, conn, row, *, is_update: bool) -> dict:
             plink = await _zoho_link(db, row.tenantId, "part", ln.partId)
             if plink:
                 li["item_id"] = plink.external_id
+        # Round-trip the Books line_item_id on UPDATE so Books edits the existing
+        # line instead of appending a duplicate (spec §4.2 — deferred from 2a).
+        if is_update:
+            line_link = await _zoho_link(db, row.tenantId, "po_line", ln.id)
+            if line_link:
+                li["line_item_id"] = line_link.external_id
         items.append(li)
     body["line_items"] = items
     return body
+
+
+async def _persist_po_line_links(db, row, record):
+    """After a PO CREATE, persist each Books line_item_id against its local
+    POLineItem (matched by push order) so subsequent PO updates carry the id and
+    do not duplicate lines (spec §4.2 line-id round-trip)."""
+    from app.models.po_models import POLineItem
+
+    zoho_lines = (record or {}).get("line_items") or []
+    if not zoho_lines:
+        return
+    local_lines = (await db.execute(select(POLineItem).where(
+        POLineItem.headerId == row.entity_id).order_by(POLineItem.id))).scalars().all()
+    for local_ln, zline in zip(local_lines, zoho_lines):
+        lid = zline.get("line_item_id")
+        if not lid:
+            continue
+        exists = await _zoho_link(db, row.tenantId, "po_line", local_ln.id)
+        if exists is None:
+            db.add(IntegrationExternalLink(
+                tenantId=row.tenantId, provider="zoho_books", entity_type="po_line",
+                entity_id=local_ln.id, external_id=str(lid)))
 
 
 def _canonical_checksum(body: dict) -> str:
@@ -301,6 +329,9 @@ async def _deliver_zoho_books(db, conn, row, client):
                 tenantId=row.tenantId, provider="zoho_books",
                 entity_type=row.entity_type, entity_id=row.entity_id,
                 external_id=str(external_id)))
+        # Capture Books line ids so PO updates edit lines instead of duplicating.
+        if persist_link and row.entity_type == "purchase_order":
+            await _persist_po_line_links(db, row, record)
         event = "push_create"
 
     if persist_link:

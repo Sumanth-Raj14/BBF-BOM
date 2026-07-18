@@ -35,7 +35,12 @@ logger = logging.getLogger(__name__)
 
 _backup_task = None
 _integration_drain_task = None
+_zoho_poll_task = None
 _INTEGRATION_DRAIN_INTERVAL_SECONDS = 15
+# Scheduler tick for the Zoho inbound poll. Faster than the smallest per-tenant
+# sync_cadence_seconds (default 300s); the poller gates each connection by its
+# own cadence, so this only bounds how quickly a due connection is picked up.
+_ZOHO_POLL_TICK_SECONDS = 60
 
 
 async def _run_integration_drainer(interval: int = _INTEGRATION_DRAIN_INTERVAL_SECONDS):
@@ -53,6 +58,23 @@ async def _run_integration_drainer(interval: int = _INTEGRATION_DRAIN_INTERVAL_S
                 logger.info("Integration outbox drained: %s", result)
         except Exception as e:
             logger.error("Integration outbox drain failed: %s", e)
+        await asyncio.sleep(interval)
+
+
+async def _run_zoho_poll_scheduler(interval: int = _ZOHO_POLL_TICK_SECONDS):
+    """Periodically run the Zoho Books INBOUND poll (Books -> tool) with its OWN
+    DB session, mirroring the outbox drainer (spec §4.4). Only ENABLED zoho_books
+    connections are polled, each gated by its own sync_cadence_seconds; a
+    tenant-less run establishes per-tenant context internally (spec §4.0)."""
+    from app.integrations.zoho_inbound import poll_zoho_inbound_once
+
+    while True:
+        try:
+            result = await poll_zoho_inbound_once(respect_cadence=True)
+            if result:
+                logger.info("Zoho inbound poll: %s", result)
+        except Exception as e:
+            logger.error("Zoho inbound poll failed: %s", e)
         await asyncio.sleep(interval)
 
 
@@ -153,10 +175,12 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Backup system OK (%d existing backups)", backup_count)
 
-    global _backup_task, _integration_drain_task
+    global _backup_task, _integration_drain_task, _zoho_poll_task
     _backup_task = asyncio.create_task(_run_backup_scheduler())
     _integration_drain_task = asyncio.create_task(_run_integration_drainer())
     logger.info("Integration outbox drainer scheduled (every %ds)", _INTEGRATION_DRAIN_INTERVAL_SECONDS)
+    _zoho_poll_task = asyncio.create_task(_run_zoho_poll_scheduler())
+    logger.info("Zoho Books inbound poll scheduled (tick %ds)", _ZOHO_POLL_TICK_SECONDS)
 
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -178,6 +202,8 @@ async def lifespan(app: FastAPI):
         _backup_task.cancel()
     if _integration_drain_task:
         _integration_drain_task.cancel()
+    if _zoho_poll_task:
+        _zoho_poll_task.cancel()
     try:
         from app.db.session import get_engine
 

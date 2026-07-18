@@ -25,6 +25,11 @@ from app.db.session import get_db
 from app.integrations.events import emit_integration_event
 from app.integrations.worker import _sanitize_error, deliver_pending
 from app.integrations.zoho_client import ZohoBooksClient
+from app.integrations.zoho_inbound import (
+    poll_connection,
+    reconcile_connection,
+    resolve_conflict,
+)
 from app.integrations.zoho_oauth import (
     ZOHO_DC,
     accounts_host,
@@ -39,7 +44,7 @@ from app.models.part import Part
 from app.models.po_models import POHeader
 from app.models.user import User
 from app.models.vendor import Vendor
-from app.models.zoho_sync import ZohoSyncCursor, ZohoSyncState
+from app.models.zoho_sync import ZohoSyncCursor, ZohoSyncLog, ZohoSyncState
 
 router = APIRouter()
 
@@ -70,6 +75,10 @@ class OAuthStartRequest(BaseModel):
 
 class SelectOrgRequest(BaseModel):
     organization_id: str
+
+
+class ResolveConflictRequest(BaseModel):
+    resolution: str  # tool_wins | books_wins
 
 
 async def _get_conn(db: AsyncSession, tenant_id: int) -> IntegrationConnection | None:
@@ -285,36 +294,59 @@ async def trigger_sync(
     entity_type: str,
     entity_id: int | None = Query(None),
     direction: str = Query("push"),
+    mode: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_superuser),
 ):
-    """Manual outbound sync trigger (spec §6). `direction=push` only in this
-    increment; `pull`/`both` and `mode=reconcile` are inbound (increment 2b) and
-    return an explicit 501 rather than a fake success.
+    """Manual sync trigger (spec §6).
 
-    With an `entity_id`, enqueues that one entity; without, flushes this
-    tenant's pending outbox rows. Delivery is scoped to the caller's tenant.
+    - `mode=reconcile` → one-time natural-key initial-link reconciliation.
+    - `direction=push`  → enqueue + flush this tenant's outbox (tool → Books).
+    - `direction=pull`  → run the inbound poll for this entity (Books → tool).
+    - `direction=both`  → push then pull.
+
+    With an `entity_id` (push only), enqueues that one entity; without, flushes
+    this tenant's pending rows. All work is scoped to the caller's tenant.
     """
     if entity_type not in _ENTITY_TYPES:
         raise HTTPException(422, "unknown entity_type")
-    if direction != "push":
-        raise HTTPException(501, "only direction=push is implemented in this increment")
+    if direction not in ("push", "pull", "both"):
+        raise HTTPException(422, "direction must be push|pull|both")
 
     conn = await _get_conn(db, user.tenantId)
     if conn is None or not conn.is_enabled:
         raise HTTPException(400, "zoho_books is not connected/enabled")
 
-    enqueued = 0
-    if entity_id is not None:
-        snap = await _load_snapshot(db, entity_type, entity_id)
-        if snap is None:
-            raise HTTPException(404, f"{entity_type} {entity_id} not found")
-        enqueued = await emit_integration_event(
-            db, user.tenantId, entity_type, entity_id, "manual_sync", snap)
-        await db.commit()
+    out: dict = {}
 
-    result = await deliver_pending(db, limit=50, tenant_id=user.tenantId)
-    return {"enqueued": enqueued, "delivery": result}
+    if mode == "reconcile":
+        client = ZohoBooksClient.from_connection(conn)
+        try:
+            recon = await reconcile_connection(db, conn, client, entity_types=[entity_type])
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(502, f"reconcile failed: {_sanitize_error(e)}")
+        return {"mode": "reconcile", "reconcile": recon}
+
+    if direction in ("push", "both"):
+        enqueued = 0
+        if entity_id is not None:
+            snap = await _load_snapshot(db, entity_type, entity_id)
+            if snap is None:
+                raise HTTPException(404, f"{entity_type} {entity_id} not found")
+            enqueued = await emit_integration_event(
+                db, user.tenantId, entity_type, entity_id, "manual_sync", snap)
+            await db.commit()
+        out["enqueued"] = enqueued
+        out["delivery"] = await deliver_pending(db, limit=50, tenant_id=user.tenantId)
+
+    if direction in ("pull", "both"):
+        client = ZohoBooksClient.from_connection(conn)
+        try:
+            out["pull"] = await poll_connection(db, conn, client, entity_types=[entity_type])
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(502, f"pull failed: {_sanitize_error(e)}")
+
+    return out
 
 
 @router.get("/sync/status")
@@ -379,3 +411,51 @@ async def list_mappings(
             "last_synced_at": st.last_synced_at.isoformat() if st and st.last_synced_at else None,
         })
     return {"entity_type": entity_type, "mappings": out}
+
+
+# --- Conflict review queue (spec §4.5/§6) -----------------------------------
+
+@router.get("/conflicts")
+async def list_conflicts(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Open monetary conflicts awaiting manual resolution — ZohoSyncLog rows with
+    event='conflict_detected' still unresolved (status='conflict')."""
+    rows = (await db.execute(select(ZohoSyncLog).where(
+        ZohoSyncLog.tenantId == user.tenantId,
+        ZohoSyncLog.event == "conflict_detected",
+        ZohoSyncLog.resolution.is_(None)).order_by(ZohoSyncLog.id.desc()))).scalars().all()
+    return {"conflicts": [
+        {
+            "id": r.id,
+            "entity_type": r.entity_type,
+            "entity_id": r.entity_id,
+            "external_id": r.external_id,
+            "field_diffs": r.field_diffs,
+            "status": r.status,
+            "message": r.message,
+            "createdAt": r.createdAt.isoformat() if r.createdAt else None,
+        }
+        for r in rows
+    ]}
+
+
+@router.post("/conflicts/{conflict_id}/resolve")
+async def resolve_conflict_endpoint(
+    conflict_id: int,
+    body: ResolveConflictRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_superuser),
+):
+    """Apply the chosen value (`tool_wins` | `books_wins`), re-baseline
+    ZohoSyncState so the conflict does not re-detect, and audit the resolution
+    (spec §4.5)."""
+    try:
+        row = await resolve_conflict(
+            db, user.tenantId, conflict_id, body.resolution, resolved_by=user.id)
+    except ValueError as e:
+        msg = str(e)
+        raise HTTPException(404 if "not found" in msg else 400, msg)
+    await db.commit()
+    return {"id": row.id, "resolution": row.resolution, "status": row.status}

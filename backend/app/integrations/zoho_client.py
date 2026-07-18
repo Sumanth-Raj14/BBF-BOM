@@ -32,16 +32,20 @@ from app.integrations.zoho_oauth import (
 _TOKEN_SKEW_SECONDS = 300
 _HTTP_TIMEOUT = 15
 
-# entity_type -> (module path segment, create/update record key, id field).
+# entity_type -> (module path segment, create/update record key, id field, list key).
 # The record key is the singular wrapper Books returns/accepts; the id field is
-# the opaque Zoho id stored in IntegrationExternalLink.external_id.
+# the opaque Zoho id stored in IntegrationExternalLink.external_id; the list key
+# is the plural array Books returns on GET /{module} (used by the inbound poll).
 ZOHO_MODULES: dict[str, dict[str, str]] = {
-    "part": {"module": "items", "record": "item", "id_field": "item_id"},
-    "vendor": {"module": "contacts", "record": "contact", "id_field": "contact_id"},
+    "part": {"module": "items", "record": "item", "id_field": "item_id", "list": "items"},
+    "vendor": {
+        "module": "contacts", "record": "contact", "id_field": "contact_id", "list": "contacts",
+    },
     "purchase_order": {
         "module": "purchaseorders",
         "record": "purchaseorder",
         "id_field": "purchaseorder_id",
+        "list": "purchaseorders",
     },
 }
 
@@ -183,6 +187,16 @@ class ZohoBooksClient:
     async def update_record(self, module: str, external_id: str, payload: dict) -> dict:
         """PUT /{module}/{external_id} — update an existing Books record."""
         return await self._request("PUT", f"/{module}/{external_id}", json=payload)
+
+    async def list_records(self, module: str, *, params: dict | None = None) -> dict:
+        """GET /{module} — one page of records for the incremental inbound poll
+        (spec §4.4). Returns the full Books body so the caller reads both the
+        record array (module 'list' key) and `page_context.has_more_page`.
+
+        Raises httpx.HTTPStatusError on any 4xx/5xx (e.g. 429 rate limit) so the
+        poller can classify/back off honestly — never a silent empty page.
+        """
+        return await self._request("GET", f"/{module}", params=params)
 
     async def list_settings(self, kind: str) -> dict:
         """Per-org settings lookup (currencies|taxes|chartofaccounts) used to
