@@ -146,6 +146,23 @@ describe('storage utility', () => {
     expect(storage.comments.get({})['key']).toHaveLength(1);
   });
 
+  it('should handle a11y domain methods', () => {
+    expect(storage.a11y.get()).toEqual([]);
+    storage.a11y.set(['high-contrast']);
+    expect(storage.a11y.get()).toEqual(['high-contrast']);
+    storage.a11y.set(['high-contrast', 'colorblind-safe']);
+    expect(storage.a11y.get()).toEqual(['high-contrast', 'colorblind-safe']);
+    storage.a11y.set([]);
+    expect(storage.a11y.get()).toEqual([]);
+  });
+
+  it('a11y domain falls back to [] on corrupted/non-array data', () => {
+    localStorage.setItem(KEYS.A11Y, '{not valid json!!!}');
+    expect(storage.a11y.get()).toEqual([]);
+    localStorage.setItem(KEYS.A11Y, JSON.stringify({ not: 'an array' }));
+    expect(storage.a11y.get()).toEqual([]);
+  });
+
   it('checklist domain isolates dismissed state from list items', () => {
     storage.checklist.dismiss();
     expect(storage.checklist.isDismissed()).toBe(true);

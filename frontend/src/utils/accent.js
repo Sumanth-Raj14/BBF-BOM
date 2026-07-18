@@ -108,6 +108,22 @@ function darkenForContrast(hex, target, against = "#ffffff") {
   return out;
 }
 
+/** Lighten `hex` (raise HSL lightness) until it clears `target` contrast vs `against`.
+ * Mirror of darkenForContrast, used for dark-surface text (light-on-dark
+ * needs a *brighter* tone to hit AA, not a darker one). */
+function lightenForContrast(hex, target, against) {
+  const [h, s, l0] = rgbToHsl(...hexToRgb(hex));
+  let l = l0;
+  let out = hex;
+  let steps = 0;
+  while (contrastRatio(out, against) < target && l < 0.98 && steps < 200) {
+    l += 0.01;
+    out = toHex(hslToRgb(h, s, l));
+    steps++;
+  }
+  return out;
+}
+
 function darkenByAmount(hex, amount) {
   const [h, s, l] = rgbToHsl(...hexToRgb(hex));
   return toHex(hslToRgb(h, s, Math.max(0, l - amount)));
@@ -160,8 +176,29 @@ const KNOWN_PRESETS = {
   },
 };
 
-/** Full token set for a preset/custom accent hex — locked pair if known, else derived. */
-export function accentTokensFor(hex) {
+// Dark-theme reference surface for --accent-text contrast targeting. Chosen
+// as the *lightest* of the dark palette's backgrounds (matches dark
+// --bg-subtle in styles.css) so a value that clears AA against it also
+// clears AA against the darker --bg-app/--bg-surface dark tones.
+const DARK_TEXT_CONTRAST_BG = "#232326";
+
+/** Full token set for a preset/custom accent hex — locked pair if known, else derived.
+ * `theme` ("light" | "dark") only affects --accent-text/--accent-subtle: the
+ * light-tuned values in KNOWN_PRESETS/deriveAccentTokens are darkened for AA
+ * against a *white* surface, which reads as under-4.5:1 text on a dark
+ * surface (verified: the shipped default #B8480F is ~3.3:1 on dark
+ * --bg-subtle). --accent-interactive/--accent-strong/--focus/--accent-hover
+ * keep their light values in dark mode too — they either sit under a fixed
+ * white foreground (buttons) or only need the 3:1 non-text threshold
+ * (borders/rings), which the existing hues already clear on dark surfaces. */
+export function accentTokensFor(hex, theme = "light") {
   const known = KNOWN_PRESETS[String(hex).toLowerCase()];
-  return known || deriveAccentTokens(hex);
+  const tokens = known ? { ...known } : deriveAccentTokens(hex);
+  if (theme !== "dark") return tokens;
+  const base = tokens["--accent-interactive"];
+  return {
+    ...tokens,
+    "--accent-text": lightenForContrast(base, 4.5, DARK_TEXT_CONTRAST_BG),
+    "--accent-subtle": hexToRgba(base, 0.2),
+  };
 }

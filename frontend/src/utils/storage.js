@@ -18,6 +18,8 @@ export const KEYS = {
   SAVED_SEARCHES: "__bbox_saved_searches",
   SUPPLIER_USERS: "__bbox_supplier_users",
   NAV_COLLAPSED: "__bbox_nav_collapsed",
+  THEME: "__bbox_theme",
+  A11Y: "__bbox_a11y",
 };
 
 function get(key, fallback = null) {
@@ -183,5 +185,25 @@ export const storage = {
     // Persisted collapsed state for the primary navigation rail.
     getCollapsed: () => get(KEYS.NAV_COLLAPSED) === "1",
     setCollapsed: (v) => set(KEYS.NAV_COLLAPSED, v ? "1" : "0"),
+  },
+
+  theme: {
+    // "light" | "dark" | "system" — "system" follows prefers-color-scheme
+    // (see AppCtx.jsx). Defaults to "system" so a fresh install respects the
+    // OS setting rather than silently forcing light mode.
+    get: () => get(KEYS.THEME, "system"),
+    set: (v) => set(KEYS.THEME, v),
+  },
+
+  a11y: {
+    // Array of active accessibility-mode flags, e.g. ["high-contrast",
+    // "colorblind-safe"] — both/either/neither can be active at once, and
+    // they compose with theme (see styles.css [data-a11y] rules and
+    // AppCtx.jsx, which joins this array into the `data-a11y` root attribute).
+    get: () => {
+      const v = getJSON(KEYS.A11Y, []);
+      return Array.isArray(v) ? v : [];
+    },
+    set: (modes) => setJSON(KEYS.A11Y, Array.isArray(modes) ? modes : []),
   },
 };

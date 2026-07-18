@@ -54,6 +54,41 @@ function AppCtxProvider({ children }) {
   const [onboardingDone, setOnboardingDone] = React.useState(() =>
     storage.onboarding.isDone(),
   );
+  // Theme: "light" | "dark" | "system" (persisted). "system" resolves via
+  // prefers-color-scheme, tracked live through a matchMedia listener below
+  // so an OS-level theme change is reflected without a reload.
+  const [themePref, setThemePrefState] = React.useState(() =>
+    storage.theme.get(),
+  );
+  const [systemPrefersDark, setSystemPrefersDark] = React.useState(() =>
+    typeof window !== "undefined" && window.matchMedia
+      ? window.matchMedia("(prefers-color-scheme: dark)").matches
+      : false,
+  );
+  const resolvedTheme =
+    themePref === "system" ? (systemPrefersDark ? "dark" : "light") : themePref;
+  const setThemePref = React.useCallback((v) => {
+    storage.theme.set(v);
+    setThemePrefState(v);
+  }, []);
+  // Accessibility modes: array of "high-contrast" / "colorblind-safe" flags
+  // (both/either/neither active at once), persisted via storage.a11y and
+  // composed onto the root as `data-a11y="high-contrast colorblind-safe"`
+  // (see styles.css [data-a11y~=...] rules) — independent of, and layered
+  // on top of, the light/dark theme above.
+  const [a11yModes, setA11yModesState] = React.useState(() =>
+    storage.a11y.get(),
+  );
+  const toggleA11yMode = React.useCallback((mode, enabled) => {
+    setA11yModesState((prev) => {
+      const has = prev.includes(mode);
+      const want = enabled === undefined ? !has : !!enabled;
+      if (want === has) return prev;
+      const next = want ? [...prev, mode] : prev.filter((m) => m !== mode);
+      storage.a11y.set(next);
+      return next;
+    });
+  }, []);
   const [showMobileScan, setShowMobileScan] = React.useState(false);
   const [userRole, setUserRole] = React.useState(() => storage.role.get());
   const [authChecking, setAuthChecking] = React.useState(false);
@@ -229,20 +264,51 @@ function AppCtxProvider({ children }) {
   // this only governs the slide-in overlay + scrim below the breakpoint.
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
 
+  // Live-track the OS theme so themePref === "system" updates without a
+  // reload when the user flips their OS between light/dark.
   React.useEffect(() => {
-    // Dark mode was removed (a real AA dark theme is a later build); the app is
-    // light-only. Density + accent remain user-adjustable via Tweaks.
+    if (typeof window === "undefined" || !window.matchMedia) return undefined;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = (e) => setSystemPrefersDark(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  // Stamp data-theme before paint (useLayoutEffect, matching the
+  // data-nav-collapsed pattern in NavRail.jsx) to avoid a flash of the
+  // wrong theme. styles.css defines a complete :root[data-theme="dark"]
+  // token override that every component consumes automatically.
+  React.useLayoutEffect(() => {
+    document.documentElement.setAttribute("data-theme", resolvedTheme);
+  }, [resolvedTheme]);
+
+  // Stamp data-a11y before paint, same rationale as data-theme above. An
+  // empty modes array clears the attribute entirely rather than leaving
+  // `data-a11y=""` (both are inert for the [data-a11y~="..."] selectors,
+  // but an absent attribute is cleaner to inspect/debug).
+  React.useLayoutEffect(() => {
+    if (a11yModes.length > 0) {
+      document.documentElement.setAttribute("data-a11y", a11yModes.join(" "));
+    } else {
+      document.documentElement.removeAttribute("data-a11y");
+    }
+  }, [a11yModes]);
+
+  React.useEffect(() => {
     document.documentElement.setAttribute("data-density", t.density);
     // Accent-preset AA rethread: a chosen preset must move the *whole* accent
     // family together (interactive/hover/strong/strong-hover/text/focus/subtle),
     // not just the single legacy --accent alias — otherwise components reading
     // --accent-strong/--accent-text/--focus directly stay desynced on the
     // default orange while --accent-driven chrome follows the new pick.
-    const tokens = accentTokensFor(t.accent);
+    // Threading resolvedTheme through re-derives --accent-text/--accent-subtle
+    // for dark surfaces (utils/accent.js) — the light-tuned values otherwise
+    // stay pinned as an inline style, overriding the CSS dark-token fallback.
+    const tokens = accentTokensFor(t.accent, resolvedTheme);
     for (const [prop, value] of Object.entries(tokens)) {
       document.documentElement.style.setProperty(prop, value);
     }
-  }, [t.density, t.accent]);
+  }, [t.density, t.accent, resolvedTheme]);
 
   React.useEffect(() => {
     // Hydrate the canonical bom_items_master lines for the active BOM so
@@ -387,6 +453,11 @@ function AppCtxProvider({ children }) {
     t,
     gridDensity,
     setTweak,
+    themePref,
+    setThemePref,
+    resolvedTheme,
+    a11yModes,
+    toggleA11yMode,
     selectedRow,
     setSelectedRow,
     search,

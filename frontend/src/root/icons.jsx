@@ -263,6 +263,17 @@ export const Icon = {
   Moon: (p) => (
     <ICO {...p} d={<path d="M13 9.5A5.5 5.5 0 016.5 3a5.5 5.5 0 109 6.5z" />} />
   ),
+  Monitor: (p) => (
+    <ICO
+      {...p}
+      d={
+        <>
+          <rect x="2" y="3" width="12" height="8" rx="1" />
+          <path d="M6 13h4M8 11v2" />
+        </>
+      }
+    />
+  ),
   Check: (p) => <ICO {...p} d={<path d="M3 8l3 3 7-7" />} />,
   Up: (p) => <ICO {...p} d={<path d="M4 10l4-4 4 4" />} />,
   Down: (p) => <ICO {...p} d={<path d="M4 6l4 4 4-4" />} />,

@@ -35,13 +35,13 @@ services:
     image: redis:7-alpine
     container_name: bom_redis
     restart: unless-stopped
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-bom_redis_secret}", "--appendonly", "yes"]
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required. Set it in .env or environment.}", "--appendonly", "yes"]
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-bom_redis_secret}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD is required. Set it in .env or environment.}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -54,9 +54,9 @@ services:
     container_name: bom_api
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-bom_user}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB:-bom_db}
-      - REDIS_URL=${REDIS_URL:-redis://:${REDIS_PASSWORD:-bom_redis_secret}@redis:6379/0}
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-bom_redis_secret}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-bom_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required. Set it in .env or environment.}@postgres/${POSTGRES_DB:-bom_db}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required. Set it in .env or environment.}@redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required. Set it in .env or environment.}
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required. Set it in .env or environment.}
       - ALGORITHM=RS256
       - RSA_KEY_DIR=${RSA_KEY_DIR:-/rsa_keys}
