@@ -383,3 +383,108 @@ def test_migration_040_downgrade_always_gated_on_dialect_only(monkeypatch):
     executed_sql = " ".join(str(c.args[0]) for c in fake_bind.execute.call_args_list)
     assert "DISABLE ROW LEVEL SECURITY" in executed_sql
     assert "tenant_isolation_auth_bootstrap" in executed_sql
+
+
+# ---------------------------------------------------------------------------
+# Review-fix coverage: migration 041 must apply RLS to e_signatures itself
+# (important finding) -- 040's dynamic information_schema.columns scan runs
+# BEFORE 041 creates the table, so it can never see e_signatures without a
+# future re-run/backfill. 041 must not rely on that and must install the
+# same tenant_isolation policy directly, gated identically to 040.
+# ---------------------------------------------------------------------------
+
+
+def _load_migration_041():
+    import importlib.util
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "alembic"
+        / "versions"
+        / "041_part11_esignatures.py"
+    )
+    spec = importlib.util.spec_from_file_location("rls_migration_041_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_migration_041_noop_rls_on_sqlite(monkeypatch):
+    """Ordinary test/dev path (SQLite): table creation happens, no RLS SQL."""
+    monkeypatch.setattr(settings, "ENABLE_RLS", True)
+    mod = _load_migration_041()
+
+    fake_bind = MagicMock()
+    fake_bind.dialect.name = "sqlite"
+    fake_op = MagicMock()
+    fake_op.get_bind.return_value = fake_bind
+    monkeypatch.setattr(mod, "op", fake_op)
+
+    mod.upgrade()
+
+    executed_sql = " ".join(str(c.args[0]) for c in fake_bind.execute.call_args_list)
+    assert "ROW LEVEL SECURITY" not in executed_sql
+    assert "tenant_isolation" not in executed_sql
+
+
+def test_migration_041_noop_rls_on_postgres_when_flag_disabled(monkeypatch):
+    """A routine deploy (ENABLE_RLS default False) must not force RLS on the
+    brand-new e_signatures table either."""
+    monkeypatch.setattr(settings, "ENABLE_RLS", False)
+    mod = _load_migration_041()
+
+    fake_bind = MagicMock()
+    fake_bind.dialect.name = "postgresql"
+    fake_op = MagicMock()
+    fake_op.get_bind.return_value = fake_bind
+    monkeypatch.setattr(mod, "op", fake_op)
+
+    mod.upgrade()
+
+    executed_sql = " ".join(str(c.args[0]) for c in fake_bind.execute.call_args_list)
+    assert "ROW LEVEL SECURITY" not in executed_sql
+    assert "tenant_isolation" not in executed_sql
+
+
+def test_migration_041_applies_rls_to_e_signatures_when_flag_true_on_postgres(monkeypatch):
+    """When ENABLE_RLS is True at migration time on Postgres, 041 must install
+    ENABLE/FORCE ROW LEVEL SECURITY + the tenant_isolation policy directly on
+    e_signatures itself -- not rely on 040 (which already ran, before this
+    table existed) to have done it."""
+    monkeypatch.setattr(settings, "ENABLE_RLS", True)
+    mod = _load_migration_041()
+
+    fake_bind = MagicMock()
+    fake_bind.dialect.name = "postgresql"
+    fake_op = MagicMock()
+    fake_op.get_bind.return_value = fake_bind
+    monkeypatch.setattr(mod, "op", fake_op)
+
+    mod.upgrade()
+
+    executed_sql = " ".join(str(c.args[0]) for c in fake_bind.execute.call_args_list)
+    assert 'ENABLE ROW LEVEL SECURITY' in executed_sql
+    assert 'FORCE ROW LEVEL SECURITY' in executed_sql
+    assert '"e_signatures"' in executed_sql
+    assert "tenant_isolation" in executed_sql
+
+
+def test_migration_041_downgrade_drops_policy_gated_on_dialect_only(monkeypatch):
+    """downgrade() must remain able to clean up the policy/RLS state
+    regardless of the flag's current value, matching 040's downgrade
+    posture."""
+    monkeypatch.setattr(settings, "ENABLE_RLS", False)
+    mod = _load_migration_041()
+
+    fake_bind = MagicMock()
+    fake_bind.dialect.name = "postgresql"
+    fake_op = MagicMock()
+    fake_op.get_bind.return_value = fake_bind
+    monkeypatch.setattr(mod, "op", fake_op)
+
+    mod.downgrade()
+
+    executed_sql = " ".join(str(c.args[0]) for c in fake_bind.execute.call_args_list)
+    assert "DISABLE ROW LEVEL SECURITY" in executed_sql
+    assert '"e_signatures"' in executed_sql
