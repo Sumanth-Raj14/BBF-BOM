@@ -1,7 +1,7 @@
 import PropTypes from "prop-types";
-import { Z } from "../utils/design-tokens.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import { Button, Field, Input, Select, Modal } from "../components/ui";
 // Auth screens + Onboarding wizard + Mobile scan view + Role context.
 // These attach to window so app.jsx can show them based on app state.
 // ============ ROLES & PERMISSIONS ============
@@ -168,38 +168,45 @@ function AuthScreen({ onSignIn }) {
                 className="d-grid gap-8 mb-14"
                 style={{ gridTemplateColumns: "1fr 1fr" }}
               >
-                <button
-                  className="btn justify-center"
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  block
                   onClick={() => sso("Google")}
                   disabled={loading}
-                  style={{ height: 38 }}
                 >
                   <span
                     className="font-mono fw-700 fs-13"
                     style={{ color: "#4285F4" }}
+                    aria-hidden="true"
                   >
                     G
                   </span>{" "}
                   Google
-                </button>
-                <button
-                  className="btn justify-center"
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  block
                   onClick={() => sso("Microsoft")}
                   disabled={loading}
-                  style={{ height: 38 }}
                 >
-                  <span className="font-mono fw-700 fs-13">⊞</span>{" "}
+                  <span className="font-mono fw-700 fs-13" aria-hidden="true">
+                    ⊞
+                  </span>{" "}
                   {__t("auth.ssoMicrosoft")}
-                </button>
+                </Button>
               </div>
-              <button
-                className="btn w-100p justify-center mb-14"
+              <Button
+                variant="secondary"
+                size="lg"
+                block
+                className="mb-14"
                 onClick={() => sso("SAML SSO")}
                 disabled={loading}
-                style={{ height: 38 }}
               >
                 <Icon.Link size={12} /> {__t("auth.ssoSaml")}
-              </button>
+              </Button>
               <div
                 className="flex items-center gap-10 fg-4 fs-10 font-mono letter-sp-8"
                 style={{ margin: "16px 0" }}
@@ -217,52 +224,57 @@ function AuthScreen({ onSignIn }) {
             </>
           )}
           <form onSubmit={submit}>
-            <div className="field">
-              <label htmlFor="auth-email">{__t("auth.email")}</label>
-              <input
+            <Field label={__t("auth.email")} htmlFor="auth-email">
+              <Input
                 id="auth-email"
                 name="email"
                 autoFocus
-                className="input mono"
+                mono
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder={__t("auth.emailPlaceholder")}
                 type="email"
               />
-            </div>
+            </Field>
             {mode !== "forgot" && (
-              <div className="field">
-                <label htmlFor="auth-password">
-                  {__t("auth.password")}{" "}
-                  {mode === "signin" && (
-                    <span
-                      className="c-pointer fg-accent"
-                      style={{
-                        float: "right",
-                        fontFamily: "inherit",
-                        textTransform: "none",
-                        letterSpacing: 0,
-                      }}
-                      onClick={() => setMode("forgot")}
-                    >
-                      {__t("auth.forgotShort")}
-                    </span>
-                  )}
-                </label>
-                <input
+              <Field
+                htmlFor="auth-password"
+                label={
+                  <>
+                    {__t("auth.password")}{" "}
+                    {mode === "signin" && (
+                      <button
+                        type="button"
+                        className="bg-transparent b-0 p-0 fg-accent cursor-pointer fs-12"
+                        style={{
+                          float: "right",
+                          fontFamily: "inherit",
+                          textTransform: "none",
+                          letterSpacing: 0,
+                        }}
+                        onClick={() => setMode("forgot")}
+                      >
+                        {__t("auth.forgotShort")}
+                      </button>
+                    )}
+                  </>
+                }
+              >
+                <Input
                   id="auth-password"
                   name="password"
-                  className="input mono"
+                  mono
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder={__t("auth.passwordPlaceholder")}
                   type="password"
                 />
-              </div>
+              </Field>
             )}
             {err && (
               <div
                 className="rounded-r2 fg-danger fs-11 font-mono mb-12"
+                role="alert"
                 style={{
                   padding: 8,
                   background:
@@ -273,60 +285,60 @@ function AuthScreen({ onSignIn }) {
                 {err}
               </div>
             )}
-            <button
+            <Button
               type="submit"
-              className="btn primary w-100p justify-center mt-4"
-              disabled={loading}
-              style={{ height: 38 }}
+              variant="primary"
+              size="lg"
+              block
+              className="mt-4"
+              loading={loading}
             >
-              {loading ? (
-                <>
-                  <span className="spinner" />{" "}
-                  {mode === "signin"
-                    ? __t("auth.signingIn")
-                    : mode === "signup"
-                      ? __t("auth.creating")
-                      : __t("auth.sending")}
-                </>
-              ) : mode === "signin" ? (
-                __t("auth.signIn")
-              ) : mode === "signup" ? (
-                __t("auth.createWorkspace")
-              ) : (
-                __t("auth.sendResetLink")
-              )}
-            </button>
+              {loading
+                ? mode === "signin"
+                  ? __t("auth.signingIn")
+                  : mode === "signup"
+                    ? __t("auth.creating")
+                    : __t("auth.sending")
+                : mode === "signin"
+                  ? __t("auth.signIn")
+                  : mode === "signup"
+                    ? __t("auth.createWorkspace")
+                    : __t("auth.sendResetLink")}
+            </Button>
           </form>
           <div className="text-center fs-12 fg-3" style={{ marginTop: 18 }}>
             {mode === "signin" && (
               <>
                 {__t("auth.newToBlackbox")}{" "}
-                <a
+                <button
+                  type="button"
                   onClick={() => setMode("signup")}
-                  className="fg-accent cursor-pointer fw-600"
+                  className="bg-transparent b-0 p-0 fg-accent cursor-pointer fw-600 fs-12"
                 >
                   {__t("auth.createAccount")}
-                </a>
+                </button>
               </>
             )}
             {mode === "signup" && (
               <>
                 {__t("auth.alreadyHaveAccount")}{" "}
-                <a
+                <button
+                  type="button"
                   onClick={() => setMode("signin")}
-                  className="fg-accent cursor-pointer fw-600"
+                  className="bg-transparent b-0 p-0 fg-accent cursor-pointer fw-600 fs-12"
                 >
                   {__t("auth.signIn")}
-                </a>
+                </button>
               </>
             )}
             {mode === "forgot" && (
-              <a
+              <button
+                type="button"
                 onClick={() => setMode("signin")}
-                className="fg-accent cursor-pointer fw-600"
+                className="bg-transparent b-0 p-0 fg-accent cursor-pointer fw-600 fs-12"
               >
                 {__t("auth.backToSignIn")}
-              </a>
+              </button>
             )}
           </div>
         </div>
@@ -388,12 +400,14 @@ function OnboardingWizard({ user, onComplete }) {
           {__t("app.brandBlackbox")} {__t("app.brandBom")}
         </div>
         <div className="flex-1" />
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => onComplete({})}
-          className="bg-transparent b-0 fg-3 fs-11 c-pointer font-mono"
+          className="font-mono"
         >
           {__t("onboarding.skipSetup")}
-        </button>
+        </Button>
       </div>
       <div className="ob-progress">
         {steps.map((s, i) => (
@@ -402,6 +416,7 @@ function OnboardingWizard({ user, onComplete }) {
               className={
                 "ob-dot " + (i < step ? "done" : i === step ? "active" : "")
               }
+              aria-hidden="true"
             >
               {i < step ? "✓" : i + 1}
             </span>
@@ -417,22 +432,32 @@ function OnboardingWizard({ user, onComplete }) {
           </div>
         ))}
       </div>
-      <div className="ob-content">
+      <div
+        className="ob-content"
+        role="group"
+        aria-label={__t("onboarding.stepOf", {
+          current: step + 1,
+          total: total,
+        })}
+      >
         {step === 0 && (
           <>
             <h1>{__t("onboarding.nameWorkspace")}</h1>
             <p>{__t("onboarding.nameWorkspaceDesc")}</p>
-            <div className="field" style={{ maxWidth: 420 }}>
-              <label>{__t("onboarding.workspaceName")}</label>
-              <input
-                id="ob-workspace"
-                name="workspaceName"
-                autoFocus
-                className="input"
-                value={workspaceName}
-                onChange={(e) => setWorkspaceName(e.target.value)}
-                placeholder={__t("onboarding.workspacePlaceholder")}
-              />
+            <div style={{ maxWidth: 420 }}>
+              <Field
+                label={__t("onboarding.workspaceName")}
+                htmlFor="ob-workspace"
+              >
+                <Input
+                  id="ob-workspace"
+                  name="workspaceName"
+                  autoFocus
+                  value={workspaceName}
+                  onChange={(e) => setWorkspaceName(e.target.value)}
+                  placeholder={__t("onboarding.workspacePlaceholder")}
+                />
+              </Field>
             </div>
             <div className="fs-11 fg-3 font-mono mt-8">
               {__t("onboarding.urlLabel")}{" "}
@@ -452,6 +477,8 @@ function OnboardingWizard({ user, onComplete }) {
             <div
               className="d-grid gap-10"
               style={{ gridTemplateColumns: "repeat(2, 1fr)", maxWidth: 520 }}
+              role="radiogroup"
+              aria-label={__t("onboarding.whatsYourRole")}
             >
               {[
                 { id: "Admin", desc: __t("onboarding.roleAdmin") },
@@ -461,6 +488,9 @@ function OnboardingWizard({ user, onComplete }) {
               ].map((r) => (
                 <button
                   key={r.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={role === r.id}
                   onClick={() => setRole(r.id)}
                   style={{
                     padding: 14,
@@ -490,10 +520,11 @@ function OnboardingWizard({ user, onComplete }) {
             <div style={{ maxWidth: 480 }}>
               {invites.map((inv, i) => (
                 <div key={inv + "-" + i} className="flex gap-6 mb-6">
-                  <input
+                  <Input
                     id={"ob-invite-" + i}
                     name="inviteEmail"
-                    className="input mono"
+                    mono
+                    className="flex-1"
                     placeholder={__t("onboarding.invitePlaceholder")}
                     value={inv}
                     onChange={(e) => {
@@ -503,10 +534,9 @@ function OnboardingWizard({ user, onComplete }) {
                     }}
                     aria-label={"Invite email " + (i + 1)}
                   />
-                  <select
+                  <Select
                     id={"ob-invite-role-" + i}
                     name="inviteRole"
-                    className="select"
                     style={{ width: 140 }}
                     aria-label={"Invite role " + (i + 1)}
                   >
@@ -514,26 +544,28 @@ function OnboardingWizard({ user, onComplete }) {
                     <option>Procurement</option>
                     <option>Finance</option>
                     <option>Viewer</option>
-                  </select>
+                  </Select>
                   {invites.length > 1 && (
-                    <button
-                      className="icon-btn w-32 h-32"
+                    <Button
+                      variant="ghost"
+                      iconOnly
                       aria-label={__t("onboarding.inviteRemove")}
                       onClick={() =>
                         setInvites(invites.filter((_, j) => j !== i))
                       }
                     >
                       <Icon.X size={12} />
-                    </button>
+                    </Button>
                   )}
                 </div>
               ))}
-              <button
-                className="btn small"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => setInvites([...invites, ""])}
               >
                 <Icon.Plus size={11} /> {__t("onboarding.inviteAdd")}
-              </button>
+              </Button>
             </div>
           </>
         )}
@@ -572,7 +604,10 @@ function OnboardingWizard({ user, onComplete }) {
                       : "var(--bg)",
                   }}
                 >
-                  <span className="w-36 h-36 rounded-r2 bg-sunk inline-flex items-center justify-center font-mono fs-18 fg-2">
+                  <span
+                    className="w-36 h-36 rounded-r2 bg-sunk inline-flex items-center justify-center font-mono fs-18 fg-2"
+                    aria-hidden="true"
+                  >
                     {it.icon}
                   </span>
                   <div className="flex-1">
@@ -604,6 +639,8 @@ function OnboardingWizard({ user, onComplete }) {
             <div
               className="d-grid gap-10"
               style={{ gridTemplateColumns: "repeat(3, 1fr)", maxWidth: 720 }}
+              role="radiogroup"
+              aria-label={__t("onboarding.startTemplate")}
             >
               {[
                 {
@@ -627,6 +664,9 @@ function OnboardingWizard({ user, onComplete }) {
               ].map((t) => (
                 <button
                   key={t.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={template === t.id}
                   onClick={() => setTemplate(t.id)}
                   style={{
                     padding: 16,
@@ -655,20 +695,20 @@ function OnboardingWizard({ user, onComplete }) {
       </div>
       <div className="ob-footer">
         {step > 0 ? (
-          <button className="btn" onClick={back}>
+          <Button variant="secondary" onClick={back}>
             {__t("onboarding.back")}
-          </button>
+          </Button>
         ) : (
           <div />
         )}
         <div className="font-mono fs-10 fg-3">
           {__t("onboarding.stepOf", { current: step + 1, total: total })}
         </div>
-        <button className="btn primary" onClick={next}>
+        <Button variant="primary" onClick={next}>
           {step === total - 1
             ? __t("onboarding.finishSetup")
             : __t("onboarding.continue")}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -731,7 +771,11 @@ function MobileScanView({ onClose }) {
   return (
     <div className="mobile-scan">
       <div className="ms-bar">
-        <button className="ms-back" onClick={onClose}>
+        <button
+          className="ms-back"
+          onClick={onClose}
+          aria-label={__t("common.back") || "Back"}
+        >
           ←
         </button>
         <div className="ms-title">{__t("mobileScan.title")}</div>
@@ -739,13 +783,22 @@ function MobileScanView({ onClose }) {
           <Icon.Dots size={16} />
         </button>
       </div>
-      <div className="ms-viewfinder">
+      <div
+        className="ms-viewfinder"
+        role="status"
+        aria-live="polite"
+        aria-label={
+          scanning
+            ? __t("mobileScan.scanning")
+            : __t("mobileScan.pointCamera")
+        }
+      >
         <div className="ms-corner tl" />
         <div className="ms-corner tr" />
         <div className="ms-corner bl" />
         <div className="ms-corner br" />
-        {scanning && <div className="ms-scanline" />}
-        <div className="ms-hint">
+        {scanning && <div className="ms-scanline" aria-hidden="true" />}
+        <div className="ms-hint" aria-hidden="true">
           {scanning
             ? __t("mobileScan.scanning")
             : __t("mobileScan.pointCamera")}
@@ -825,7 +878,6 @@ function TenantSettingsModal({ open, onClose }) {
   const [maxStorage, setMaxStorage] = React.useState(
     tenant?.maxStorageGb || 50,
   );
-  if (!open) return null;
   const plans = [
     {
       id: "free",
@@ -863,148 +915,92 @@ function TenantSettingsModal({ open, onClose }) {
     toast(__t("tenant.saved"), { kind: "success" });
     onClose();
   };
-  return React.createElement(
-    "div",
-    {
-      className: "modal-overlay",
-      style: {
-        position: "fixed",
-        inset: 0,
-        zIndex: Z.MODAL,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "rgba(0,0,0,0.5)",
-      },
-    },
-    React.createElement(
-      "div",
-      {
-        style: {
-          background: "#fff",
-          borderRadius: 12,
-          padding: 24,
-          width: 520,
-          maxHeight: "80vh",
-          overflow: "auto",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
-        },
-      },
-      React.createElement(
-        "h2",
-        { style: { margin: "0 0 16px", fontSize: 18 } },
-        __t("tenant.settings"),
-      ),
-      React.createElement(
-        "div",
-        { className: "field" },
-        React.createElement("label", null, __t("tenant.workspaceName")),
-        React.createElement("input", {
-          className: "input",
-          value: name,
-          onChange: (e) => setName(e.target.value),
-        }),
-      ),
-      React.createElement(
-        "div",
-        { className: "field" },
-        React.createElement("label", null, __t("tenant.plan")),
-        React.createElement(
-          "div",
-          {
-            style: {
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 8,
-              marginTop: 6,
-            },
-          },
-          plans.map((p) =>
-            React.createElement(
-              "button",
-              {
-                key: p.id,
-                onClick: () => setPlan(p.id),
-                style: {
-                  padding: 10,
-                  border:
-                    "1.5px solid " +
-                    (plan === p.id ? "var(--accent)" : "var(--line)"),
-                  borderRadius: 8,
-                  background:
-                    plan === p.id ? "var(--accent-soft)" : "var(--bg)",
-                  cursor: "pointer",
-                  textAlign: "left",
-                },
-              },
-              React.createElement(
-                "div",
-                { style: { fontWeight: 700, fontSize: 13 } },
-                p.name + " " + p.price,
-              ),
-              React.createElement(
-                "div",
-                {
-                  style: {
-                    fontSize: 10,
-                    color: "var(--fg-3)",
-                    fontFamily: "var(--font-mono)",
-                  },
-                },
-                p.features,
-              ),
-            ),
-          ),
-        ),
-      ),
-      React.createElement(
-        "div",
-        { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
-        React.createElement(
-          "div",
-          { className: "field" },
-          React.createElement("label", null, __t("tenant.maxUsers")),
-          React.createElement("input", {
-            className: "input mono",
-            type: "number",
-            value: maxUsers,
-            onChange: (e) => setMaxUsers(e.target.value),
-          }),
-        ),
-        React.createElement(
-          "div",
-          { className: "field" },
-          React.createElement("label", null, __t("tenant.maxStorage")),
-          React.createElement("input", {
-            className: "input mono",
-            type: "number",
-            value: maxStorage,
-            onChange: (e) => setMaxStorage(e.target.value),
-          }),
-        ),
-      ),
-      React.createElement(
-        "div",
-        {
-          style: {
-            display: "flex",
-            justifyContent: "flex-end",
+  return (
+    <Modal
+      open={!!open}
+      onClose={onClose}
+      title={__t("tenant.settings")}
+      size="md"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            {__t("tenant.cancel")}
+          </Button>
+          <Button variant="primary" onClick={save}>
+            {__t("tenant.saveSettings")}
+          </Button>
+        </>
+      }
+    >
+      <Field label={__t("tenant.workspaceName")} htmlFor="tenant-name">
+        <Input
+          id="tenant-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </Field>
+
+      <Field label={__t("tenant.plan")}>
+        <div
+          role="radiogroup"
+          aria-label={__t("tenant.plan")}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
             gap: 8,
-            marginTop: 16,
-          },
-        },
-        React.createElement(
-          "button",
-          { className: "btn", onClick: onClose },
-          __t("tenant.cancel"),
-        ),
-        React.createElement(
-          "button",
-          { className: "btn primary", onClick: save },
-          __t("tenant.saveSettings"),
-        ),
-      ),
-    ),
+          }}
+        >
+          {plans.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              role="radio"
+              aria-checked={plan === p.id}
+              onClick={() => setPlan(p.id)}
+              style={{
+                padding: 10,
+                border:
+                  "1.5px solid " +
+                  (plan === p.id ? "var(--accent)" : "var(--line)"),
+                borderRadius: "var(--r-2)",
+                background:
+                  plan === p.id ? "var(--accent-soft)" : "var(--bg)",
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              <div className="fw-700 fs-13">
+                {p.name} {p.price}
+              </div>
+              <div className="fs-10 fg-3 font-mono">{p.features}</div>
+            </button>
+          ))}
+        </div>
+      </Field>
+
+      <div
+        style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
+      >
+        <Field label={__t("tenant.maxUsers")} htmlFor="tenant-max-users">
+          <Input
+            id="tenant-max-users"
+            mono
+            type="number"
+            value={maxUsers}
+            onChange={(e) => setMaxUsers(e.target.value)}
+          />
+        </Field>
+        <Field label={__t("tenant.maxStorage")} htmlFor="tenant-max-storage">
+          <Input
+            id="tenant-max-storage"
+            mono
+            type="number"
+            value={maxStorage}
+            onChange={(e) => setMaxStorage(e.target.value)}
+          />
+        </Field>
+      </div>
+    </Modal>
   );
 }
 TenantSettingsModal.propTypes = {
