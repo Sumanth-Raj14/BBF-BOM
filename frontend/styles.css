@@ -4433,7 +4433,7 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
 .fg-ok { color: var(--ok); }
 .fg-warn { color: var(--warn); }
 .fg-info { color: var(--info); }
-.fg-white { color: white; }
+.fg-white { color: var(--text-inverse); }
 .bg-accent { background: var(--accent); }
 .bg-white { background: white; }
 .bg-transparent { background: transparent; }
@@ -4494,9 +4494,11 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
 .w-22 { width: 22px; }
 .w-28 { width: 28px; }
 .w-32 { width: 32px; }
+.w-80 { width: 80px; }
 .w-100p { width: 100%; }
 .w-280 { width: 280px; }
 .h-1 { height: 1px; }
+.h-2 { height: 2px; }
 .h-14 { height: 14px; }
 .h-18 { height: 18px; }
 .h-22 { height: 22px; }

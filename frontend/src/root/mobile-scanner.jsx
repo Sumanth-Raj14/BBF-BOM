@@ -126,8 +126,11 @@ function MobileScannerScreen() {
   // Menu screen
   if (mode === "menu") {
     return (
-      <div style={{ minHeight: "100vh", background: "var(--bg)", padding: 16 }}>
-        <div className="text-center" style={{ padding: "20px 0 30px" }}>
+      <div className="p-16 bg-canvas" style={{ minHeight: "100vh" }}>
+        <div
+          className="text-center"
+          style={{ padding: "var(--sp-5) 0 var(--sp-6)" }}
+        >
           <div className="fs-28 fw-700 font-mono">
             {__t("app.brandBlackbox") || "BLACKBOX"}
           </div>
@@ -195,30 +198,41 @@ function MobileScannerScreen() {
             <div className="fs-10 uppercase letter-sp-6 mb-8 fg-3">
               {__t("mobileScan.recentScans") || "Recent Scans"}
             </div>
-            {recentScans.slice(0, 5).map((s) => (
-              <div
-                key={s.code}
-                onClick={() => {
-                  setPartData(s.part);
-                  setScanResult(s.code);
-                  setMode("lookup");
-                }}
-                className="border-bottom c-pointer flex justify-between px-12 py-10"
-              >
-                <div>
-                  <div className="mono fs-11 fw-600">{s.code}</div>
-                  <div className="fs-10 fg-3">
-                    {s.part?.name ||
-                      s.part?.partNumber ||
-                      __t("mobileScan.unknown") ||
-                      "Unknown"}
+            {recentScans.slice(0, 5).map((s) => {
+              const openScan = () => {
+                setPartData(s.part);
+                setScanResult(s.code);
+                setMode("lookup");
+              };
+              return (
+                <div
+                  key={s.code}
+                  role="button"
+                  tabIndex={0}
+                  onClick={openScan}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openScan();
+                    }
+                  }}
+                  className="border-bottom c-pointer flex justify-between px-12 py-10"
+                >
+                  <div>
+                    <div className="mono fs-11 fw-600">{s.code}</div>
+                    <div className="fs-10 fg-3">
+                      {s.part?.name ||
+                        s.part?.partNumber ||
+                        __t("mobileScan.unknown") ||
+                        "Unknown"}
+                    </div>
+                  </div>
+                  <div className="fs-9 fg-3">
+                    {new Date(s.time).toLocaleTimeString()}
                   </div>
                 </div>
-                <div className="fs-9 fg-4">
-                  {new Date(s.time).toLocaleTimeString()}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -229,7 +243,7 @@ function MobileScannerScreen() {
     return (
       <div
         className="pos-relative"
-        style={{ minHeight: "100vh", background: "#000" }}
+        style={{ minHeight: "100vh", background: "var(--bbf-black)" }}
       >
         <video
           ref={videoRef}
@@ -245,18 +259,18 @@ function MobileScannerScreen() {
             top: "25vh",
             left: "10%",
             width: "80%",
-            background: "#e85d1f",
-            boxShadow: "0 0 20px #e85d1f",
+            background: "var(--accent-interactive)",
+            boxShadow: "0 0 20px var(--accent-interactive)",
           }}
         />
         <div
-          className="pos-absolute"
+          className="pos-absolute p-16"
           style={{
             bottom: 0,
             left: 0,
             right: 0,
-            padding: 16,
-            background: "linear-gradient(transparent, rgba(0,0,0,0.9))",
+            background:
+              "linear-gradient(transparent, color-mix(in srgb, var(--bbf-black) 90%, transparent))",
           }}
         >
           <div className="text-center fs-12 mb-12 fg-white">
@@ -265,8 +279,7 @@ function MobileScannerScreen() {
           <div className="flex gap-8">
             <button
               onClick={simulateScan}
-              className="flex-1 rounded-r2 b-0 fw-600 fs-13 c-pointer"
-              style={{ padding: 14, background: "#e85d1f", color: "white" }}
+              className="flex-1 rounded-r2 b-0 fw-600 fs-13 c-pointer p-14 bg-accent fg-white"
             >
               {__t("mobileScan.demoScan") || "Demo Scan"}
             </button>
@@ -275,12 +288,7 @@ function MobileScannerScreen() {
                 stopCamera();
                 setMode("lookup");
               }}
-              className="flex-1 rounded-r2 border-line fs-13 c-pointer"
-              style={{
-                padding: 14,
-                background: "var(--bg-elev)",
-                color: "var(--fg)",
-              }}
+              className="flex-1 rounded-r2 border-line fs-13 c-pointer p-14 bg-elev fg"
             >
               {__t("mobileScan.manualEntry") || "Manual Entry"}
             </button>
@@ -297,24 +305,25 @@ function MobileScannerScreen() {
         </div>
         {scanResult && partData && (
           <div
+            role="button"
+            tabIndex={0}
             onClick={() => setMode("lookup")}
-            className="pos-absolute rounded-r2 c-pointer"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setMode("lookup");
+              }
+            }}
+            className="pos-absolute rounded-r2 c-pointer p-16 bg-canvas"
             style={{
               top: 16,
               left: 16,
               right: 16,
-              background: "var(--bg)",
-              padding: 16,
-              boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+              boxShadow: "var(--shadow-xl)",
             }}
           >
             <div className="flex items-center gap-8">
-              <span
-                className="fs-18"
-                style={{ color: "var(--green, #10b981)" }}
-              >
-                &#x2714;
-              </span>
+              <span className="fs-18 fg-ok">&#x2714;</span>
               <div>
                 <div className="mono fw-600">{scanResult}</div>
                 <div className="fs-11 fg-3">
@@ -330,7 +339,7 @@ function MobileScannerScreen() {
   // Lookup / scan result screen
   if (mode === "lookup") {
     return (
-      <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+      <div className="bg-canvas" style={{ minHeight: "100vh" }}>
         <div className="border-bottom flex gap-8 items-center py-12 px-16">
           <button
             onClick={() => {
@@ -339,13 +348,14 @@ function MobileScannerScreen() {
               setScanResult(null);
             }}
             className="b-0 c-pointer fs-18 bg-transparent"
+            aria-label={__t("mobileScan.backToMenu") || "Back to menu"}
           >
             &#x2190;
           </button>
           <input
             id="ms-search"
             name="partSearch"
-            className="twk-field flex-1"
+            className="input flex-1"
             placeholder={
               __t("mobileScan.searchPlaceholder") ||
               "Search by name, part number, or barcode..."
@@ -366,8 +376,12 @@ function MobileScannerScreen() {
           >
             {__t("common.search") || "Search"}
           </button>
-          <button className="btn" onClick={startCamera}>
-            <span>&#x1f4f7;</span>
+          <button
+            className="btn"
+            onClick={startCamera}
+            aria-label={__t("mobileScan.scanBarcode") || "Scan barcode"}
+          >
+            <span aria-hidden="true">&#x1f4f7;</span>
           </button>
         </div>
         {partData ? (
@@ -488,11 +502,12 @@ function MobileScannerScreen() {
   // PO Receiving screen
   if (mode === "receive") {
     return (
-      <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+      <div className="bg-canvas" style={{ minHeight: "100vh" }}>
         <div className="border-bottom flex gap-8 items-center py-12 px-16">
           <button
             onClick={() => setMode("menu")}
             className="b-0 c-pointer fs-18 bg-transparent"
+            aria-label={__t("mobileScan.backToMenu") || "Back to menu"}
           >
             &#x2190;
           </button>
@@ -516,7 +531,15 @@ function MobileScannerScreen() {
               poList.map((po) => (
                 <div
                   key={po.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setSelectedPo(po)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedPo(po);
+                    }
+                  }}
                   className="border-line rounded-r2 mb-8 c-pointer p-12"
                 >
                   <div className="flex justify-between">
@@ -559,7 +582,7 @@ function MobileScannerScreen() {
                   <input
                     id="ms-receive-qty"
                     name="receiveQty"
-                    className="twk-field w-80"
+                    className="input w-80"
                     placeholder={__t("mobileScan.qty") || "Qty"}
                     value={receiveQty}
                     onChange={(e) => setReceiveQty(e.target.value)}
@@ -604,11 +627,12 @@ function MobileScannerScreen() {
   // Inventory check screen
   if (mode === "inventory") {
     return (
-      <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+      <div className="bg-canvas" style={{ minHeight: "100vh" }}>
         <div className="border-bottom flex gap-8 items-center py-12 px-16">
           <button
             onClick={() => setMode("menu")}
             className="b-0 c-pointer fs-18 bg-transparent"
+            aria-label={__t("mobileScan.backToMenu") || "Back to menu"}
           >
             &#x2190;
           </button>
@@ -621,7 +645,7 @@ function MobileScannerScreen() {
             <input
               id="ms-check-search"
               name="checkSearch"
-              className="twk-field flex-1"
+              className="input flex-1"
               placeholder={
                 __t("mobileScan.scanOrSearchPart") || "Scan or search part..."
               }
@@ -635,8 +659,12 @@ function MobileScannerScreen() {
                 "Search part for inventory check"
               }
             />
-            <button className="btn" onClick={startCamera}>
-              &#x1f4f7;
+            <button
+              className="btn"
+              onClick={startCamera}
+              aria-label={__t("mobileScan.scanBarcode") || "Scan barcode"}
+            >
+              <span aria-hidden="true">&#x1f4f7;</span>
             </button>
             <button
               className="btn primary"
