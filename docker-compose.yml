@@ -1,34 +1,52 @@
 version: "3.9"
 
+# One-command local deployment (local-first: everything runs on this host,
+# no cloud dependency). Bring the whole stack up with:
+#
+#   cp .env.example .env   # then fill in real secrets — see .env.example
+#   docker compose up --build
+#
+# Then open http://localhost — nginx (the `frontend` service) serves the
+# built React SPA and reverse-proxies /api/ and /ws/ to the backend, so the
+# whole app lives behind ONE localhost port (see frontend/nginx.conf).
+#
+# Direct-to-Postgres (no pgbouncer) is the supported local-first topology —
+# pgbouncer's transaction-pooling mode is incompatible with asyncpg prepared
+# statements without extra driver config, so it is intentionally omitted
+# from this single-node deployment. Add it back only if you need connection
+# pooling across many app instances.
+
 services:
   db:
     # TODO: pin by digest in CI
     image: postgres:15-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: bom_db
-      POSTGRES_USER: bom_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bom_password}
+      POSTGRES_DB: ${POSTGRES_DB:-bom_db}
+      POSTGRES_USER: ${POSTGRES_USER:-bom_user}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (copy .env.example first)}"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - wal_archive:/var/lib/postgresql/wal_archive
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bom_user -d bom_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bom_user} -d ${POSTGRES_DB:-bom_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     command: redis-server --requirepass ${REDIS_PASSWORD:-redis_password}
     volumes:
       - redis_data:/data
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_password}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 3
@@ -37,62 +55,64 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    restart: unless-stopped
     environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       POSTGRES_SERVER: db
-      POSTGRES_USER: bom_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bom_password}
-      POSTGRES_DB: bom_db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-bom_user}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (copy .env.example first)}"
+      POSTGRES_DB: ${POSTGRES_DB:-bom_db}
       REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
-      SECRET_KEY: ${SECRET_KEY}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      SECRET_KEY: "${SECRET_KEY:?Set SECRET_KEY in .env - generate with python -c 'import secrets; print(secrets.token_urlsafe(32))'}"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env - generate with python -c 'import secrets; print(secrets.token_urlsafe(32))'}"
+      # Required by the config validator even when S3/MinIO is not deployed
+      # (the local-first stack stores documents on the local filesystem).
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-local-unused}
+      S3_SECRET_KEY: "${S3_SECRET_KEY:?Set S3_SECRET_KEY in .env (any placeholder is fine if you do not use S3)}"
       ALGORITHM: RS256
       RSA_KEY_DIR: /rsa_keys
       BACKUP_DIR: /backups
-      ENVIRONMENT: ${ENVIRONMENT:-development}
+      ENABLE_RLS: ${ENABLE_RLS:-false}
+      SEED_RBAC_ON_START: ${SEED_RBAC_ON_START:-true}
+      # Alembic (run by the entrypoint) is now the sole schema owner.
+      SKIP_CREATE_ALL: "true"
     volumes:
       - backend_backups:/backups
+      - backend_uploads:/app/uploads
       - rsa_keys:/rsa_keys
       - wal_archive:/var/lib/postgresql/wal_archive
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import http.client; c=http.client.HTTPConnection('localhost:8000'); c.request('GET','/health'); r=c.getresponse(); exit(0) if r.status==200 else exit(1)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    restart: unless-stopped
     environment:
       VITE_API_BASE: /api/v1
     ports:
-      - "80:80"
+      - "${FRONTEND_PORT:-80}:80"
     depends_on:
-      - backend
-
-  pgbouncer:
-    # TODO: Pin to SHA256 digest
-    image: edoburu/pgbouncer:1.23-1
-    environment:
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_USER: bom_user
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-bom_password}
-      DB_NAME: bom_db
-      POOL_MODE: transaction
-      MAX_CLIENT_CONN: 200
-      DEFAULT_POOL_SIZE: 25
-    ports:
-      - "127.0.0.1:5433:5432"
-    depends_on:
-      db:
+      backend:
         condition: service_healthy
 
 volumes:
   pgdata:
   redis_data:
   backend_backups:
+  backend_uploads:
   rsa_keys:
   wal_archive:

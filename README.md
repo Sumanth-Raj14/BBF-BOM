@@ -34,7 +34,31 @@ npm run dev                 # Vite dev server on port 3001
 npm run build               # Production build to dist/
 ```
 
-### Docker (Production)
+### Docker (Local, one-command — recommended for a new machine)
+
+Local-first: the whole stack (Postgres, Redis, backend, frontend) runs on
+this machine, migrated and seeded automatically. No cloud dependency.
+
+```bash
+cp .env.example .env    # fill in the secrets — see comments in the file
+docker compose up --build
+```
+
+Then open **http://localhost** — nginx (the `frontend` container) serves the
+built React SPA and reverse-proxies `/api/` and `/ws/` to the backend
+(`frontend/nginx.conf`), so the whole app lives behind one localhost port.
+The `backend` container's entrypoint (`backend/scripts/docker-entrypoint.sh`)
+waits for Postgres, runs `alembic upgrade head`, and seeds the default RBAC
+roles/permissions on a genuinely empty database before starting uvicorn —
+re-running `docker compose up` on an existing install is safe and won't
+re-seed or touch your data. Named volumes (`pgdata`, `backend_backups`,
+`backend_uploads`, `rsa_keys`) persist across restarts and rebuilds.
+
+To move the app to a new PC: copy the repo (or `git clone`) + your `.env`
+(keep it secret, never commit it), install Docker, and run the two commands
+above again.
+
+### Docker (Production, full stack — monitoring/MinIO/pgBackRest)
 ```bash
 cd backend
 docker compose -f docker-compose.prod.yml up -d
