@@ -1081,10 +1081,49 @@ export const ecoAPI = {
   create: (data) => apiRequest('/eco', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => apiRequest(`/eco/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id) => apiRequest(`/eco/${id}`, { method: 'DELETE' }),
+  // Canonical guarded state-transition endpoint (app.services.eco_service.
+  // perform_eco_action). action: 'submit'|'approve'|'reject'|'implement'|
+  // 'close'. 'approve'/'implement' require { password, signature_meaning } —
+  // a 21 CFR Part 11 password-re-authenticated electronic signature — and
+  // the backend rejects (401/403/409) without mutating state on failure.
+  action: (id, data) => apiRequest(`/eco/${id}/action`, { method: 'POST', body: JSON.stringify(data) }),
   approve: (id, data) => apiRequest(`/eco/${id}/approve`, { method: 'POST', body: JSON.stringify(data) }),
   reject: (id, reason) => apiRequest(`/eco/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
   changes: (id) => apiRequest(`/eco/${id}/changes`),
   notifications: (id) => apiRequest(`/eco/${id}/notifications`),
+  impact: (id) => apiRequest(`/eco/${id}/impact`),
+  addItem: (id, data) => apiRequest(`/eco/${id}/items`, { method: 'POST', body: JSON.stringify(data) }),
+};
+
+// 21 CFR Part 11 — electronic signatures. Read-only (write-once, created
+// only by app.services.part11_service.sign_action as a side effect of a
+// guarded action such as eco.action). Admin-gated on the backend.
+export const esignatureAPI = {
+  list: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiRequest(`/esignatures/${q ? '?' + q : ''}`);
+  },
+};
+
+// RoHS/REACH substance compliance — substance catalog, per-part
+// composition declarations, and the two read-only derivation endpoints
+// (part compliance status, BOM-wide compliance rollup).
+export const substanceComplianceAPI = {
+  substances: {
+    list: () => apiRequest('/substance-compliance/substances'),
+    get: (id) => apiRequest(`/substance-compliance/substances/${id}`),
+    create: (data) => apiRequest('/substance-compliance/substances', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id, data) => apiRequest(`/substance-compliance/substances/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id) => apiRequest(`/substance-compliance/substances/${id}`, { method: 'DELETE' }),
+  },
+  partComposition: {
+    list: (partId) => apiRequest(`/substance-compliance/parts/${partId}/composition`),
+    add: (partId, data) => apiRequest(`/substance-compliance/parts/${partId}/composition`, { method: 'POST', body: JSON.stringify(data) }),
+    update: (partId, rowId, data) => apiRequest(`/substance-compliance/parts/${partId}/composition/${rowId}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (partId, rowId) => apiRequest(`/substance-compliance/parts/${partId}/composition/${rowId}`, { method: 'DELETE' }),
+  },
+  partCompliance: (partId) => apiRequest(`/substance-compliance/parts/${partId}/compliance`),
+  bomCompliance: (bomId) => apiRequest(`/substance-compliance/bom/${bomId}/compliance`),
 };
 
 // Inventory API — backend is resource-specific (stock / warehouses /
@@ -1315,6 +1354,8 @@ export const api = {
   orderTracking: orderTrackingAPI,
   workOrders: workOrdersAPI,
   eco: ecoAPI,
+  esignatures: esignatureAPI,
+  substanceCompliance: substanceComplianceAPI,
   inventory: inventoryAPI,
   quality: qualityAPI,
   userDataSync: userDataSyncAPI,
@@ -1336,6 +1377,8 @@ window.approvalAutomationAPI = approvalAutomationAPI;
 window.orderTrackingAPI = orderTrackingAPI;
 window.workOrdersAPI = workOrdersAPI;
 window.ecoAPI = ecoAPI;
+window.esignatureAPI = esignatureAPI;
+window.substanceComplianceAPI = substanceComplianceAPI;
 window.inventoryAPI = inventoryAPI;
 window.qualityAPI = qualityAPI;
 window.userDataSyncAPI = userDataSyncAPI;

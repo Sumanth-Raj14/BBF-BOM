@@ -2,7 +2,8 @@ import { storage } from "../../utils/storage.js";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Icon, INR, escapeHtml, openPrintWindow, useAppStore } from "../../globals";
+import { Icon, INR, api, escapeHtml, openPrintWindow, useAppStore } from "../../globals";
+import { ESignDialog } from "../ESignDialog.jsx";
 import {
   Badge,
   Button,
@@ -19,6 +20,13 @@ import {
   TabPanel,
   Tabs,
 } from "../ui";
+
+// Actions that are 21 CFR Part 11 guarded change-control events — approving
+// or implementing an ECR/ECO requires a password-re-authenticated
+// electronic signature, captured via ESignDialog and enforced server-side
+// by app.services.eco_service.perform_eco_action (see updateStatus below,
+// which only applies the local status change after that call succeeds).
+const ESIGN_ACTIONS = new Set(["approve", "implement"]);
 
 const IMPACT_TONE = { high: "danger", med: "warning", low: "neutral" };
 const APPROVAL_TONE = {
@@ -56,6 +64,9 @@ function ECRScreen() {
     items_affected: 0,
   });
   const [detailEcr, setDetailEcr] = React.useState(null);
+  // { ecr, action } while the e-sign dialog is open for an approve/implement
+  // request; null otherwise.
+  const [signRequest, setSignRequest] = React.useState(null);
   const [ecrs, setEcrs] = React.useState(() => {
     try {
       const saved = storage.ecrs.get();
@@ -168,6 +179,13 @@ function ECRScreen() {
       cost_impact: Number(form.cost_impact) || 0,
       items_affected: Number(form.items_affected) || 0,
       approvals: { eng: "pending", proc: "pending", fin: "pending" },
+      // Real backend ECO id this ECR is backed by, filled in by
+      // createBackingEco() below once it resolves — null until then, and
+      // permanently null if the backend call fails or is unreachable.
+      // ESignDialog's ecoId prop is fed straight from this field (no
+      // fallback to the local `id` string above); its own "no linked ECO"
+      // guard treats null honestly rather than pretending to sign.
+      ecoId: null,
     };
     setEcrs([newEcr, ...ecrs]);
     setForm({
@@ -183,9 +201,40 @@ function ECRScreen() {
       { kind: "success" },
     );
     notify("New ECR created", id + " · " + newEcr.title);
+    createBackingEco(id, newEcr);
   };
 
-  const updateStatus = (id, action) => {
+  // Best-effort backend sync: create the real ECO record this ECR is
+  // backed by, so the password-re-authenticated e-sign dialog (wired to
+  // approve/implement below) has a genuine numeric id to call
+  // api.eco.action(ecoId, ...) against — without this, approve/implement
+  // through this screen could never succeed (backend `eco_id: int` always
+  // 422-rejects the client-generated "ECR-2026-…" string). The ECR row
+  // itself is always created locally regardless of this call's outcome
+  // (local-first) — if it fails (offline, backend down), ecoId simply
+  // stays null and any later sign attempt honestly fails via ESignDialog's
+  // "no linked ECO" guard instead of silently pretending to work.
+  const createBackingEco = async (id, ecr) => {
+    if (!api?.eco?.create) return;
+    const priorityByImpact = { low: "low", med: "medium", high: "high" };
+    try {
+      const eco = await api.eco.create({
+        title: ecr.title,
+        change_type: "design",
+        priority: priorityByImpact[ecr.impact] || "medium",
+        reason: `Created from ${id}`,
+      });
+      const ecoId = eco?.id ?? eco?.eco_id ?? null;
+      if (ecoId != null) {
+        setEcrs((cur) => cur.map((e) => (e.id === id ? { ...e, ecoId } : e)));
+      }
+    } catch {
+      // Honest failure — see comment above.
+    }
+  };
+
+  const updateStatus = (id, action, opts = {}) => {
+    const prevEcr = ecrs.find((e) => e.id === id);
     const next = ecrs.map((e) => {
       if (e.id !== id) return e;
       let status = e.status;
@@ -221,8 +270,44 @@ function ECRScreen() {
           : action === "implement"
             ? "marked implemented"
             : "advanced";
-    toast(id + " " + label, { kind: action === "reject" ? "warn" : "success" });
+    // For approve/implement, ESignDialog already toasted the real
+    // (server-confirmed) result — avoid a second, redundant toast here.
+    if (!opts.silent) {
+      toast(id + " " + label, { kind: action === "reject" ? "warn" : "success" });
+    }
     notify("ECR " + label, id + " · " + (ecr?.title || ""));
+    // Keep the backend ECO in lockstep when submitting a Draft ECR for
+    // review: perform_eco_action's "approve" transition requires the ECO
+    // to already be in "review" status, so without this sync a freshly
+    // created ECR's later Approve (through ESignDialog) would 409 even
+    // though it has a real ecoId. Best-effort / fire-and-forget — demo
+    // rows and ones whose backing ECO failed to create (ecoId still null)
+    // are unaffected and keep the historical local-only behavior.
+    if (
+      action === "advance" &&
+      prevEcr?.status === "Draft" &&
+      prevEcr.ecoId != null &&
+      api?.eco?.action
+    ) {
+      api.eco.action(prevEcr.ecoId, { action: "submit" }).catch(() => {
+        // Honest failure: local status still advances; a later Approve
+        // attempt will surface the real backend conflict via ESignDialog
+        // rather than silently succeeding.
+      });
+    }
+  };
+
+  // Gatekeeper for approve/implement: these are 21 CFR Part 11 change-control
+  // events and must go through the password-re-authenticated e-sign dialog
+  // (which calls the real guarded backend action) rather than mutating local
+  // status directly. Reject/advance are not signature-gated on the backend
+  // and keep the previous local-only behavior.
+  const requestAction = (ecr, action) => {
+    if (ESIGN_ACTIONS.has(action)) {
+      setSignRequest({ ecr, action });
+      return;
+    }
+    updateStatus(ecr.id, action);
   };
 
   const exportCsv = () => {
@@ -292,7 +377,7 @@ function ECRScreen() {
           {
             icon: <Icon.Check size={11} />,
             label: __t("common.approve") || "Approve",
-            onSelect: () => updateStatus(e.id, "approve"),
+            onSelect: () => requestAction(e, "approve"),
           },
           {
             icon: <Icon.X size={11} />,
@@ -306,7 +391,7 @@ function ECRScreen() {
           {
             icon: <Icon.Check size={11} />,
             label: __t("advanced.ecr.markImplemented") || "Mark implemented",
-            onSelect: () => updateStatus(e.id, "implement"),
+            onSelect: () => requestAction(e, "implement"),
           },
         ]
       : []),
@@ -645,7 +730,7 @@ function ECRScreen() {
                   <Button
                     variant="primary"
                     onClick={() => {
-                      updateStatus(detailEcr.id, "approve");
+                      requestAction(detailEcr, "approve");
                       setDetailEcr(null);
                     }}
                   >
@@ -658,7 +743,7 @@ function ECRScreen() {
                 <Button
                   variant="primary"
                   onClick={() => {
-                    updateStatus(detailEcr.id, "implement");
+                    requestAction(detailEcr, "implement");
                     setDetailEcr(null);
                   }}
                 >
@@ -757,6 +842,24 @@ function ECRScreen() {
           </div>
         </Modal>
       )}
+
+      <ESignDialog
+        open={!!signRequest}
+        onClose={() => setSignRequest(null)}
+        // Deliberately no fallback to signRequest.ecr.id: that's the
+        // client-generated "ECR-2026-…" string, never a valid backend
+        // eco_id. Falling back to it would make ESignDialog call
+        // api.eco.action with a non-numeric id (422, before password/
+        // signature verification) instead of honestly reporting "no linked
+        // ECO" when createBackingEco() hasn't produced a real one yet.
+        ecoId={signRequest?.ecr?.ecoId ?? null}
+        ecoLabel={signRequest ? `${signRequest.ecr.id} · ${signRequest.ecr.title}` : ""}
+        action={signRequest?.action || "approve"}
+        onSuccess={() => {
+          if (signRequest) updateStatus(signRequest.ecr.id, signRequest.action, { silent: true });
+          setSignRequest(null);
+        }}
+      />
     </div>
   );
 }
