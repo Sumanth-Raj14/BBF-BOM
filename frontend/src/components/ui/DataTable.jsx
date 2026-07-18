@@ -93,11 +93,19 @@ export function DataTable({
             rows.map((row, i) => {
               const selected = isRowSelected ? isRowSelected(row) : undefined;
               const clickable = !!onRowClick;
+              // aria-selected is not a supported state on role="button" per
+              // ARIA — only mark a clickable row as role="button" when it
+              // has no selection state to report. A row that also carries
+              // aria-selected keeps its implicit role="row" (which DOES
+              // support aria-selected) and stays operable via tabIndex +
+              // the Enter/Space handler below, without the invalid
+              // button+aria-selected combination.
+              const selectable = isRowSelected != null;
               return (
                 <tr
                   key={rowKey(row, i)}
                   aria-selected={selected}
-                  role={clickable ? "button" : undefined}
+                  role={clickable && !selectable ? "button" : undefined}
                   tabIndex={clickable ? 0 : undefined}
                   onClick={clickable ? () => onRowClick(row) : undefined}
                   onKeyDown={

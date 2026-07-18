@@ -35,6 +35,12 @@ function AppCtxProvider({ children }) {
 
   const [apiParts, setApiParts] = React.useState(null);
   const [apiVendors, setApiVendors] = React.useState(null);
+  // Canonical bom_items_master lines for the active BOM — hydrated onto
+  // Parts-API rows below so structural edits (qty/refdes/find-number,
+  // delete, reorder) can scope their writes to a real bom_items_master
+  // line instead of silently falling back to local-only state or the
+  // global Part record. See convertApiPartsToTree in utils/bom.js.
+  const [apiBomItems, setApiBomItems] = React.useState(null);
   const [, setApiProjects] = React.useState(null);
   const [apiLoading, setApiLoading] = React.useState(true);
   const [apiError, setApiError] = React.useState(null);
@@ -157,7 +163,9 @@ function AppCtxProvider({ children }) {
   }, []);
 
   const apiRows =
-    apiParts && apiParts.length > 0 ? convertApiPartsToTree(apiParts) : null;
+    apiParts && apiParts.length > 0
+      ? convertApiPartsToTree(apiParts, apiBomItems)
+      : null;
   const effectiveVendors =
     apiVendors && apiVendors.length > 0
       ? apiVendors.map((v) => ({
@@ -187,6 +195,10 @@ function AppCtxProvider({ children }) {
   const [project, setProject] = React.useState({ ...data.project });
   const [rollup, setRollup] = React.useState({ ...data.rollup });
   const [activeProjectKey, setActiveProjectKey] = React.useState("ATLAS");
+  // Same instance-BOM id convention used by BomEditor/CostRollupView for the
+  // structural bom_items_master API (neither the Parts-API row source nor
+  // the demo fixture threads a real bom_id through yet).
+  const bomId = project?.id || project?.bomId || data?.project?.id || 1;
 
   const switchProject = React.useCallback((key) => {
     const p = PROJECTS?.[key];
@@ -233,10 +245,35 @@ function AppCtxProvider({ children }) {
   }, [t.density, t.accent]);
 
   React.useEffect(() => {
+    // Hydrate the canonical bom_items_master lines for the active BOM so
+    // pre-existing Parts-API rows (not just ones created fresh this session
+    // via Add Item/Duplicate) get a real bomItemId. Without this, every
+    // loaded row falls through to local-only edits/deletes/reorders — see
+    // convertApiPartsToTree in utils/bom.js.
+    if (!apiConnected || !api?.bomEnterprise?.items) return;
+    let cancelled = false;
+    api.bomEnterprise.items
+      .list(bomId)
+      .then((items) => {
+        if (!cancelled) setApiBomItems(Array.isArray(items) ? items : []);
+      })
+      .catch((err) => {
+        console.warn(
+          "[AppCtx] Failed to load BOM items for bom",
+          bomId,
+          err?.message || err,
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiConnected, bomId]);
+
+  React.useEffect(() => {
     if (apiParts && apiParts.length > 0) {
-      setRows(convertApiPartsToTree(apiParts));
+      setRows(convertApiPartsToTree(apiParts, apiBomItems));
     }
-  }, [apiParts]);
+  }, [apiParts, apiBomItems]);
   React.useEffect(() => {
     if (apiVendors && apiVendors.length > 0) {
       setVendors(
@@ -368,6 +405,8 @@ function AppCtxProvider({ children }) {
     apiError,
     apiParts,
     apiVendors,
+    apiBomItems,
+    bomId,
     syncStatus,
     authed,
     setAuthed,
