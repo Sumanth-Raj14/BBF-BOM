@@ -1,0 +1,105 @@
+{
+  "_comment": "RoHS Annex III (general) and Annex IV (medical devices / monitoring & control) exemptions. valid_until is the scalar fallback expiry; category_validity overrides it per EEE category (spec P16). status ACTIVE / EXPIRED / RENEWAL_PENDING; a RENEWAL_PENDING exemption past its date still resolves to COMPLIANT_WITH_EXEMPTION pending Commission decision (spec P15). applicable_eee_categories are RoHS categories 1-11. Lead entries reference the LEAD_COMPOUNDS group for group-aware claim matching; cadmium/mercury reference the specific substance by CAS. Representative snapshot, not exhaustive.",
+  "exemptions": [
+    {
+      "code": "6(a)",
+      "annex": "ANNEX_III",
+      "substance_group": "LEAD_COMPOUNDS",
+      "application_scope": "Lead as an alloying element in steel for machining purposes and in galvanised steel containing up to 0.35% lead by weight",
+      "applicable_eee_categories": [1, 2, 3, 4, 5, 6, 7, 10, 11],
+      "valid_until": "2024-07-21",
+      "category_validity": null,
+      "status": "ACTIVE"
+    },
+    {
+      "code": "6(b)",
+      "annex": "ANNEX_III",
+      "substance_group": "LEAD_COMPOUNDS",
+      "application_scope": "Lead as an alloying element in aluminium containing up to 0.4% lead by weight",
+      "applicable_eee_categories": [1, 2, 3, 4, 5, 6, 7, 10, 11],
+      "valid_until": "2024-07-21",
+      "category_validity": null,
+      "status": "ACTIVE"
+    },
+    {
+      "code": "6(c)",
+      "annex": "ANNEX_III",
+      "substance_group": "LEAD_COMPOUNDS",
+      "application_scope": "Copper alloy containing up to 4% lead by weight",
+      "applicable_eee_categories": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "valid_until": "2024-07-21",
+      "category_validity": { "8": "2028-07-21", "9": "2029-07-21" },
+      "status": "ACTIVE"
+    },
+    {
+      "code": "7(a)",
+      "annex": "ANNEX_III",
+      "substance_group": "LEAD_COMPOUNDS",
+      "application_scope": "Lead in high melting temperature type solders (i.e. lead-based alloys containing 85% by weight or more lead)",
+      "applicable_eee_categories": [1, 2, 3, 4, 5, 6, 7, 10, 11],
+      "valid_until": "2024-07-21",
+      "category_validity": null,
+      "status": "ACTIVE"
+    },
+    {
+      "code": "7(c)-I",
+      "annex": "ANNEX_III",
+      "substance_group": "LEAD_COMPOUNDS",
+      "application_scope": "Electrical and electronic components containing lead in a glass or ceramic other than dielectric ceramic in capacitors, or in a glass or ceramic matrix compound",
+      "applicable_eee_categories": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "valid_until": "2024-07-21",
+      "category_validity": null,
+      "status": "ACTIVE"
+    },
+    {
+      "code": "8(b)",
+      "annex": "ANNEX_III",
+      "substance_cas": "7440-43-9",
+      "application_scope": "Cadmium and its compounds in electrical contacts",
+      "applicable_eee_categories": [1, 2, 3, 4, 5, 6, 7, 10, 11],
+      "valid_until": "2024-07-21",
+      "category_validity": null,
+      "status": "RENEWAL_PENDING"
+    },
+    {
+      "code": "13(a)",
+      "annex": "ANNEX_III",
+      "substance_group": "LEAD_COMPOUNDS",
+      "application_scope": "Lead in white glasses used for optical applications",
+      "applicable_eee_categories": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "valid_until": "2027-07-21",
+      "category_validity": null,
+      "status": "ACTIVE"
+    },
+    {
+      "code": "15",
+      "annex": "ANNEX_III",
+      "substance_group": "LEAD_COMPOUNDS",
+      "application_scope": "Lead in solders to complete a viable electrical connection between semiconductor die and carrier within integrated circuit flip chip packages",
+      "applicable_eee_categories": [1, 2, 3, 4, 5, 6, 7, 10, 11],
+      "valid_until": "2024-07-21",
+      "category_validity": null,
+      "status": "ACTIVE"
+    },
+    {
+      "code": "IV-1(a)",
+      "annex": "ANNEX_IV",
+      "substance_group": "LEAD_COMPOUNDS",
+      "application_scope": "Lead, cadmium and mercury in detectors for ionising radiation",
+      "applicable_eee_categories": [8, 9],
+      "valid_until": null,
+      "category_validity": null,
+      "status": "ACTIVE"
+    },
+    {
+      "code": "IV-5",
+      "annex": "ANNEX_IV",
+      "substance_cas": "7440-43-9",
+      "application_scope": "Cadmium anode Hersch cells for oxygen sensors used in industrial monitoring and control instruments",
+      "applicable_eee_categories": [9],
+      "valid_until": "2023-07-21",
+      "category_validity": null,
+      "status": "EXPIRED"
+    }
+  ]
+}

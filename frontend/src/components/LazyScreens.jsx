@@ -195,3 +195,8 @@ export const WorkQueueScreen = createLazyScreen(function () {
 export const IntegrationsScreen = createLazyScreen(function () {
   return import("./screens/IntegrationsScreen.jsx");
 }, "IntegrationsScreen");
+
+// Regulated features — read-only audit-trail viewer (GET /audit-logs).
+export const AuditTrailScreen = createLazyScreen(function () {
+  return import("./screens/AuditTrailScreen.jsx");
+}, "AuditTrailScreen");

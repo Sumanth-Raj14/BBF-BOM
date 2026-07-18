@@ -215,6 +215,11 @@ api_router.include_router(
     tags=["eco"],
 )
 api_router.include_router(
+    endpoints.esignature_api.router,
+    prefix="/esignatures",
+    tags=["esignatures"],
+)
+api_router.include_router(
     endpoints.work_order_api.router,
     prefix="/work-orders",
     tags=["work-orders"],
@@ -277,6 +282,14 @@ api_router.include_router(
     endpoints.compliance_api.router,
     prefix="/compliance",
     tags=["compliance"],
+)
+
+# RoHS/REACH substance compliance (substance catalog, part composition,
+# derived part/BOM compliance) — see frontend/api.js substanceComplianceAPI.
+api_router.include_router(
+    endpoints.substance_compliance_api.router,
+    prefix="/substance-compliance",
+    tags=["substance-compliance"],
 )
 
 # API Key Management

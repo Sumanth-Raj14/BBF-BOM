@@ -15,6 +15,7 @@ from app.integrations.events import emit_integration_event
 from app.models.audit_log import AuditLog
 from app.models.eco import EcoApproval, EcoHeader, EcoItem, EcoItemAttributeChange, EcoNotification
 from app.models.user import User
+from app.services.part11_service import sign_action
 
 # ECO change-control state machine (R8, surgical): the source status(es) an
 # ECO must be in for a given action to be legal. Full multi-approver
@@ -189,6 +190,8 @@ async def perform_eco_action(
     action: str,
     comments: Optional[str] = None,
     digital_signature: Optional[str] = None,
+    password: Optional[str] = None,
+    signature_meaning: Optional[str] = None,
 ) -> dict:
     tid = get_tenant_id()
     eco_stmt = select(EcoHeader).where(EcoHeader.id == eco_id)
@@ -235,6 +238,20 @@ async def perform_eco_action(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User lacks the designated ECO-approver role",
             )
+        # 21 CFR Part 11: approving an ECO requires a password-re-authenticated
+        # electronic signature, recorded (with an audit-log entry) BEFORE any
+        # state mutation below. A missing/invalid password raises
+        # HTTPException(401) here and the ECO does not transition.
+        await sign_action(
+            db,
+            current_user,
+            password,
+            action="eco.approve",
+            entity_type="eco",
+            entity_id=eco.id,
+            meaning=signature_meaning or comments or f"Approval of ECO {eco.eco_number}",
+            content={"eco_id": eco.id, "eco_number": eco.eco_number, "status": eco.status},
+        )
         eco.status = "approved"
         eco.approved_by = current_user.id
         eco.approved_at = now
@@ -255,6 +272,19 @@ async def perform_eco_action(
     elif action == "reject":
         eco.status = "draft"
     elif action == "implement":
+        # 21 CFR Part 11: implementing an ECO likewise requires a
+        # password-re-authenticated electronic signature before the state
+        # transition — same guardrail shape as "approve" above.
+        await sign_action(
+            db,
+            current_user,
+            password,
+            action="eco.implement",
+            entity_type="eco",
+            entity_id=eco.id,
+            meaning=signature_meaning or comments or f"Implementation of ECO {eco.eco_number}",
+            content={"eco_id": eco.id, "eco_number": eco.eco_number, "status": eco.status},
+        )
         eco.status = "implemented"
         eco.implemented_by = current_user.id
         eco.implemented_at = now

@@ -119,7 +119,7 @@ async def _approve_eco(client, headers, eco_id):
     resp = await client.post(
         f"/api/v1/eco/{eco_id}/action",
         headers=headers,
-        json={"action": "approve", "comments": "looks good"},
+        json={"action": "approve", "comments": "looks good", "password": "testpass123"},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "approved"
@@ -174,7 +174,7 @@ async def test_implement_approved_eco_succeeds(
     resp = await client.post(
         f"/api/v1/eco/{eco_id}/implement",
         headers=creator_headers,
-        params={"notes": "rolled out to production"},
+        params={"notes": "rolled out to production", "password": "testpass123"},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "implemented"

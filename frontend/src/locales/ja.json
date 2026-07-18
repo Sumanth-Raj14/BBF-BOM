@@ -1040,6 +1040,25 @@
     "searchAlternates": "代替品を検索",
     "rowsCount": "{{current}}行 - {{unique}}ユニーク"
   },
+  "complianceRollup": {
+    "bySubassembly": "コンプライアンス集計 - アセンブリ別",
+    "colRohs": "RoHSステータス",
+    "colReach": "REACHステータス",
+    "colFidelity": "データ精度",
+    "colObligations": "REACH義務件数",
+    "fidelity": {
+      "COMPUTED_FROM_FMD": "計算済み(FMD)",
+      "ASSERTED_FROM_SUMMARY": "申告(サマリー)",
+      "NO_DATA": "データなし"
+    }
+  },
+  "complianceStatus": {
+    "COMPLIANT": "適合",
+    "COMPLIANT_WITH_EXEMPTION": "適合(適用除外)",
+    "UNKNOWN": "不明",
+    "NON_COMPLIANT": "不適合",
+    "NOT_APPLICABLE": "対象外"
+  },
   "approvals": {
     "title": "承認受信箱",
     "subtitle": "BOM、発注、仕入先、部品全体で{{count}}件の未処理",

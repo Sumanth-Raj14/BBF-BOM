@@ -2,6 +2,7 @@ import PropTypes from "prop-types";
 
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import { ComplianceReportPanel } from "../components/ComplianceReportPanel.jsx";
 import {
   BomEditor,
   BomShell,
@@ -307,6 +308,12 @@ function BomEditorScreen({
         >
           {__t("bomShell.tabSourcing")}
         </button>
+        <button
+          className={"tab " + (bomTab === "compliance" ? "active" : "")}
+          onClick={() => setBomTab("compliance")}
+        >
+          {__t("bomShell.tabCompliance") || "Compliance"}
+        </button>
         <div className="flex-1" />
         <button
           className="tab fg-3"
@@ -541,6 +548,7 @@ function BomEditorScreen({
         {bomTab === "sourcing" && (
           <window.SourcingView data={data} onOpenDetail={onOpenDetail} />
         )}
+        {bomTab === "compliance" && <ComplianceReportPanel />}
         {selectedRow && (
           <Drawer
             row={selectedRow}

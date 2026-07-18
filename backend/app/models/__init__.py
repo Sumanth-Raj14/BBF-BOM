@@ -46,6 +46,7 @@ from app.models.enterprise_extensions import (
     ExchangeRate,
 )
 from app.models.erp_connector import ERPConnector, ERPSyncLog
+from app.models.esignature import ESignature
 from app.models.fai import FaiAttachment, FaiCharacteristic, FAIReport
 from app.models.inventory import (
     BinLocation,
@@ -90,6 +91,25 @@ from app.models.routing import (
 from app.models.service_bom import ServiceBomHeader, ServiceBomItem
 from app.models.session import UserSession
 from app.models.should_cost import ShouldCostModel
+
+# RoHS/REACH substance compliance — GLOBAL reference (substance.py), tenant-owned
+# composition/declarations (part_composition.py) and evaluation caches
+# (compliance_evaluation.py). The tenant-aware ones subclass TenantAwareMixin so
+# register_tenant_listeners() sees them via __subclasses__().
+from app.models.compliance_evaluation import ComplianceEvaluation, ReachObligation
+from app.models.part_composition import (
+    ExemptionClaim,
+    PartMaterial,
+    PartMaterialSubstance,
+    SubstanceDeclaration,
+)
+from app.models.substance import (
+    RegulationVersion,
+    RestrictedSubstanceEntry,
+    RohsExemption,
+    Substance,
+    SubstanceGroup,
+)
 from app.models.supplier_portal import (
     RfqHeader,
     RfqLineItem,

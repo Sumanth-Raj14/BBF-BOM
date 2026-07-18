@@ -73,6 +73,7 @@ export const SECTIONS = [
     items: [
       { id: "ai", label: "AI & Automation", icon: <Icon.Sparkles size={size} /> },
       { id: "activity", label: "Team Activity", icon: <Icon.User size={size} /> },
+      { id: "audit-trail", label: "Audit Trail", icon: <Icon.Activity size={size} /> },
     ],
   },
   {

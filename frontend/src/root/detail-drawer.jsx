@@ -1,6 +1,7 @@
 import PropTypes from "prop-types";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import { PartComplianceTab } from "../components/PartComplianceTab.jsx";
 import {
   Button,
   Badge,
@@ -135,6 +136,10 @@ function Drawer({ row, onClose, data, openModal, overlay }) {
             { value: "files", label: __t("detailDrawer.files") || "Files" },
             { value: "barcode", label: __t("detailDrawer.barcode") || "Barcode" },
             {
+              value: "compliance",
+              label: __t("detailDrawer.complianceTab") || "Compliance",
+            },
+            {
               value: "comments",
               label: __t("detailDrawer.comments") || "Comments",
               count: commentList.length || undefined,
@@ -162,6 +167,9 @@ function Drawer({ row, onClose, data, openModal, overlay }) {
           </TabPanel>
           <TabPanel id={DRAWER_TABS_ID} value="barcode" active={tab === "barcode"}>
             <BarcodeTab row={row} />
+          </TabPanel>
+          <TabPanel id={DRAWER_TABS_ID} value="compliance" active={tab === "compliance"}>
+            {tab === "compliance" && <PartComplianceTab row={row} />}
           </TabPanel>
           <TabPanel id={DRAWER_TABS_ID} value="comments" active={tab === "comments"}>
             <CommentsTab row={row} />

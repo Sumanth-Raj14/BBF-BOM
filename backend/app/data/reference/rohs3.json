@@ -1,0 +1,19 @@
+{
+  "_comment": "RoHS 3 (Directive 2011/65/EU as amended by (EU) 2015/863) Annex II restricted substances. Basis = homogeneous material. Cadmium @ 100 ppm (0.01%); all others @ 1000 ppm (0.1%). Ten entries: four metals, PBB family, PBDE family, four phthalates. Group entries (PBB/PBDE) match by group membership; phthalate entries are individual substances that also carry the PHTHALATES_4 group for exemption matching.",
+  "regulation_code": "ROHS3",
+  "version_label": "ROHS3-2015/863",
+  "effective_date": "2019-07-22",
+  "threshold_basis": "HOMOGENEOUS_MATERIAL",
+  "substances": [
+    { "name": "Lead", "cas_number": "7439-92-1", "ec_number": "231-100-4", "group": "LEAD_COMPOUNDS", "threshold_ppm": 1000 },
+    { "name": "Mercury", "cas_number": "7439-97-6", "ec_number": "231-106-7", "threshold_ppm": 1000 },
+    { "name": "Cadmium", "cas_number": "7440-43-9", "ec_number": "231-152-8", "threshold_ppm": 100 },
+    { "name": "Hexavalent chromium", "cas_number": "18540-29-9", "ec_number": null, "threshold_ppm": 1000 },
+    { "name": "Polybrominated biphenyls (PBB)", "group": "PBB", "threshold_ppm": 1000 },
+    { "name": "Polybrominated diphenyl ethers (PBDE)", "group": "PBDE", "threshold_ppm": 1000 },
+    { "name": "Bis(2-ethylhexyl) phthalate (DEHP)", "cas_number": "117-81-7", "ec_number": "204-211-0", "group": "PHTHALATES_4", "threshold_ppm": 1000 },
+    { "name": "Butyl benzyl phthalate (BBP)", "cas_number": "85-68-7", "ec_number": "201-622-7", "group": "PHTHALATES_4", "threshold_ppm": 1000 },
+    { "name": "Dibutyl phthalate (DBP)", "cas_number": "84-74-2", "ec_number": "201-557-4", "group": "PHTHALATES_4", "threshold_ppm": 1000 },
+    { "name": "Diisobutyl phthalate (DIBP)", "cas_number": "84-69-5", "ec_number": "201-553-2", "group": "PHTHALATES_4", "threshold_ppm": 1000 }
+  ]
+}
