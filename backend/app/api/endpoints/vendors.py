@@ -10,6 +10,8 @@ from app.core.deps import get_current_user
 from app.core.pagination import PageParams, get_page_params, paginate
 from app.core.rbac import require_vendors_write
 from app.db.session import get_db
+from app.integrations.events import emit_integration_event
+from app.integrations.zoho_snapshots import vendor_snapshot
 from app.models.user import User
 from app.models.vendor import Vendor
 
@@ -88,6 +90,9 @@ async def create_vendor(
     db.add(db_vendor)
     await db.commit()
     await db.refresh(db_vendor)
+    await emit_integration_event(
+        db, current_user.tenantId, "vendor", db_vendor.id, "created", vendor_snapshot(db_vendor))
+    await db.commit()
     return db_vendor
 
 
@@ -131,6 +136,9 @@ async def update_vendor(
 
     await db.commit()
     await db.refresh(db_vendor)
+    await emit_integration_event(
+        db, current_user.tenantId, "vendor", db_vendor.id, "updated", vendor_snapshot(db_vendor))
+    await db.commit()
     return db_vendor
 
 

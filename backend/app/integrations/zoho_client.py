@@ -1,14 +1,19 @@
-"""Zoho Books API client (FOUNDATION increment).
+"""Zoho Books API client.
 
-Provides lazy OAuth access-token refresh and an honest, read-only `verify()`
+Provides lazy OAuth access-token refresh, an honest read-only `verify()`
 (GET /organizations) wired into the existing `/integrations` test-connection
-dispatch for provider='zoho_books'. It NEVER fabricates success: an
-absent/invalid credential surfaces as a raised exception the endpoint maps to
-`not_configured`/`auth_failed`.
+dispatch, and (increment 2a) the OUTBOUND create/update calls the outbox
+delivery path uses to push Items / Contacts / Purchase Orders to Books.
 
-The outbound deliver path, inbound poll, sync-state upserts, rate-limit
-token-bucket, and conflict resolution are the NEXT increment and are
-deliberately NOT built here.
+It NEVER fabricates success: an absent/invalid credential surfaces as a raised
+exception the caller maps to `not_configured`/`auth_failed`, and a Books-side
+4xx/5xx raises `httpx.HTTPStatusError` (never a silent no-op).
+
+`organization_id` is appended to EVERY Books call EXCEPT `GET /organizations`
+(that endpoint runs at connect time, before an org id exists — spec §4.1).
+
+The inbound poll, sync-state upserts, conflict resolution, and the rate-limit
+token-bucket are the NEXT increment and are deliberately NOT built here.
 """
 
 import time
@@ -26,6 +31,19 @@ from app.integrations.zoho_oauth import (
 # lapses mid-flight.
 _TOKEN_SKEW_SECONDS = 300
 _HTTP_TIMEOUT = 15
+
+# entity_type -> (module path segment, create/update record key, id field).
+# The record key is the singular wrapper Books returns/accepts; the id field is
+# the opaque Zoho id stored in IntegrationExternalLink.external_id.
+ZOHO_MODULES: dict[str, dict[str, str]] = {
+    "part": {"module": "items", "record": "item", "id_field": "item_id"},
+    "vendor": {"module": "contacts", "record": "contact", "id_field": "contact_id"},
+    "purchase_order": {
+        "module": "purchaseorders",
+        "record": "purchaseorder",
+        "id_field": "purchaseorder_id",
+    },
+}
 
 
 class ZohoAuthError(Exception):
@@ -102,6 +120,38 @@ class ZohoBooksClient:
     def _auth_headers(self, token: str) -> dict:
         return {"Authorization": f"Zoho-oauthtoken {token}"}
 
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict | None = None,
+        params: dict | None = None,
+        with_org: bool = True,
+    ) -> dict:
+        """Issue one authenticated Books call, injecting `organization_id` on
+        everything except the org-listing endpoint (spec §4.1).
+
+        Raises httpx.HTTPStatusError on any 4xx/5xx so callers classify the
+        failure honestly (auth vs validation vs transient) — never a fake OK.
+        """
+        token = await self._ensure_token()
+        url = f"{books_base(self._api_domain)}{path}"
+        q = dict(params or {})
+        if with_org and self._organization_id:
+            q["organization_id"] = self._organization_id
+        close = self._http is None
+        http = self._http or httpx.AsyncClient(timeout=_HTTP_TIMEOUT)
+        try:
+            r = await http.request(
+                method, url, params=q or None, json=json, headers=self._auth_headers(token)
+            )
+            r.raise_for_status()
+            return r.json() or {}
+        finally:
+            if close:
+                await http.aclose()
+
     async def verify(self) -> dict:
         """Lightweight, read-only credential check: GET /organizations (built
         from api_domain with NO organization_id param — that id is not yet known
@@ -110,22 +160,32 @@ class ZohoBooksClient:
         Raises httpx.HTTPStatusError / ZohoAuthError on bad or absent creds so
         the caller reports an honest failure. Never creates/modifies anything.
         """
-        token = await self._ensure_token()
-        url = f"{books_base(self._api_domain)}/organizations"
-        close = self._http is None
-        http = self._http or httpx.AsyncClient(timeout=_HTTP_TIMEOUT)
-        try:
-            r = await http.get(url, headers=self._auth_headers(token))
-            r.raise_for_status()
-            body = r.json() or {}
-            orgs = body.get("organizations", []) or []
-            return {
-                "ok": True,
-                "organizations": [
-                    {"organization_id": o.get("organization_id"), "name": o.get("name")}
-                    for o in orgs
-                ],
-            }
-        finally:
-            if close:
-                await http.aclose()
+        body = await self._request("GET", "/organizations", with_org=False)
+        orgs = body.get("organizations", []) or []
+        return {
+            "ok": True,
+            "organizations": [
+                {"organization_id": o.get("organization_id"), "name": o.get("name")}
+                for o in orgs
+            ],
+        }
+
+    async def list_organizations(self) -> list[dict]:
+        """Return the raw org list for post-callback org selection (spec §5)."""
+        body = await self._request("GET", "/organizations", with_org=False)
+        return body.get("organizations", []) or []
+
+    async def create_record(self, module: str, payload: dict) -> dict:
+        """POST /{module} — create an Item/Contact/Purchase Order. Returns the
+        full Books response body; the caller extracts the record + its id."""
+        return await self._request("POST", f"/{module}", json=payload)
+
+    async def update_record(self, module: str, external_id: str, payload: dict) -> dict:
+        """PUT /{module}/{external_id} — update an existing Books record."""
+        return await self._request("PUT", f"/{module}/{external_id}", json=payload)
+
+    async def list_settings(self, kind: str) -> dict:
+        """Per-org settings lookup (currencies|taxes|chartofaccounts) used to
+        resolve opaque Books foreign keys on create (spec §4.1/§4.2). Read-only.
+        """
+        return await self._request("GET", f"/settings/{kind}")

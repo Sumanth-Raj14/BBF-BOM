@@ -96,9 +96,16 @@ async def create_procurement(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_procurement_write),
 ):
-    return await procurement_service.create_procurement(
+    result = await procurement_service.create_procurement(
         db, procurement.model_dump(), current_user.tenantId
     )
+    # Outbound PO create event (the deliver path reloads the header + lines).
+    await emit_integration_event(
+        db, current_user.tenantId, "purchase_order", result["id"], "created",
+        {"ref": result.get("poNumber"), "status": result.get("status")},
+    )
+    await db.commit()
+    return result
 
 
 @router.get("/alerts", response_model=list[AlertResponse])

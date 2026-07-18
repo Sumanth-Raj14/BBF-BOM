@@ -202,6 +202,9 @@ api_router.include_router(
 api_router.include_router(endpoints.teams.router, prefix="/teams", tags=["teams"])
 api_router.include_router(endpoints.work_queue.router, prefix="/work", tags=["work-queue"])
 api_router.include_router(endpoints.integrations.router, prefix="/integrations", tags=["integrations"])
+api_router.include_router(
+    endpoints.zoho_books.router, prefix="/integrations/zoho_books", tags=["zoho-books"]
+)
 
 # Enterprise Features
 api_router.include_router(
