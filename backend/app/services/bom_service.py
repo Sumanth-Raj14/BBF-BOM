@@ -1,21 +1,40 @@
 """BOM service layer — business logic for BOM management, explosion, rollup, snapshots, variants."""
 
+import hashlib
+import os
 from datetime import UTC, datetime
 from typing import Any, Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import cache_get, cache_invalidate, cache_set
+from app.core.clamav import combined_scan
+from app.core.config import settings
+from app.core.file_scanning import ALLOWED_EXTENSIONS, validate_upload
+from app.core.s3_storage import s3_storage
 from app.core.tenant_context import get_tenant_id
 from app.models.bom import BOM, BOMItem
 from app.models.bom_closure import BomClosure
 from app.models.bom_item import BomItem as TemplateBomItem
+from app.models.bom_item_custom_value import BomItemCustomValue
 from app.models.bom_snapshot import BomBaseline, BomSnapshot
 from app.models.bom_template import BomTemplate
 from app.models.bom_variant import BomVariant, BomVariantItem
+from app.models.document import Document
+from app.models.enterprise_extensions import CustomAttributeDefinition
 from app.models.part import Part
+
+# Upload location comes from settings (env-configurable via UPLOAD_DIR), same as
+# documents.py, so a packaged / read-only install can point it at a writable
+# data dir. Best-effort at import: never crash module import on a read-only or
+# missing path — the dir is created lazily on first write.
+_UPLOAD_DIR = settings.UPLOAD_DIR
+try:
+    os.makedirs(_UPLOAD_DIR, exist_ok=True)
+except OSError:
+    pass
 
 # Module-level part cache for explosion trees.
 # Keyed by (tenant_id, part_id) — NEVER by part_id alone — so a cache hit can
@@ -89,8 +108,20 @@ async def get_bom_detail(db: AsyncSession, bom_id: int) -> Optional[dict]:
     return data
 
 
-async def create_bom(db: AsyncSession, data: dict) -> BOM:
-    tid = get_tenant_id()
+async def create_bom(db: AsyncSession, data: dict, tenant_id: Optional[int] = None) -> BOM:
+    # Prefer an explicitly-passed tenant (from current_user.tenantId, matching
+    # create_bom_item / catalog_service.create_catalog); fall back to the ambient
+    # context. boms.tenantId is NOT NULL, so this must resolve to a real tenant.
+    tid = tenant_id if tenant_id is not None else get_tenant_id()
+    data = dict(data)
+    # boms.bom_number is NOT NULL (unique per tenant) with no DB default — auto-
+    # generate a tenant-scoped number when the caller didn't supply one.
+    if not data.get("bom_number"):
+        count_stmt = select(func.count()).select_from(BOM)
+        if tid is not None:
+            count_stmt = count_stmt.where(BOM.tenantId == tid)
+        count = (await db.execute(count_stmt)).scalar() or 0
+        data["bom_number"] = f"BOM-{datetime.now(UTC).year}-{count + 1:04d}"
     bom = BOM(**{k: v for k, v in data.items() if hasattr(BOM, k)}, tenantId=tid)
     db.add(bom)
     await db.commit()
@@ -117,6 +148,10 @@ _BOM_ITEM_WRITABLE_FIELDS = {
     "unit_cost_snapshot",
     "extended_cost",
     "notes",
+    # Line-item media / visibility (migration 045).
+    "image_document_id",
+    "thumbnail_path",
+    "exclude_from_bom",
 }
 
 
@@ -143,6 +178,9 @@ def _serialize_bom_item(item: BOMItem, part: Optional[Part] = None) -> dict:
         "unit_cost_snapshot": item.unit_cost_snapshot,
         "extended_cost": item.extended_cost,
         "notes": item.notes,
+        "image_document_id": item.image_document_id,
+        "thumbnail_path": item.thumbnail_path,
+        "exclude_from_bom": item.exclude_from_bom,
     }
 
 
@@ -179,6 +217,20 @@ async def _validate_parent(
             status_code=400,
             detail="parent_item_id must reference a line within the same BOM",
         )
+
+
+async def _validate_image_document(db: AsyncSession, tid, image_document_id: Optional[int]) -> None:
+    """If an image_document_id is being set directly (create/update body,
+    as opposed to via attach_bom_item_image), it must reference a real
+    Document belonging to the same tenant — otherwise a crafted id could
+    point a line at another tenant's document."""
+    if image_document_id is None:
+        return
+    stmt = select(Document).where(Document.id == image_document_id)
+    if tid is not None:
+        stmt = stmt.where(Document.tenantId == tid)
+    if not (await db.execute(stmt)).scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Document not found")
 
 
 async def _validate_no_duplicate(
@@ -410,6 +462,8 @@ async def create_bom_item(
     await _validate_no_duplicate(
         db, bom_id, tid, part_id, parent_item_id, data.get("reference_designator")
     )
+    if "image_document_id" in data:
+        await _validate_image_document(db, tid, data.get("image_document_id"))
 
     fields = {k: v for k, v in data.items() if k in _BOM_ITEM_WRITABLE_FIELDS}
     item = BOMItem(bom_id=bom.id, tenantId=tid, **fields)
@@ -444,6 +498,9 @@ async def update_bom_item(db: AsyncSession, bom_id: int, item_id: int, data: dic
             pr_stmt = pr_stmt.where(Part.tenantId == tid)
         if not (await db.execute(pr_stmt)).scalar_one_or_none():
             raise HTTPException(status_code=404, detail="Part not found")
+
+    if "image_document_id" in fields:
+        await _validate_image_document(db, tid, fields["image_document_id"])
 
     if "parent_item_id" in fields:
         await _validate_parent(db, bom_id, tid, fields["parent_item_id"], self_id=item.id)
@@ -510,6 +567,208 @@ async def reorder_bom_items(db: AsyncSession, bom_id: int, item_ids: list[int]) 
     return {"status": "reordered", "count": reordered}
 
 
+# ============ Line-item Image (OpenBOM-parity media) ============
+#
+# Attaches/clears the per-line image introduced by migration 045
+# (image_document_id / thumbnail_path on bom_items_master). The upload
+# pipeline (validate -> combined_scan -> content-hash filename -> S3-or-local)
+# mirrors app/api/endpoints/documents.py's upload_document exactly, since that
+# logic lives inline in the endpoint there rather than in a reusable service
+# function — Track B is scoped to bom_service.py/bom_enterprise.py only, so it
+# is reimplemented here rather than factored out of a file outside that scope.
+
+
+async def attach_bom_item_image(
+    db: AsyncSession,
+    bom_id: int,
+    item_id: int,
+    file: UploadFile,
+    tenant_id: Optional[int] = None,
+    uploaded_by: Optional[str] = None,
+) -> dict:
+    """Attach (or replace) the image for a BOM line. Creates a new Document
+    row for every call — including replacement — and simply repoints the
+    line's image_document_id/thumbnail_path at it; the previous Document row
+    (if any) is left alone rather than deleted, since it may still be
+    referenced elsewhere (e.g. document history)."""
+    tid = tenant_id if tenant_id is not None else get_tenant_id()
+    item = await _get_bom_item_or_404(db, bom_id, item_id, tid)
+
+    validate_upload(file)
+    content = await file.read()
+
+    scan_result = await combined_scan(content, file.filename or "unknown")
+    if not scan_result["clean"]:
+        raise HTTPException(status_code=400, detail="File rejected by security scan.")
+
+    # Never build a path from the client-supplied filename — derive a safe
+    # name from the content hash plus a whitelisted extension only (same rule
+    # as documents.py's upload_document).
+    file_hash = hashlib.md5(content).hexdigest()[:12]
+    raw_ext = os.path.splitext(file.filename or "")[1].lower().lstrip(".")
+    safe_ext = raw_ext if raw_ext.isalnum() and raw_ext in ALLOWED_EXTENSIONS else "bin"
+    safe_filename = f"{file_hash}.{safe_ext}"
+
+    s3_key = f"documents/BomItemImage/{safe_filename}"
+    content_type = file.content_type or "application/octet-stream"
+    s3_result = await s3_storage.upload_file(content, s3_key, content_type)
+
+    file_path = s3_result.get("localPath") or os.path.join(_UPLOAD_DIR, safe_filename)
+    if s3_result.get("storage") == "local_fallback":
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+    doc_url = s3_result.get("url") or f"/uploads/{safe_filename}"
+    doc = Document(
+        filename=safe_filename,
+        originalName=file.filename or "upload",
+        fileType=safe_ext,
+        fileSize=len(content),
+        filePath=file_path,
+        url=doc_url,
+        category="BomItemImage",
+        uploadedBy=uploaded_by,
+        tenantId=tid,
+    )
+    db.add(doc)
+    await db.flush()  # assigns doc.id
+
+    item.image_document_id = doc.id
+    item.thumbnail_path = doc_url
+
+    await db.commit()
+    await db.refresh(item)
+    await _invalidate_bom_caches(bom_id)
+
+    part = None
+    if item.part_id is not None:
+        pr = await db.execute(select(Part).where(Part.id == item.part_id))
+        part = pr.scalar_one_or_none()
+    return _serialize_bom_item(item, part)
+
+
+async def clear_bom_item_image(db: AsyncSession, bom_id: int, item_id: int) -> dict:
+    """Detach a line's image (clears image_document_id/thumbnail_path). The
+    underlying Document row is left in place — only the line's pointer to it
+    is cleared."""
+    tid = get_tenant_id()
+    item = await _get_bom_item_or_404(db, bom_id, item_id, tid)
+    item.image_document_id = None
+    item.thumbnail_path = None
+
+    await db.commit()
+    await db.refresh(item)
+    await _invalidate_bom_caches(bom_id)
+
+    part = None
+    if item.part_id is not None:
+        pr = await db.execute(select(Part).where(Part.id == item.part_id))
+        part = pr.scalar_one_or_none()
+    return _serialize_bom_item(item, part)
+
+
+# ============ Line-item Custom Attributes (ad-hoc columns) ============
+#
+# Reuses CustomAttributeDefinition (entity_type free-form, no CHECK constraint
+# / allowlist — app/models/enterprise_extensions.py) as the *schema* for
+# entity_type='bom_item' ad-hoc attributes, and BomItemCustomValue
+# (app/models/bom_item_custom_value.py, migration 046) as the *value* store
+# for one BOM line's answer to one of those definitions.
+
+
+async def get_bom_item_custom_attributes(db: AsyncSession, bom_id: int, item_id: int) -> list[dict]:
+    """Return one row per active entity_type='bom_item' CustomAttributeDefinition
+    for this tenant, with this line's value (None if never set) — the caller
+    always sees the full ad-hoc schema, not just the attributes that happen to
+    have a value."""
+    tid = get_tenant_id()
+    item = await _get_bom_item_or_404(db, bom_id, item_id, tid)
+
+    defs_stmt = select(CustomAttributeDefinition).where(
+        CustomAttributeDefinition.entity_type == "bom_item",
+        CustomAttributeDefinition.is_active.is_(True),
+    )
+    if tid is not None:
+        defs_stmt = defs_stmt.where(CustomAttributeDefinition.tenantId == tid)
+    definitions = (await db.execute(defs_stmt)).scalars().all()
+    if not definitions:
+        return []
+
+    values_stmt = select(BomItemCustomValue).where(BomItemCustomValue.bom_item_id == item.id)
+    if tid is not None:
+        values_stmt = values_stmt.where(BomItemCustomValue.tenantId == tid)
+    values_by_def = {
+        v.attribute_definition_id: v for v in (await db.execute(values_stmt)).scalars().all()
+    }
+
+    return [
+        {
+            "attribute_definition_id": d.id,
+            "attribute_name": d.attribute_name,
+            "display_name": d.display_name,
+            "value": values_by_def[d.id].value if d.id in values_by_def else None,
+        }
+        for d in definitions
+    ]
+
+
+async def set_bom_item_custom_attribute(
+    db: AsyncSession,
+    bom_id: int,
+    item_id: int,
+    attribute_definition_id: int,
+    value: Optional[str],
+    tenant_id: Optional[int] = None,
+) -> dict:
+    """Write (create or update) this line's value for one
+    entity_type='bom_item' custom-attribute definition. Scoped by bom_id +
+    tenantId on the line, and the definition must itself belong to the same
+    tenant and be scoped to entity_type='bom_item'."""
+    tid = tenant_id if tenant_id is not None else get_tenant_id()
+    item = await _get_bom_item_or_404(db, bom_id, item_id, tid)
+
+    def_stmt = select(CustomAttributeDefinition).where(
+        CustomAttributeDefinition.id == attribute_definition_id,
+        CustomAttributeDefinition.entity_type == "bom_item",
+    )
+    if tid is not None:
+        def_stmt = def_stmt.where(CustomAttributeDefinition.tenantId == tid)
+    definition = (await db.execute(def_stmt)).scalar_one_or_none()
+    if not definition:
+        raise HTTPException(
+            status_code=404,
+            detail="Custom attribute definition not found for entity_type='bom_item'",
+        )
+
+    row_stmt = select(BomItemCustomValue).where(
+        BomItemCustomValue.bom_item_id == item.id,
+        BomItemCustomValue.attribute_definition_id == attribute_definition_id,
+    )
+    if tid is not None:
+        row_stmt = row_stmt.where(BomItemCustomValue.tenantId == tid)
+    row = (await db.execute(row_stmt)).scalar_one_or_none()
+    if row is None:
+        row = BomItemCustomValue(
+            bom_item_id=item.id,
+            attribute_definition_id=attribute_definition_id,
+            value=value,
+            tenantId=tid,
+        )
+        db.add(row)
+    else:
+        row.value = value
+
+    await db.commit()
+    await db.refresh(row)
+
+    return {
+        "attribute_definition_id": definition.id,
+        "attribute_name": definition.attribute_name,
+        "display_name": definition.display_name,
+        "value": row.value,
+    }
+
+
 # ============ BOM Explosion (Multi-level) ============
 
 
@@ -524,7 +783,12 @@ async def _build_explosion_tree(
     if current_level > max_level:
         return []
     stmt = select(BOMItem).where(
-        BOMItem.bom_id == bom_id, BOMItem.parent_item_id == parent_item_id
+        BOMItem.bom_id == bom_id,
+        BOMItem.parent_item_id == parent_item_id,
+        # exclude_from_bom lines (and, as a consequence, their entire subtree —
+        # a skipped line's children are simply never recursed into below) are
+        # omitted from the explosion tree.
+        BOMItem.exclude_from_bom.is_(False),
     )
     if tid is not None:
         stmt = stmt.where(BOMItem.tenantId == tid)
@@ -601,7 +865,14 @@ async def get_bom_explosion_via_closure(db: AsyncSession, bom_id: int, level: in
     if cached is not None:
         return cached
 
-    items_stmt = select(BOMItem).where(BOMItem.bom_id == bom_id)
+    # exclude_from_bom lines are dropped from the source set entirely — since
+    # `build()` below only visits a node by recursing into its PARENT's
+    # children, a dropped line's own children (still in `items_by_parent`,
+    # keyed by the dropped line's id) are never reached, so its whole subtree
+    # disappears from the tree exactly as in get_bom_explosion.
+    items_stmt = select(BOMItem).where(
+        BOMItem.bom_id == bom_id, BOMItem.exclude_from_bom.is_(False)
+    )
     if tid is not None:
         items_stmt = items_stmt.where(BOMItem.tenantId == tid)
     items = (await db.execute(items_stmt)).scalars().all()
@@ -787,13 +1058,53 @@ def _compute_levels_and_effective_qty(
     return levels, effective
 
 
+def _drop_excluded_subtrees(items: list[BOMItem]) -> list[BOMItem]:
+    """Return only items that are neither exclude_from_bom nor have any
+    exclude_from_bom ancestor.
+
+    The explosion views (get_bom_explosion / get_bom_explosion_via_closure) drop
+    an excluded line AND its entire subtree — a skipped parent's children are
+    never reached. The quantity/cost rollups MUST agree on the same data.
+    Filtering ``exclude_from_bom == False`` in SQL alone does NOT: it removes the
+    excluded parent but leaves its children, which then re-root as level-1 and
+    are still counted (minus the excluded parent's qty multiplier), so explosion
+    and rollup contradict each other. Walking ancestor chains over the FULL item
+    set here reproduces the explosion's cascade-drop semantics.
+    """
+    id_map = {item.id: item for item in items}
+    dropped: dict[int, bool] = {}
+
+    def is_dropped(item_id: int, visiting: set[int]) -> bool:
+        if item_id in dropped:
+            return dropped[item_id]
+        item = id_map[item_id]
+        if bool(item.exclude_from_bom):
+            dropped[item_id] = True
+            return True
+        parent_id = item.parent_item_id
+        if parent_id is None or parent_id not in id_map or item_id in visiting:
+            dropped[item_id] = False
+            return False
+        visiting.add(item_id)
+        result = is_dropped(parent_id, visiting)
+        visiting.discard(item_id)
+        dropped[item_id] = result
+        return result
+
+    return [item for item in items if not is_dropped(item.id, set())]
+
+
 async def get_quantity_rollup(db: AsyncSession, bom_id: int) -> dict:
     await get_bom_or_404(db, bom_id)
     tid = get_tenant_id()
+    # Fetch the FULL item set, then drop each exclude_from_bom line together with
+    # its entire subtree (see _drop_excluded_subtrees) so this rollup agrees with
+    # the explosion views. Filtering exclude_from_bom in SQL alone would re-root
+    # an excluded parent's children and keep counting them.
     items_stmt = select(BOMItem).where(BOMItem.bom_id == bom_id)
     if tid is not None:
         items_stmt = items_stmt.where(BOMItem.tenantId == tid)
-    items = (await db.execute(items_stmt)).scalars().all()
+    items = _drop_excluded_subtrees((await db.execute(items_stmt)).scalars().all())
 
     part_ids = {i.part_id for i in items if i.part_id}
     parts = {}
@@ -843,11 +1154,11 @@ async def get_cost_rollup(db: AsyncSession, bom_id: int) -> dict:
 
     await get_bom_or_404(db, bom_id)
     tid = get_tenant_id()
+    # Same exclude_from_bom cascade-drop semantics as get_quantity_rollup above.
     items_stmt = select(BOMItem).where(BOMItem.bom_id == bom_id)
     if tid is not None:
         items_stmt = items_stmt.where(BOMItem.tenantId == tid)
-    items_result = await db.execute(items_stmt)
-    items = items_result.scalars().all()
+    items = _drop_excluded_subtrees((await db.execute(items_stmt)).scalars().all())
 
     part_ids = [item.part_id for item in items if item.part_id]
     parts_map: dict[int, Any] = {}

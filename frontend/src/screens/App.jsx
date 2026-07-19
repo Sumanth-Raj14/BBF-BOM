@@ -62,6 +62,7 @@ import {
   IntegrationsScreen,
   AuditTrailScreen,
   ZohoBooksScreen,
+  CatalogsScreen,
 } from "../components/LazyScreens.jsx";
 
 const ErrBD = (p) =>
@@ -574,6 +575,10 @@ function AppShell() {
             <Route
               path="/zoho-books"
               element={<GenericScreen Component={ZohoBooksScreen} />}
+            />
+            <Route
+              path="/catalogs"
+              element={<GenericScreen Component={CatalogsScreen} />}
             />
             <Route path="*" element={<FourOhFour />} />
           </Routes>

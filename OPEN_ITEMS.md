@@ -64,6 +64,7 @@ This document tracks outstanding work across the Blackbox BOM platform (backend 
 | **RFQ response tracking** | Feature Gap | LOW | Backend | OPEN | v2.5 | RFQ models exist; supplier response workflows not fully implemented. |
 | **Encryption key rotation** | Security | MEDIUM | Backend | OPEN | v2.2 | TOTP encryption uses single Fernet key. No key rotation or escrow mechanism. |
 | **Secret management (production)** | Security | HIGH | DevOps | OPEN | v2.1 | .env secrets should move to vault/secret manager for production. Currently file-based. |
+| **Mfg-BOM workbook field parity (7 items)** | Feature Gap | MEDIUM | Product | OPEN | v2.5 | Field-level parity with a customer's "Master Manufacturing BOM" workbook. Top item = per-line component image thumbnails in the BOM grid (HIGH). See [Manufacturing-BOM Workbook Field-Parity Backlog](#manufacturing-bom-workbook-field-parity-backlog-2026-07-19). Logged 2026-07-19 from a gap analysis; **no code changes made** — tracking only. |
 
 ---
 
@@ -304,6 +305,30 @@ Alembic's default `alembic_version.version_num` column is VARCHAR(32). Migration
 
 ---
 
+## Manufacturing-BOM Workbook Field-Parity Backlog (2026-07-19)
+
+**Source:** gap analysis of a customer's `Master Manufacturing BOM.xlsx` (32 tabs: Machining, Fabrication, Anodising, Fasteners, Misumi, Festo, Electronics, Pneumatics, Budget, POs, Not Yet Ordered, etc.) against the current tool.
+**Finding:** ~80% of the workbook's per-line detail already maps to existing tool concepts (parts, custom attributes, documents, inventory, vendors, POs). The items below are the ~20% that are **not native** and would be needed for true field-level parity.
+**Status:** LOGGED ONLY — no product code was changed. This is the confirmed enhancement backlog for later prioritization. Related existing gap: "Excel direct import" (see Feature Gaps table) and `COMPARISON.md`.
+
+Ordered by the priority the customer weighted (image-per-line is the top item, called out twice):
+
+| # | Enhancement | What the tool has today | What's missing (the gap) | Priority | Est. effort |
+|---|-------------|-------------------------|--------------------------|----------|-------------|
+| 1 | **Per-line component image / thumbnail** | Images attach as documents to a part | A thumbnail-per-row shown inline in the BOM grid, and preserved on rows imported from vendor-catalog tabs (item 7). This is a per-line image *column*, not a separate documents area. | **HIGH** | Medium |
+| 2 | **Structured Process / Precision / Machining-process fields** | Only generic custom attributes | Native, typed columns with controlled vocab (e.g. Process = Routing/Milling; Precision = High/Medium; source = COTS) so they filter/report/roll-up, not free-text customs | MEDIUM | Medium |
+| 3 | **Typed multi-CAD-link columns per line** | One documents area per part | Separate native per-line fields: DWG + STEP + DXF links **and** a "drawing status" field, distinct from generic document attachments | MEDIUM | Medium |
+| 4 | **Required-vs-Utilized-vs-Inventory reconciliation view** | Data exists across inventory + BOM + procurement domains | A single grid showing, per component: needed / used-in-machine / in-stock / $ amount in one screen. Data is present but not surfaced as one native reconciliation view | MEDIUM (high value) | High |
+| 5 | **Dual per-part approval (Internal + External)** | Approval is workflow/ECO-based | Two independent approval flags (Internal approved + External approved) per component line, as the workbook models them | MEDIUM | Low–Medium |
+| 6 | **Phased ordering + Budget-vs-actual + "Not Yet Ordered" views** | POs exist | Procurement/budget rollup views: phased ordering, budget-vs-actual, and a "not yet ordered" queue as out-of-box screens | MEDIUM | High |
+| 7 | **Vendor-catalog import (Misumi / Festo tabs)** | One consolidated vendor/part model (structurally better than per-vendor sheets) | An importer that maps per-vendor catalog tabs into the unified model — **and carries the per-line image column** (ties back to item 1) rather than dropping it | LOW–MEDIUM | Medium |
+
+**Note on item 7:** the tool's single vendor/part model is deliberately better than keeping one sheet per vendor, so those tabs would be *imported and consolidated*, not preserved as separate sheets. The one thing that must survive the import is the image column, which is why it reinforces item 1.
+
+**Target:** v2.5 (feature parity pass). None of these block v2.1.0 / production deploy.
+
+---
+
 ## Architecture & Design Decisions
 
 ### Current Architecture
@@ -438,3 +463,4 @@ Per the project plan: feat/regulated, feat/zoho-books, and feat/polish are featu
 - Fresh Postgres installs now verified (155 tables)
 - Desktop packaging (WS7) shipped; PITR/WAL live verification pending
 - Identified 5 new OPEN items (test RE-BASELINE, PITR verification, code-signing, autosave, rate-limiting)
+- Added "Manufacturing-BOM Workbook Field-Parity Backlog" (7 items, v2.5 target) from a customer xlsx gap analysis — tracking only, no code changes

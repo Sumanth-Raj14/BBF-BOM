@@ -116,6 +116,37 @@ describe('convertApiPartsToTree', () => {
     expect(cable.customFields).toEqual({});
     expect(cable.countryHistory).toEqual([]);
     expect(cable.vendorPrices).toEqual([]);
+
+    // No `bomItems` arg was passed, so every row's line-item media /
+    // visibility fields (migration 045) fall back to their unset defaults.
+    expect(washer.imageDocumentId).toBeNull();
+    expect(washer.thumbnailPath).toBeNull();
+    expect(washer.excludeFromBom).toBe(false);
+  });
+
+  it('threads bom_items_master line-item media/visibility fields onto the matched row', () => {
+    const bomItems = [
+      {
+        id: 501,
+        part_id: 101,
+        quantity: 3,
+        image_document_id: 77,
+        thumbnail_path: '/uploads/thumbs/77.png',
+        exclude_from_bom: true,
+      },
+    ];
+    const tree = convertApiPartsToTree(sampleApiResponse, bomItems);
+    const bolt = tree[0];
+    expect(bolt.bomItemId).toBe(501);
+    expect(bolt.imageDocumentId).toBe(77);
+    expect(bolt.thumbnailPath).toBe('/uploads/thumbs/77.png');
+    expect(bolt.excludeFromBom).toBe(true);
+
+    // Unmatched rows still default cleanly.
+    const washer = tree[1];
+    expect(washer.imageDocumentId).toBeNull();
+    expect(washer.thumbnailPath).toBeNull();
+    expect(washer.excludeFromBom).toBe(false);
   });
 
   it('output has correct tree node structure', () => {
@@ -126,7 +157,7 @@ describe('convertApiPartsToTree', () => {
       'origin', 'status', 'assembly', 'material', 'weight',
       'dimensions', 'imageUrl', 'customFields', 'tags', 'compliance',
       'freight', 'tax', 'landedCost', 'countryHistory', 'vendorPrices',
-      'cadUrl', 'barcode',
+      'cadUrl', 'barcode', 'imageDocumentId', 'thumbnailPath', 'excludeFromBom',
     ];
     for (const node of tree) {
       for (const key of keys) {

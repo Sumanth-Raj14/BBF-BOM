@@ -3,7 +3,7 @@ import { storage } from "../utils/storage.js";
 import { useAutosave } from "../hooks/useAutosave.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
-import { Button, Badge, StatusPill } from "../components/ui/index.js";
+import { Button, Badge, StatusPill, Switch } from "../components/ui/index.js";
 // BOM editor — multi-level table with hierarchy, expand/collapse, inline edit,
 // bulk select, drag-reorder, sparkline cost trend, lead-time heatbar.
 function getRate() {
@@ -235,6 +235,155 @@ EditableCell.propTypes = {
   align: PropTypes.string,
   prefix: PropTypes.string,
 };
+// Per-line thumbnail: upload/replace the image on this ONE bom_items_master
+// occurrence of the part (distinct from the part's own `imageUrl` — see the
+// comment in utils/bom.js). Requires a real `bomItemId` to attach to, since
+// the image is persisted via image_document_id/thumbnail_path on that row.
+function ThumbCell({ row, bomId, onSaved }) {
+  const inputRef = React.useRef(null);
+  const [uploading, setUploading] = React.useState(false);
+  const [previewUrl, setPreviewUrl] = React.useState(null);
+  const handleFile = async (file) => {
+    if (!file) return;
+    if (row.bomItemId == null) {
+      toast(
+        __t("bom.imageNeedsSavedLine") ||
+          "Add this line to the BOM before attaching an image",
+        { kind: "warn" },
+      );
+      return;
+    }
+    const localUrl = URL.createObjectURL(file);
+    setPreviewUrl(localUrl);
+    setUploading(true);
+    try {
+      const doc = await api.documents.upload(file, {
+        category: "image",
+        partId: typeof row.partId === "number" ? row.partId : undefined,
+      });
+      const path = doc.url || doc.filePath || null;
+      await api.bomEnterprise.items.update(bomId, row.bomItemId, {
+        image_document_id: doc.id,
+        thumbnail_path: path,
+      });
+      onSaved(row.id, { thumbnailPath: path, imageDocumentId: doc.id });
+      toast(__t("bom.imageUpdated") || "Line image updated", {
+        kind: "success",
+      });
+    } catch (err) {
+      toast(
+        (__t("bom.imageUploadFailed") || "Failed to save line image") +
+          ": " +
+          (err?.message || "server error"),
+        { kind: "error" },
+      );
+    } finally {
+      setUploading(false);
+      setPreviewUrl(null);
+      URL.revokeObjectURL(localUrl);
+    }
+  };
+  const src = previewUrl || row.thumbnailPath;
+  return (
+    <span className="bom-thumb-wrap">
+      <input
+        ref={inputRef}
+        id={"bom-thumb-input-" + row.id}
+        name="bomThumbUpload"
+        type="file"
+        accept="image/*"
+        className="d-none"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          handleFile(file);
+        }}
+        aria-label={
+          (__t("bom.uploadLineImage") || "Upload line image") + " " + row.pn
+        }
+      />
+      <button
+        type="button"
+        className={"bom-thumb-btn " + (uploading ? "uploading" : "")}
+        onClick={() => inputRef.current?.click()}
+        disabled={uploading}
+        title={
+          src
+            ? __t("bom.replaceImage") || "Replace image"
+            : __t("bom.addImage") || "Add image"
+        }
+      >
+        {src ? (
+          <img src={src} alt="" className="bom-thumb" />
+        ) : (
+          <Icon.Upload size={12} />
+        )}
+      </button>
+    </span>
+  );
+}
+ThumbCell.propTypes = {
+  row: PropTypes.object,
+  bomId: PropTypes.any,
+  onSaved: PropTypes.func,
+};
+// Ad-hoc custom columns for entity_type='bom_item' attribute definitions
+// (custom_attribute_definitions — see enterprise_ext_api.py). That system
+// only stores DEFINITIONS (name/type/options), never per-instance VALUES —
+// there is no bom-item-scoped value table. The one value store that already
+// round-trips to the server end-to-end is Part.customFields (a JSON column,
+// wired via api.parts.update — same field the detail drawer's "Custom
+// Fields" section reads). So for a Part-backed row, values are read/written
+// through row.customFields keyed by the attribute's name; for a purely
+// local/unsaved row (no partId yet) the edit is local-only + autosave-
+// drafted, same limitation every other field has on an unconfirmed new row.
+function CustomAttrCell({ row, def, onCommit }) {
+  const key = def.name || def.attribute_name;
+  const dataType = def.data_type || def.attribute_type;
+  const value = row.customFields ? row.customFields[key] : undefined;
+  const options = def.options_normalized || [];
+  if (dataType === "boolean") {
+    return (
+      <Switch
+        checked={!!value}
+        onChange={(next) => onCommit(row, def, next)}
+        aria-label={(def.display_name || key) + " " + row.pn}
+      />
+    );
+  }
+  if (options.length > 0) {
+    return (
+      <select
+        id={"bom-attr-" + def.id + "-" + row.id}
+        name={"bomAttr" + def.id}
+        className="custom-attr-select"
+        value={value ?? ""}
+        onChange={(e) => onCommit(row, def, e.target.value)}
+        aria-label={def.display_name || key}
+      >
+        <option value="">{"—"}</option>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label || o.value}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <EditableCell
+      value={value ?? ""}
+      align={dataType === "number" ? "right" : "left"}
+      mono={dataType === "number"}
+      onCommit={(v) => onCommit(row, def, v)}
+    />
+  );
+}
+CustomAttrCell.propTypes = {
+  row: PropTypes.object,
+  def: PropTypes.object,
+  onCommit: PropTypes.func,
+};
 export const STATUS_CLASS = {
   Released: "released",
   Draft: "draft",
@@ -281,6 +430,27 @@ export function BomEditor({
   const [dirty, setDirty] = React.useState(false);
   const dirtyRef = React.useRef(false);
   const [saving, setSaving] = React.useState(false);
+  // Ad-hoc custom columns: definitions for entity_type='bom_item' (see
+  // CustomAttrCell comment above for why values ride on Part.customFields).
+  // `apiRequest` is a bare global (window.apiRequest, set by api.js) like
+  // `api`/`Icon` elsewhere in this file — guarded with typeof so a test
+  // harness that doesn't stub it degrades to "no custom columns" instead of
+  // throwing.
+  const [bomItemAttrDefs, setBomItemAttrDefs] = React.useState([]);
+  React.useEffect(() => {
+    if (typeof apiRequest !== "function") return;
+    let cancelled = false;
+    apiRequest("/enterprise/custom-attributes?entity_type=bom_item")
+      .then((defs) => {
+        if (!cancelled) setBomItemAttrDefs(Array.isArray(defs) ? defs : []);
+      })
+      .catch(() => {
+        if (!cancelled) setBomItemAttrDefs([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   React.useEffect(() => {
     const onBefore = (e) => {
       if (dirtyRef.current) {
@@ -560,6 +730,8 @@ export function BomEditor({
     if ("qty" in patch) structuralPatch.quantity = patch.qty;
     if ("refDes" in patch) structuralPatch.reference_designator = patch.refDes;
     if ("findNumber" in patch) structuralPatch.find_number = patch.findNumber;
+    if ("excludeFromBom" in patch)
+      structuralPatch.exclude_from_bom = patch.excludeFromBom;
     if (row?.bomItemId != null && Object.keys(structuralPatch).length > 0) {
       api.bomEnterprise.items
         .update(bomId, row.bomItemId, structuralPatch)
@@ -586,6 +758,51 @@ export function BomEditor({
       align="right"
       onCommit={(v) => inlineEdit(row.id, { qty: parseFloat(v) || 0 })}
     />
+  );
+  // Thumbnail upload/replace already persisted server-side (ThumbCell awaits
+  // both the document upload and the bom_items_master PATCH before calling
+  // this) — just reconcile local row state so the UI reflects it.
+  const handleThumbSaved = React.useCallback(
+    (rowId, patch) => {
+      setRows((cur) => updateRow(cur, rowId, patch));
+      markDirty();
+    },
+    [setRows, markDirty],
+  );
+  // See CustomAttrCell comment: values for entity_type='bom_item' custom
+  // columns are stored in row.customFields (Part.customFields JSON) since
+  // there is no bom-item-scoped value table. Only Part-backed rows can sync
+  // to the server; a purely local row keeps the edit in local state + the
+  // autosave draft, same as any other field on an unconfirmed new row.
+  const commitCustomAttr = React.useCallback(
+    (row, def, rawValue) => {
+      const key = def.name || def.attribute_name;
+      if (!key) return;
+      const dataType = def.data_type || def.attribute_type;
+      let value = rawValue;
+      if (dataType === "number") {
+        value = rawValue === "" || rawValue == null ? null : Number(rawValue);
+      } else if (dataType === "boolean") {
+        value = !!rawValue;
+      }
+      const nextFields = { ...(row.customFields || {}), [key]: value };
+      setRows((cur) => updateRow(cur, row.id, { customFields: nextFields }));
+      markDirty();
+      if (typeof row.partId === "number") {
+        api.parts.update(row.partId, { customFields: nextFields }).catch((e) => {
+          console.warn(
+            "[BomEditor] custom attribute sync failed for",
+            row.id,
+            e.message,
+          );
+          toast(
+            __t("bom.saveFailed") || "Edit saved locally — server sync failed",
+            { kind: "warn" },
+          );
+        });
+      }
+    },
+    [setRows, markDirty],
   );
   return (
     <>
@@ -741,6 +958,7 @@ export function BomEditor({
             <colgroup>
               <col className="col-drag" />
               <col className="col-check" />
+              <col className="col-thumb" />
               <col className="col-pn" />
               <col className="col-name" />
               <col className="col-rev" />
@@ -753,7 +971,11 @@ export function BomEditor({
               <col className="col-lead" />
               <col className="col-origin" />
               <col className="col-status" />
+              <col className="col-exclude" />
               <col className="col-trend" />
+              {bomItemAttrDefs.map((def) => (
+                <col key={"attr-col-" + def.id} className="col-custom-attr" />
+              ))}
               <col className="col-actions" />
             </colgroup>
             <thead>
@@ -772,6 +994,9 @@ export function BomEditor({
                     aria-label={__t("bom.selectAllRows") || "Select all rows"}
                   />
                 </th>
+                <th className="col-thumb">
+                  {__t("bom.colImage") || "Image"}
+                </th>
                 <th>{__t("bom.colPartNo") || "Part No."}</th>
                 <th>{__t("bom.colName") || "Name"}</th>
                 <th>{__t("bom.colRev") || "Rev"}</th>
@@ -784,14 +1009,23 @@ export function BomEditor({
                 <th>{__t("bom.colLead") || "Lead"}</th>
                 <th>{__t("bom.colOrigin") || "Origin"}</th>
                 <th>{__t("bom.colStatus") || "Status"}</th>
+                <th>{__t("bom.colExclude") || "Exclude"}</th>
                 <th>{__t("bom.colTrend") || "Cost Trend"}</th>
+                {bomItemAttrDefs.map((def) => (
+                  <th key={"attr-th-" + def.id}>
+                    {def.display_name || def.name || def.attribute_name}
+                  </th>
+                ))}
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {flat.length === 0 ? (
                 <tr>
-                  <td colSpan={16} className="text-center p-0">
+                  <td
+                    colSpan={18 + bomItemAttrDefs.length}
+                    className="text-center p-0"
+                  >
                     <div className="empty-state">
                       <div className="fg-3 mb-12">
                         {search ||
@@ -830,7 +1064,8 @@ export function BomEditor({
                         (isSelected ? "selected " : "") +
                         (focused === row.id ? "focused " : "") +
                         (dragId === row.id ? "dragging " : "") +
-                        (dropId === row.id ? "drop-target " : "")
+                        (dropId === row.id ? "drop-target " : "") +
+                        (row.excludeFromBom ? "excluded " : "")
                       }
                       aria-selected={isSelected}
                       aria-expanded={
@@ -867,6 +1102,13 @@ export function BomEditor({
                           aria-label={
                             (__t("bom.selectRow") || "Select") + " " + row.pn
                           }
+                        />
+                      </td>
+                      <td className="col-thumb">
+                        <ThumbCell
+                          row={row}
+                          bomId={bomId}
+                          onSaved={handleThumbSaved}
                         />
                       </td>
                       <td
@@ -959,9 +1201,35 @@ export function BomEditor({
                       <td>
                         <StatusPill status={row.status} />
                       </td>
+                      <td className="col-exclude">
+                        <Switch
+                          checked={!!row.excludeFromBom}
+                          onChange={(next) =>
+                            inlineEdit(row.id, { excludeFromBom: next })
+                          }
+                          aria-label={
+                            (__t("bom.excludeFromBom") ||
+                              "Exclude from BOM") +
+                            " " +
+                            row.pn
+                          }
+                          title={
+                            __t("bom.excludeFromBom") || "Exclude from BOM"
+                          }
+                        />
+                      </td>
                       <td>
                         <Sparkline data={row.trend} />
                       </td>
+                      {bomItemAttrDefs.map((def) => (
+                        <td key={"attr-td-" + def.id + "-" + row.id}>
+                          <CustomAttrCell
+                            row={row}
+                            def={def}
+                            onCommit={commitCustomAttr}
+                          />
+                        </td>
+                      ))}
                       <td>
                         <span className="inline-flex gap-2">
                           <Button

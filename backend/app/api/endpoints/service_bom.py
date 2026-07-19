@@ -47,6 +47,28 @@ class ServiceBomMergeRequest(BaseModel):
     conflict_resolution: str = "keep_highest_qty"
 
 
+@router.get("/")
+async def list_enterprise_boms(
+    skip: int = 0,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Enterprise collection root — service BOM headers (delegates to
+    list_service_boms so the two views cannot drift)."""
+    return await list_service_boms(skip=skip, limit=limit, db=db, current_user=current_user)
+
+
+@router.post("/")
+async def create_enterprise_bom(
+    body: ServiceBomHeaderCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Enterprise collection root create (delegates to create_service_bom)."""
+    return await create_service_bom(body=body, db=db, current_user=current_user)
+
+
 @router.get("/service-bom")
 async def list_service_boms(
     skip: int = 0,
@@ -78,9 +100,12 @@ async def create_service_bom(
     count_result = await db.execute(text("SELECT COUNT(*) FROM service_bom_headers"))
     count = count_result.scalar() or 0
     bom_number = f"SBOM-{datetime.now().year}-{count + 1:04d}"
+    # Raw text() INSERT bypasses the ORM tenant listener that normally
+    # auto-populates tenantId, so set it explicitly (the column is NOT NULL).
+    # "tenantId" is quoted to preserve the camelCase identifier on Postgres.
     await db.execute(
         text(
-            "INSERT INTO service_bom_headers (bom_number, name, description, parent_product_pn, service_type, created_by) VALUES (:bn, :name, :desc, :ppn, :st, :uid)"
+            'INSERT INTO service_bom_headers (bom_number, name, description, parent_product_pn, service_type, created_by, "tenantId") VALUES (:bn, :name, :desc, :ppn, :st, :uid, :tid)'
         ),
         {
             "bn": bom_number,
@@ -89,6 +114,7 @@ async def create_service_bom(
             "ppn": body.parent_product_pn,
             "st": body.service_type,
             "uid": current_user.id,
+            "tid": current_user.tenantId,
         },
     )
     await db.commit()

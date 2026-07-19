@@ -61,6 +61,14 @@ export function convertApiPartsToTree(apiParts, bomItems) {
       bomItemId: item ? item.id : null,
       refDes: item ? item.reference_designator : undefined,
       findNumber: item ? item.find_number : undefined,
+      // Line-item media / visibility (migration 045: bom_items_master gained
+      // image_document_id / thumbnail_path / exclude_from_bom). These live on
+      // the bom_items_master line itself, NOT on the Part, so \u2014 unlike
+      // `imageUrl` above, which is the Part's own picture \u2014 a thumbnail set
+      // here only applies to this one BOM occurrence of the part.
+      imageDocumentId: item ? item.image_document_id : null,
+      thumbnailPath: item ? item.thumbnail_path : null,
+      excludeFromBom: item ? !!item.exclude_from_bom : false,
       partId: p.id,
     };
   });

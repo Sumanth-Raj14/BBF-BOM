@@ -1,6 +1,7 @@
 """BOM master model — represents a Bill of Materials header."""
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -11,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -69,6 +71,14 @@ class BOMItem(Base, TenantAwareMixin):
     unit_cost_snapshot = Column(Numeric(10, 4))
     extended_cost = Column(Numeric(10, 4))
     notes = Column(Text)
+
+    # OpenBOM-parity line-item media / visibility (migration 045)
+    image_document_id = Column(
+        Integer, ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    thumbnail_path = Column(String, nullable=True)
+    exclude_from_bom = Column(Boolean, nullable=False, server_default=false(), default=False)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

@@ -33,6 +33,11 @@ class ServiceBomHeader(Base, TenantAwareMixin):
     parent_product_pn = Column(String(100))
     revision = Column(Integer, default=1)
     status = Column(String(50), default="draft")
+    # Added to production Postgres by migration 008 (ADD COLUMN service_type
+    # VARCHAR(50) DEFAULT 'maintenance'); mirrored here so create_all builds a
+    # matching table and the raw INSERT in the service-BOM endpoints works on
+    # SQLite too. Was previously model/migration drift.
+    service_type = Column(String(50), default="maintenance")
     created_by = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     __table_args__ = (
         Index("idx_service_bom_headers_tenant_status", "tenantId", "status"),

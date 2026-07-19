@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clamav import combined_scan
+from app.core.config import settings
 from app.core.deps import get_current_user
 from app.core.file_scanning import ALLOWED_EXTENSIONS, validate_upload
 from app.core.pagination import PageParams, get_page_params
@@ -31,11 +32,21 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-UPLOAD_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-    "uploads",
-)
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# Upload location comes from settings (env-configurable via UPLOAD_DIR) so a
+# packaged / read-only install can point it at a writable data dir instead of
+# the app directory. Pre-creating it is best-effort: never let a read-only or
+# missing path crash module import — the directory is created lazily on first
+# write. (A hardcoded __file__-relative path under Program Files was the cause
+# of the desktop backend crashing on import with PermissionError.)
+UPLOAD_DIR = settings.UPLOAD_DIR
+try:
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+except OSError as exc:
+    logger.warning(
+        "Could not pre-create UPLOAD_DIR %s at import (%s); will create on first use",
+        UPLOAD_DIR,
+        exc,
+    )
 
 
 class DocumentResponse(BaseModel):
