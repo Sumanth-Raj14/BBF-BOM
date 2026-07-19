@@ -50,9 +50,9 @@ jobs:
       POSTGRES_PASSWORD: ci_postgres_pw_9f3a7c1e
       POSTGRES_DB: bom_db
       DATABASE_URL: postgresql+asyncpg://bom_user:ci_postgres_pw_9f3a7c1e@127.0.0.1:5432/bom_db
-      SECRET_KEY: ci-postgres-track-secret-key-do-not-use-in-prod-9f3a7c1e4b2d
+      SECRET_KEY: ci-pg-track-signkey-donotuse-9f3a7c1e4b2d5a8b6d4f2a0c8e7b
       ENCRYPTION_KEY: ci-postgres-track-encryption-key-do-not-use-in-prod-4b2d9f3a
-      S3_SECRET_KEY: ci-postgres-track-s3-secret-key-do-not-use-in-prod-7c1e4b2d
+      S3_SECRET_KEY: ci-pg-track-s3key-donotuse-7c1e4b2d9f3a5a8b6d4f2a0c8e7b
       ADMIN_EMAIL: ci@blackbox-bom.com
 
     steps:
@@ -155,9 +155,9 @@ jobs:
         working-directory: backend
     env:
       TEST_DATABASE_URL: sqlite+aiosqlite:///./ci.db
-      SECRET_KEY: ci-sqlite-track-secret-key-do-not-use-in-prod-1a2b3c4d5e6f
+      SECRET_KEY: ci-sqlite-track-signkey-donotuse-1a2b3c4d5e6f7a8b9c0d1e2f
       ENCRYPTION_KEY: ci-sqlite-track-encryption-key-do-not-use-in-prod-6f5e4d3c2b1a
-      S3_SECRET_KEY: ci-sqlite-track-s3-secret-key-do-not-use-in-prod-2b1a6f5e4d3c
+      S3_SECRET_KEY: ci-sqlite-track-s3key-donotuse-2b1a6f5e4d3c9c0d1e2f7a8b
       POSTGRES_PASSWORD: ci-sqlite-track-postgres-placeholder-3c4d5e6f1a2b
       ADMIN_EMAIL: ci@blackbox-bom.com
     steps:

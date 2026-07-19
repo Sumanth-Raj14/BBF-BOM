@@ -101,9 +101,9 @@ jobs:
           POSTGRES_USER: bom_user
           POSTGRES_PASSWORD: ${{ secrets.CI_PG_PASSWORD }}
           POSTGRES_DB: bom_db
-          SECRET_KEY: test-secret-key-ci-1234567890
-          ENCRYPTION_KEY: test-encryption-key-ci
-          S3_SECRET_KEY: test-s3-key
+          SECRET_KEY: ci-backend-signkey-donotuse-a1b2c3d4e5f60718293a4b5c6d7e
+          ENCRYPTION_KEY: ci-backend-enckey-donotuse-b2c3d4e5f6a708192a3b4c5d9e0f
+          S3_SECRET_KEY: ci-backend-s3key-donotuse-c3d4e5f6a7b809192a3b4c5d0e1f
           ADMIN_EMAIL: ci@blackbox-bom.com
           REDIS_URL: redis://localhost:6379/0
       - name: Run tests with coverage
@@ -115,9 +115,9 @@ jobs:
           POSTGRES_USER: bom_user
           POSTGRES_PASSWORD: ${{ secrets.CI_PG_PASSWORD }}
           POSTGRES_DB: bom_db
-          SECRET_KEY: test-secret-key-ci-1234567890
-          ENCRYPTION_KEY: test-encryption-key-ci
-          S3_SECRET_KEY: test-s3-key
+          SECRET_KEY: ci-backend-signkey-donotuse-a1b2c3d4e5f60718293a4b5c6d7e
+          ENCRYPTION_KEY: ci-backend-enckey-donotuse-b2c3d4e5f6a708192a3b4c5d9e0f
+          S3_SECRET_KEY: ci-backend-s3key-donotuse-c3d4e5f6a7b809192a3b4c5d0e1f
           ADMIN_EMAIL: ci@blackbox-bom.com
           REDIS_URL: redis://localhost:6379/0
       - uses: dorny/test-reporter@v1
@@ -170,8 +170,8 @@ jobs:
         run: python scripts/recovery_test.py --dry-run
         working-directory: backend
         env:
-          SECRET_KEY: test-secret-key-ci-1234567890
-          ENCRYPTION_KEY: test-encryption-key-ci
+          SECRET_KEY: ci-backend-signkey-donotuse-a1b2c3d4e5f60718293a4b5c6d7e
+          ENCRYPTION_KEY: ci-backend-enckey-donotuse-b2c3d4e5f6a708192a3b4c5d9e0f
           ADMIN_EMAIL: ci@blackbox-bom.com
 
   docker-build:
@@ -184,7 +184,7 @@ jobs:
           docker compose -f docker-compose.yml build
         env:
           POSTGRES_PASSWORD: ${{ secrets.CI_PG_PASSWORD }}
-          SECRET_KEY: build_test_key
+          SECRET_KEY: ci-build-signkey-donotuse-f0e1d2c3b4a5968778695a4b3c2d
           ENCRYPTION_KEY: build_encryption_key_32char!
 
   build-frontend:
