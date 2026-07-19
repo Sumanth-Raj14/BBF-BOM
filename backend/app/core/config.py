@@ -213,6 +213,10 @@ class Settings(BaseSettings):
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 60
     RATE_LIMIT_AUTH_PER_MINUTE: int = 5
+    # Outbound Zoho Books API calls (client-side token bucket in
+    # app.integrations.zoho_client.ZohoBooksClient) — conservative default
+    # well under Zoho's server-side limit so the tool throttles itself first.
+    ZOHO_RATE_LIMIT_PER_MIN: int = 90
 
     # Backup
     BACKUP_DIR: str = "./backups"

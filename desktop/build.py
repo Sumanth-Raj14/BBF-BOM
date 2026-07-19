@@ -204,7 +204,16 @@ def stage_postgres(skip: bool) -> Path:
 # Stage 5: assemble INSTALL_DIR layout
 # ---------------------------------------------------------------------------
 
-def stage_assemble(frontend_dist: Path, backend_dist: Path, launcher_dist: Path, pgsql_dir: Path) -> Path:
+def stage_assemble(frontend_dist: Path, backend_dist: Path, launcher_dist: Path, pgsql_dir: Path | None) -> Path:
+    """Lay out the INSTALL_DIR mirror under desktop/build/install/:
+    launcher.exe (root) + backend\\ (from the backend.spec onedir output,
+    dist/backend -> backend.exe + _internal\\) + frontend\\dist\\ (from
+    frontend/dist) + optionally pgsql\\ (portable Postgres binaries).
+
+    ``pgsql_dir=None`` (via ``--no-pgsql``) skips the Postgres binaries and
+    the conf template entirely -- used for a fast dev-bundle assembly meant
+    to be run with BLACKBOX_SKIP_PG=1 against an already-installed/pointed
+    Postgres, see DESKTOP_PACKAGING.md section 6."""
     stage = "assemble"
     if INSTALL_STAGE.exists():
         shutil.rmtree(INSTALL_STAGE)
@@ -218,20 +227,27 @@ def stage_assemble(frontend_dist: Path, backend_dist: Path, launcher_dist: Path,
     # backend\ (onedir PyInstaller bundle: backend.exe + _internal\ etc.)
     backend_out = INSTALL_STAGE / "backend"
     shutil.copytree(backend_dist, backend_out)
+    _require_file(
+        backend_out / "backend.exe",
+        "backend.spec did not produce backend.exe inside the onedir output",
+    )
 
     # frontend\dist
     frontend_out = INSTALL_STAGE / "frontend" / "dist"
     frontend_out.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(frontend_dist, frontend_out)
 
-    # pgsql\ (portable Postgres binaries only -- no data)
-    pgsql_out = INSTALL_STAGE / "pgsql"
-    shutil.copytree(pgsql_dir, pgsql_out)
+    if pgsql_dir is None:
+        _log(stage, "no-pgsql: skipping pgsql\\ and postgresql.conf.template (use BLACKBOX_SKIP_PG=1 to run this bundle)")
+    else:
+        # pgsql\ (portable Postgres binaries only -- no data)
+        pgsql_out = INSTALL_STAGE / "pgsql"
+        shutil.copytree(pgsql_dir, pgsql_out)
 
-    # ship the durability template so the launcher can seed a fresh pgdata\postgresql.conf
-    conf_template = DESKTOP_DIR / "postgresql.conf.template"
-    if conf_template.exists():
-        shutil.copy2(conf_template, INSTALL_STAGE / "postgresql.conf.template")
+        # ship the durability template so the launcher can seed a fresh pgdata\postgresql.conf
+        conf_template = DESKTOP_DIR / "postgresql.conf.template"
+        if conf_template.exists():
+            shutil.copy2(conf_template, INSTALL_STAGE / "postgresql.conf.template")
 
     _log(stage, f"OK -> {INSTALL_STAGE}")
     return INSTALL_STAGE
@@ -340,9 +356,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--notes", default="", help="Release notes to embed in feed.json")
     parser.add_argument("--skip-frontend", action="store_true", help="Reuse existing frontend/dist instead of rebuilding")
     parser.add_argument("--skip-postgres", action="store_true", help="Reuse cached desktop/build/pgsql instead of re-fetching")
+    parser.add_argument(
+        "--no-pgsql",
+        action="store_true",
+        help=(
+            "Don't fetch/bundle portable Postgres at all (skips stage_postgres and the "
+            "pgsql\\ copy in assemble). Implies --skip-installer -- an installer without "
+            "pgsql\\ is not a valid release artifact. For fast dev-bundle iteration: run the "
+            "assembled bundle with BLACKBOX_SKIP_PG=1 against an already-installed/pointed "
+            "Postgres (see DESKTOP_PACKAGING.md section 6)."
+        ),
+    )
     parser.add_argument("--skip-sign", action="store_true", help="Skip Authenticode signing even if CODE_SIGN_PFX is set")
     parser.add_argument("--skip-installer", action="store_true", help="Stop after assembling INSTALL_DIR layout (skip iscc/sign/feed)")
     args = parser.parse_args(argv)
+    if args.no_pgsql:
+        args.skip_installer = True
 
     version, default_feed_url = load_version(args.version)
     feed_url = args.feed_url if args.feed_url is not None else default_feed_url
@@ -355,7 +384,7 @@ def main(argv: list[str] | None = None) -> int:
         frontend_dist = stage_frontend(args.skip_frontend)
         backend_dist_root = stage_pyinstaller("backend.spec", "backend")
         launcher_dist_root = stage_pyinstaller("launcher.spec", "launcher")
-        pgsql_dir = stage_postgres(args.skip_postgres)
+        pgsql_dir = None if args.no_pgsql else stage_postgres(args.skip_postgres)
 
         # PyInstaller onedir output lands in <distpath>/<name>/; discover it
         # rather than hardcoding the spec's internal app name.

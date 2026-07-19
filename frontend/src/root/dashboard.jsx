@@ -79,43 +79,20 @@ function DashboardScreen() {
   const pctCommitted = ((wb.spent + wb.committed) / wb.annual) * 100;
   const remaining = wb.annual - wb.spent - wb.committed;
   const overBudget = pctCommitted > 100;
-  // Role-specific tile set
+  // Role-specific tile set. Each role sees the widgets relevant to its job:
+  // Admin → users/tenant/system health/audit; Engineering → parts/BOM/ECO/
+  // where-used; Procurement → POs/vendors/RFQs/receiving; Finance → cost
+  // rollups/spend/should-cost; Viewer → read-only overview.
   const tilesByRole = {
-    Admin: [
-      "budget",
-      "at-risk",
-      "approvals",
-      "activity",
-      "vendors",
-      "spend-mix",
-    ],
-    Engineering: [
-      "budget",
-      "my-boms",
-      "approvals",
-      "at-risk",
-      "activity",
-      "spend-mix",
-    ],
-    Procurement: [
-      "budget",
-      "in-flight",
-      "at-risk",
-      "vendors",
-      "approvals",
-      "spend-mix",
-    ],
-    Finance: [
-      "budget",
-      "spend-mix",
-      "at-risk",
-      "cost-trend",
-      "approvals",
-      "activity",
-    ],
+    Admin: ["budget", "users", "system-health", "audit", "approvals", "activity"],
+    Engineering: ["budget", "my-boms", "eco", "where-used", "at-risk", "activity"],
+    Procurement: ["budget", "in-flight", "vendors", "receiving", "at-risk", "approvals"],
+    Finance: ["budget", "cost-rollup", "spend-mix", "cost-trend", "should-cost", "approvals"],
     Viewer: ["budget", "activity", "spend-mix"],
   };
   const tiles = tilesByRole[role] || tilesByRole.Admin;
+  // Viewer is a strictly read-only overview — no workspace-level edit affordances.
+  const canEditWorkspace = role !== "Viewer";
   return (
     <div className="screen-wrap" data-screen-label="Dashboard">
       <ScreenHeader
@@ -167,7 +144,7 @@ function DashboardScreen() {
                 {__t("dashboard.workspaceBudget") || "Workspace Budget"} ·{" "}
                 {scale.label}
               </span>
-              {!editingBudget && (
+              {!editingBudget && canEditWorkspace && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -429,6 +406,14 @@ function DashboardScreen() {
         {tiles.includes("spend-mix") && <SpendMixTile />}
         {tiles.includes("cost-trend") && <CostTrendTile />}
         {tiles.includes("activity") && <ActivityTile />}
+        {tiles.includes("users") && <UsersTile />}
+        {tiles.includes("system-health") && <SystemHealthTile ctx={ctx} />}
+        {tiles.includes("audit") && <AuditTile />}
+        {tiles.includes("eco") && <ECOTile />}
+        {tiles.includes("where-used") && <WhereUsedTile />}
+        {tiles.includes("receiving") && <ReceivingTile />}
+        {tiles.includes("cost-rollup") && <CostRollupTile />}
+        {tiles.includes("should-cost") && <ShouldCostTile />}
       </div>
     </div>
   );
@@ -744,6 +729,238 @@ function ActivityTile() {
           <span className="font-mono fs-10 fg-3 ml-6">{a.time}</span>
         </div>
       ))}
+    </Tile>
+  );
+}
+// ── Admin: users / tenant / system health / audit ──────────────────────────
+function UsersTile() {
+  const users = [
+    { name: "Elena Chen", role: "Admin", status: "active" },
+    { name: "M. Park", role: "Engineering", status: "active" },
+    { name: "K. Singh", role: "Procurement", status: "active" },
+    { name: "R. Alvarez", role: "Finance", status: "invited" },
+  ];
+  return (
+    <Tile
+      title={__t("dashboard.users") || "Users & Tenant"}
+      action={__t("dashboard.manage") || "Manage"}
+      onAction={() => window.__nav?.("tenant-admin")}
+    >
+      <div className="flex items-baseline gap-8 mb-10">
+        <span className="font-mono fs-28 fw-700">{users.length}</span>
+        <span className="font-mono fs-11 fg-3">
+          {__t("dashboard.seats") || "seats"} ·{" "}
+          {users.filter((u) => u.status === "invited").length}{" "}
+          {__t("dashboard.pending") || "pending"}
+        </span>
+      </div>
+      {users.map((u) => (
+        <div key={u.name} className="vendor-row">
+          <span>
+            {u.name} <span className="fg-3 fs-10">{u.role}</span>
+          </span>
+          <Badge tone={u.status === "active" ? "success" : "warning"} pill>
+            {u.status}
+          </Badge>
+        </div>
+      ))}
+    </Tile>
+  );
+}
+function SystemHealthTile({ ctx }) {
+  const online = ctx?.apiConnected !== false;
+  const sync = ctx?.syncStatus || {};
+  return (
+    <Tile
+      title={__t("dashboard.systemHealth") || "System Health"}
+      action={__t("dashboard.monitoring") || "Monitoring"}
+      onAction={() => window.__nav?.("monitoring")}
+    >
+      <div className="flex items-center gap-8 mb-10">
+        <StatusPill status={online ? "Operational" : "Degraded"} />
+        <span className="font-mono fs-10 fg-3">
+          {sync.syncing
+            ? __t("dashboard.syncing") || "Syncing…"
+            : __t("dashboard.allSynced") || "All changes synced"}
+        </span>
+      </div>
+      <div
+        className="d-grid gap-8"
+        style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
+      >
+        {[
+          [__t("dashboard.apiUptime") || "API Uptime", "99.98%"],
+          [
+            __t("dashboard.pendingSync") || "Pending sync",
+            String(sync.pendingCount || 0),
+          ],
+          [__t("dashboard.errorRate") || "Error rate", "0.02%"],
+        ].map(([l, v]) => (
+          <div
+            key={l}
+            className="bg-sunk rounded-r2 text-center"
+            style={{ padding: 8 }}
+          >
+            <div className="font-mono fs-14 fw-700">{v}</div>
+            <div className="font-mono fs-9 fg-3 uppercase letter-sp-6">{l}</div>
+          </div>
+        ))}
+      </div>
+    </Tile>
+  );
+}
+SystemHealthTile.propTypes = { ctx: PropTypes.object };
+function AuditTile() {
+  const items = [
+    { who: "Elena Chen", what: "changed role of", obj: "R. Alvarez → Finance", time: "18m" },
+    { who: "System", what: "revoked API key", obj: "key-prod-07", time: "3h" },
+    { who: "K. Singh", what: "approved", obj: "PO-0481", time: "6h" },
+  ];
+  return (
+    <Tile
+      title={__t("dashboard.auditLog") || "Audit Log"}
+      action={__t("dashboard.viewAll") || "View all"}
+      onAction={() => window.__nav?.("audit-trail")}
+    >
+      {items.map((a, i) => (
+        <div
+          key={a.who + i}
+          className="fs-11"
+          style={{ padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}
+        >
+          <strong>{a.who}</strong>{" "}
+          <span className="fg-3">{a.what}</span>{" "}
+          <span style={{ padding: "0 4px" }}>{a.obj}</span>
+          <span className="font-mono fs-10 fg-3 ml-6">{a.time}</span>
+        </div>
+      ))}
+    </Tile>
+  );
+}
+// ── Engineering: ECO / where-used ───────────────────────────────────────────
+function ECOTile() {
+  const items = [
+    { id: "ECO-0142", title: "Revise BMS harness routing", status: "Review" },
+    { id: "ECO-0139", title: "Swap MCU to STM32H7 rev B", status: "Draft" },
+    { id: "ECO-0135", title: "Update sensor pod enclosure", status: "Approved" },
+  ];
+  return (
+    <Tile
+      title={__t("dashboard.openECOs") || "Open ECOs"}
+      action={__t("dashboard.viewAll") || "View all"}
+      onAction={() => window.__nav?.("ecr")}
+    >
+      {items.map((e) => (
+        <div
+          key={e.id}
+          className="flex justify-between items-center gap-8"
+          style={{ padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}
+        >
+          <div>
+            <div className="font-mono fs-11 fw-600">{e.id}</div>
+            <div className="fs-10 fg-3">{e.title}</div>
+          </div>
+          <StatusPill status={e.status} />
+        </div>
+      ))}
+    </Tile>
+  );
+}
+function WhereUsedTile() {
+  const items = [
+    { pn: "HW-FAS-M3-08", uses: 6 },
+    { pn: "EL-MCU-STM32H7", uses: 4 },
+    { pn: "EL-BMS-12S", uses: 3 },
+  ];
+  return (
+    <Tile
+      title={__t("dashboard.whereUsed") || "Where Used"}
+      action={__t("nav.parts") || "Components"}
+      onAction={() => window.__nav?.("parts")}
+    >
+      {items.map((it) => (
+        <div key={it.pn} className="vendor-row">
+          <span className="font-mono">{it.pn}</span>
+          <span>
+            {it.uses} {__t("dashboard.boms") || "BOMs"}
+          </span>
+        </div>
+      ))}
+    </Tile>
+  );
+}
+// ── Procurement: receiving ───────────────────────────────────────────────
+function ReceivingTile() {
+  const items = [
+    { po: "PO-0481", vendor: "McMaster", eta: "Today", status: "In transit" },
+    { po: "PO-0476", vendor: "Digi-Key", eta: "Tomorrow", status: "In transit" },
+    { po: "PO-0470", vendor: "Mouser", eta: "—", status: "Received" },
+  ];
+  return (
+    <Tile
+      title={__t("dashboard.receiving") || "Receiving"}
+      action={__t("dashboard.trackOrders") || "Track orders"}
+      onAction={() => window.__nav?.("order-tracking")}
+    >
+      {items.map((it) => (
+        <div
+          key={it.po}
+          className="flex justify-between items-center gap-8"
+          style={{ padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}
+        >
+          <div>
+            <div className="font-mono fs-11 fw-600">{it.po}</div>
+            <div className="fs-10 fg-3">
+              {it.vendor} · ETA {it.eta}
+            </div>
+          </div>
+          <StatusPill status={it.status} />
+        </div>
+      ))}
+    </Tile>
+  );
+}
+// ── Finance: cost rollups / should-cost ─────────────────────────────────────
+function CostRollupTile() {
+  const rows = Object.entries(WORKSPACE_BUDGET.byProject);
+  return (
+    <Tile
+      title={__t("dashboard.costRollup") || "Cost Rollup by Project"}
+      action={__t("nav.analytics") || "Analytics"}
+      onAction={() => window.__nav?.("analytics")}
+    >
+      {rows.map(([k, p]) => (
+        <div key={k} className="vendor-row">
+          <span className="font-mono">{k}</span>
+          <span>{INR(p.spent + p.committed, 0)}</span>
+        </div>
+      ))}
+    </Tile>
+  );
+}
+function ShouldCostTile() {
+  const items = [
+    { pn: "EL-BMS-12S", quoted: 42.5, should: 36.1 },
+    { pn: "HW-FAS-M3-08", quoted: 0.18, should: 0.14 },
+    { pn: "EL-MCU-STM32H7", quoted: 11.2, should: 10.6 },
+  ];
+  return (
+    <Tile
+      title={__t("dashboard.shouldCost") || "Should-Cost Variance"}
+      action={__t("nav.analytics") || "Analytics"}
+      onAction={() => window.__nav?.("analytics")}
+    >
+      {items.map((it) => {
+        const delta = ((it.quoted - it.should) / it.should) * 100;
+        return (
+          <div key={it.pn} className="vendor-row">
+            <span className="font-mono">{it.pn}</span>
+            <span style={{ color: delta > 10 ? "var(--danger-text)" : "var(--fg-3)" }}>
+              +{delta.toFixed(0)}%
+            </span>
+          </div>
+        );
+      })}
     </Tile>
   );
 }

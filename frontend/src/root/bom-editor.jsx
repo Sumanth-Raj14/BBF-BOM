@@ -1,5 +1,6 @@
 import PropTypes from "prop-types";
 import { storage } from "../utils/storage.js";
+import { useAutosave } from "../hooks/useAutosave.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import { Button, Badge, StatusPill } from "../components/ui/index.js";
@@ -299,6 +300,32 @@ export function BomEditor({
     setDirty(true);
     dirtyRef.current = true;
   }, []);
+  // Draft-safety: debounce-persist the live row tree so an accidental
+  // reload/crash/navigation doesn't lose in-progress edits before they're
+  // explicitly saved. Namespaced per-BOM so switching BOMs doesn't cross
+  // draft state.
+  const autosave = useAutosave({ screen: "bom-editor", entityId: String(bomId), value: rows });
+  const [showBomDraftBanner, setShowBomDraftBanner] = React.useState(false);
+  React.useEffect(() => {
+    if (
+      autosave.hasDraft &&
+      autosave.draftValue &&
+      JSON.stringify(autosave.draftValue) !== JSON.stringify(rows)
+    ) {
+      setRows(autosave.draftValue);
+      markDirty();
+      setShowBomDraftBanner(true);
+    }
+    // Only ever apply the restored draft once, right when the editor mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const discardBomDraft = React.useCallback(() => {
+    autosave.discardDraft();
+    setRows(JSON.parse(JSON.stringify(data.rows)));
+    markClean();
+    setShowBomDraftBanner(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.rows, markClean]);
   const addItem = React.useCallback(() => {
     const newId = "new-" + Date.now();
     const newRow = {
@@ -629,6 +656,8 @@ export function BomEditor({
                     }),
                   );
                   markClean();
+                  autosave.clearDraft();
+                  setShowBomDraftBanner(false);
                   toast(
                     `${__t("bom.saved") || "Saved"} \u00B7 ${synced} ${__t("bom.synced") || "synced"}${failed ? `, ${failed} ${__t("bom.failed") || "failed"}` : ""}`,
                     { kind: failed ? "warn" : "success" },
@@ -648,9 +677,31 @@ export function BomEditor({
               onClick={() => {
                 setRows(JSON.parse(JSON.stringify(data.rows)));
                 markClean();
+                autosave.clearDraft();
+                setShowBomDraftBanner(false);
               }}
             >
               {__t("bom.discard") || "Discard"}
+            </Button>
+          </div>
+        )}
+        {showBomDraftBanner && (
+          <div
+            className="flex items-center gap-8 fs-11 font-mono"
+            style={{
+              padding: "var(--sp-2) var(--sp-3)",
+              borderBottom: "1px solid var(--accent)",
+              background: "var(--accent-soft)",
+            }}
+          >
+            <Icon.Sparkles size={12} />
+            <span>
+              {__t("bom.draftRestored") ||
+                "Draft restored from your last unsaved edits"}
+            </span>
+            <span className="flex-1" />
+            <Button variant="ghost" size="sm" onClick={discardBomDraft}>
+              {__t("bom.discardDraft") || "Discard"}
             </Button>
           </div>
         )}

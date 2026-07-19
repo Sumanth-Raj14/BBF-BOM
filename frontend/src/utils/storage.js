@@ -20,6 +20,7 @@ export const KEYS = {
   NAV_COLLAPSED: "__bbox_nav_collapsed",
   THEME: "__bbox_theme",
   A11Y: "__bbox_a11y",
+  DRAFT_PREFIX: "__bbox_draft_",
 };
 
 function get(key, fallback = null) {
@@ -205,5 +206,46 @@ export const storage = {
       return Array.isArray(v) ? v : [];
     },
     set: (modes) => setJSON(KEYS.A11Y, Array.isArray(modes) ? modes : []),
+  },
+
+  // Autosave drafts — unsaved editor/form state, namespaced by screen + the
+  // entity being edited (e.g. a part id, a BOM id, or "new" for create
+  // forms). Used by hooks/useAutosave.js for draft-safety: debounce-persist
+  // in-progress edits so a crash/reload/navigation doesn't lose them, then
+  // clear the draft once the edit is actually saved.
+  drafts: {
+    key: (screen, entityId) =>
+      KEYS.DRAFT_PREFIX +
+      String(screen || "unknown") +
+      "::" +
+      (entityId === undefined || entityId === null || entityId === ""
+        ? "new"
+        : String(entityId)),
+    // Returns { value, savedAt } or null.
+    get: (screen, entityId) =>
+      getJSON(storage.drafts.key(screen, entityId), null),
+    set: (screen, entityId, value) =>
+      setJSON(storage.drafts.key(screen, entityId), {
+        value,
+        savedAt: Date.now(),
+      }),
+    clear: (screen, entityId) => remove(storage.drafts.key(screen, entityId)),
+    // List every draft currently on disk — used for debugging/cleanup and by
+    // any future "resume where you left off" surfaces.
+    list: () => {
+      try {
+        const out = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.indexOf(KEYS.DRAFT_PREFIX) === 0) {
+            const entry = getJSON(k, null);
+            if (entry) out.push({ key: k, ...entry });
+          }
+        }
+        return out;
+      } catch {
+        return [];
+      }
+    },
   },
 };

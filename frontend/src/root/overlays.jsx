@@ -1,5 +1,6 @@
 import PropTypes from "prop-types";
 import { storage } from "../utils/storage.js";
+import { useAutosave } from "../hooks/useAutosave.js";
 import { __t } from "../i18n";
 import { toast, subscribe } from "../utils/toast";
 export const AppCtx = React.createContext(null);
@@ -902,7 +903,25 @@ UploadModal.propTypes = {
 function NewPartModal({ open, onClose }) {
   const [form, setForm] = React.useState({});
   const [saving, setSaving] = React.useState(false);
+  // Draft-safety: debounce-persist the in-progress form so a reload/crash/
+  // accidental close of this modal doesn't lose what was typed. Namespaced
+  // to "new" since a create form has no entity id yet.
+  const autosave = useAutosave({ screen: "new-part", entityId: "new", value: form });
+  const [showRestoredBanner, setShowRestoredBanner] = React.useState(false);
+  React.useEffect(() => {
+    if (autosave.hasDraft && autosave.draftValue) {
+      setForm(autosave.draftValue);
+      setShowRestoredBanner(true);
+    }
+    // Only ever apply the draft once, right when the modal first mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const update = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const discardDraft = () => {
+    autosave.discardDraft();
+    setForm({});
+    setShowRestoredBanner(false);
+  };
   const submit = async () => {
     if (!form.pn || !form.name) {
       toast(
@@ -935,6 +954,8 @@ function NewPartModal({ open, onClose }) {
       toast(__t("overlays.newPart.createdInDb") || "Part created in database", {
         kind: "success",
       });
+      // Saved successfully — the draft is now stale, drop it.
+      autosave.clearDraft();
     } catch (e) {
       toast(
         __t("overlays.newPart.failedToCreate") ||
@@ -944,6 +965,7 @@ function NewPartModal({ open, onClose }) {
     }
     setSaving(false);
     setForm({});
+    setShowRestoredBanner(false);
     onClose();
   };
   return (
@@ -968,6 +990,32 @@ function NewPartModal({ open, onClose }) {
         </>
       }
     >
+      {showRestoredBanner && (
+        <div
+          className="flex items-center gap-8 fs-11 font-mono"
+          style={{
+            padding: "var(--sp-2) var(--sp-3)",
+            marginBottom: "var(--sp-3)",
+            border: "1px solid var(--accent)",
+            borderRadius: "var(--r-2)",
+            background: "var(--accent-soft)",
+          }}
+        >
+          <Icon.Sparkles size={12} />
+          <span>
+            {__t("overlays.newPart.draftRestored") ||
+              "Draft restored from your last unsaved edit"}
+          </span>
+          <span className="flex-1" />
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={discardDraft}
+          >
+            {__t("overlays.newPart.discardDraft") || "Discard"}
+          </button>
+        </div>
+      )}
       <div className="field-row">
         <div className="field">
           <label htmlFor="part-pn">
@@ -981,6 +1029,7 @@ function NewPartModal({ open, onClose }) {
             placeholder={
               __t("overlays.newPart.pnPlaceholder") || "e.g. EL-CAP-100UF-25V"
             }
+            value={form.pn || ""}
             onChange={(e) => update("pn", e.target.value)}
           />
         </div>
@@ -990,7 +1039,7 @@ function NewPartModal({ open, onClose }) {
             id="part-rev"
             name="partRev"
             className="input mono"
-            defaultValue="A"
+            value={form.rev ?? "A"}
             onChange={(e) => update("rev", e.target.value)}
           />
         </div>
@@ -1007,6 +1056,7 @@ function NewPartModal({ open, onClose }) {
             __t("overlays.newPart.namePlaceholder") ||
             "e.g. Capacitor, 100\u00B5F 25V Electrolytic"
           }
+          value={form.name || ""}
           onChange={(e) => update("name", e.target.value)}
         />
       </div>
@@ -1019,6 +1069,7 @@ function NewPartModal({ open, onClose }) {
             id="part-category"
             name="partCategory"
             className="select"
+            value={form.category || "Electrical"}
             onChange={(e) => update("category", e.target.value)}
           >
             <option>Electrical</option>
@@ -1040,6 +1091,7 @@ function NewPartModal({ open, onClose }) {
             placeholder={
               __t("overlays.newPart.subcatPlaceholder") || "e.g. IC, Connector"
             }
+            value={form.subCategory || ""}
             onChange={(e) => update("subCategory", e.target.value)}
           />
         </div>
@@ -1049,6 +1101,7 @@ function NewPartModal({ open, onClose }) {
             id="part-uom"
             name="partUom"
             className="select"
+            value={form.uom || "EA"}
             onChange={(e) => update("uom", e.target.value)}
           >
             <option>EA</option>
@@ -1065,6 +1118,7 @@ function NewPartModal({ open, onClose }) {
             id="part-status"
             name="partStatus"
             className="select"
+            value={form.status || "Draft"}
             onChange={(e) => update("status", e.target.value)}
           >
             <option>Draft</option>
@@ -1083,6 +1137,7 @@ function NewPartModal({ open, onClose }) {
             placeholder={
               __t("overlays.newPart.barcodePlaceholder") || "e.g. 8901234567890"
             }
+            value={form.barcode || ""}
             onChange={(e) => update("barcode", e.target.value)}
           />
         </div>
@@ -1096,6 +1151,7 @@ function NewPartModal({ open, onClose }) {
             id="part-manufacturer"
             name="partManufacturer"
             className="input"
+            value={form.manufacturer || ""}
             onChange={(e) => update("manufacturer", e.target.value)}
           />
         </div>
@@ -1105,6 +1161,7 @@ function NewPartModal({ open, onClose }) {
             id="part-origin"
             name="partOrigin"
             className="select"
+            value={form.origin || "US"}
             onChange={(e) => update("origin", e.target.value)}
           >
             <option>US</option>
@@ -1129,6 +1186,7 @@ function NewPartModal({ open, onClose }) {
               __t("overlays.newPart.materialPlaceholder") ||
               "e.g. Aluminum 6061-T6"
             }
+            value={form.material || ""}
             onChange={(e) => update("material", e.target.value)}
           />
         </div>
@@ -1143,6 +1201,7 @@ function NewPartModal({ open, onClose }) {
             type="number"
             step="0.1"
             placeholder={__t("overlays.newPart.weightPlaceholder") || "e.g. 45"}
+            value={form.weight || ""}
             onChange={(e) => update("weight", e.target.value)}
           />
         </div>
@@ -1160,6 +1219,7 @@ function NewPartModal({ open, onClose }) {
               __t("overlays.newPart.dimensionsPlaceholder") ||
               "e.g. 120 \u00D7 80 \u00D7 12 mm"
             }
+            value={form.dimensions || ""}
             onChange={(e) => update("dimensions", e.target.value)}
           />
         </div>
@@ -1172,6 +1232,7 @@ function NewPartModal({ open, onClose }) {
             name="partImageUrl"
             className="input mono"
             placeholder="https://..."
+            value={form.imageUrl || ""}
             onChange={(e) => update("imageUrl", e.target.value)}
           />
         </div>
@@ -1188,6 +1249,7 @@ function NewPartModal({ open, onClose }) {
             __t("overlays.newPart.descPlaceholder") ||
             "Brief description, key specs..."
           }
+          value={form.description || ""}
           onChange={(e) => update("description", e.target.value)}
         />
       </div>

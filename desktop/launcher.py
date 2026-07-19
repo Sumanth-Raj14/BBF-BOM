@@ -10,9 +10,18 @@ run it:
      ``bom_user`` role + ``bom_db`` database. Generates and persists strong
      random secrets into DATA_DIR\\.env.
   3. Every run: starts the bundled Postgres cluster (pg_ctl start, wait for
-     ready), points the backend at it via env vars, runs
-     ``python -m scripts.init_db`` to build/migrate the schema, then starts
-     uvicorn (app.main:app) on 127.0.0.1:8756 and opens the default browser.
+     ready), points the backend at it via env vars, then starts the backend.
+     Two backend modes are supported (see "Backend modes" below):
+       - Bundled exe (release installs): runs INSTALL_DIR\\backend\\backend.exe
+         directly. Schema bootstrap happens in-process, inside that same
+         process, via app.main's FastAPI lifespan (Base.metadata.create_all).
+       - Dev/python fallback (no backend.exe present): resolves a python
+         interpreter, runs ``python -m scripts.init_db`` out-of-process to
+         build/migrate the schema (create_all + alembic stamp head, or
+         alembic upgrade head on an already-managed DB), then starts
+         ``python -m uvicorn app.main:app``.
+     Either way the backend ends up serving on 127.0.0.1:8756 and the
+     launcher opens the default browser to it.
   4. Runs a small foreground loop (system tray icon if pystray/Pillow are
      available, otherwise a plain console loop) until asked to quit.
   5. On exit (Ctrl+C, tray Quit, SIGTERM, or an unexpected backend crash)
@@ -48,6 +57,43 @@ Environment overrides (all optional; defaults match the shared contract)
                          via the normal POSTGRES_*/DATABASE_URL env vars you
                          set yourself before launching). Handy for dev-run.
   BLACKBOX_NO_BROWSER    If "1"/"true": don't auto-open the browser.
+
+Backend modes
+--------------------------------------------------------------------------
+The launcher picks its backend mode by checking whether
+``<backend_dir>\\backend.exe`` exists (the name PyInstaller's onedir output
+uses for desktop/backend.spec -- see stage_assemble in desktop/build.py,
+which lays it out at INSTALL_DIR\\backend\\backend.exe):
+
+  - **Bundled exe present** (release installs, and any dev bundle produced
+    by ``python desktop/build.py --skip-installer``): the launcher runs
+    ``backend.exe`` directly, passing BACKEND_HOST/BACKEND_PORT via env
+    (the contract backend_entry.py reads) plus the DB/secret env vars.
+    There is no python interpreter to shell out to a separate
+    ``scripts.init_db`` step against a frozen exe, so schema bootstrap is
+    NOT run out-of-process here. Instead it happens in-process, inside the
+    same backend.exe process, the moment uvicorn starts serving: app.main's
+    FastAPI ``lifespan`` already runs ``Base.metadata.create_all()`` on
+    startup (unless the child env sets ``SKIP_CREATE_ALL=true``), which is
+    exactly the greenfield half of scripts.init_db's own strategy -- the ORM
+    models are the schema source of truth either way. The launcher makes
+    sure ``SKIP_CREATE_ALL`` is unset/false for this mode so that create_all
+    always runs (it's idempotent -- safe on every launch, only creates
+    tables that don't already exist). Known gap: this path does not stamp
+    ``alembic_version`` the way scripts.init_db's greenfield branch does, so
+    a bundled install's DB is never "alembic-managed" and future schema
+    changes shipped as real Alembic migrations won't auto-apply via
+    ``alembic upgrade head`` against it -- only re-running create_all (which
+    is additive/idempotent, not migration-aware) happens automatically.
+    Closing that gap cleanly means teaching backend_entry.py to call
+    ``scripts.init_db.bootstrap_database()`` before ``uvicorn.run()``; that
+    file is out of scope for this change and left as a follow-up.
+  - **No backend.exe** (plain dev checkout): falls back to the original
+    python-based path -- resolve_python() finds an interpreter, the
+    launcher runs ``python -m scripts.init_db`` out-of-process (full
+    create_all/alembic-stamp or alembic-upgrade logic, including the
+    alembic_version bookkeeping the exe path above cannot do), then starts
+    ``python -m uvicorn app.main:app``.
 
 Dev-run instructions (fastest path, using this repo's existing Postgres)
 --------------------------------------------------------------------------
@@ -90,6 +136,12 @@ from pathlib import Path
 
 DEFAULT_PG_PORT = 55432
 DEFAULT_BACKEND_PORT = 8756
+
+# Name of the PyInstaller onedir backend executable (desktop/backend.spec:
+# EXE(name="backend") inside COLLECT(name="backend") -> backend.exe). When
+# this file exists under backend_dir, the launcher runs it directly instead
+# of resolving a python interpreter. See "Backend modes" above.
+BACKEND_EXE_NAME = "backend.exe"
 
 REQUIRED_SECRET_KEYS = ("SECRET_KEY", "ENCRYPTION_KEY", "S3_SECRET_KEY", "POSTGRES_PASSWORD")
 
@@ -420,6 +472,15 @@ def ensure_postgres_ready(paths: dict, pg_port: int, pg_password: str, log: logg
 # Backend (schema bootstrap + uvicorn)
 # ---------------------------------------------------------------------------
 
+def resolve_backend_exe(backend_dir: Path) -> Path | None:
+    """Return the bundled backend executable path if present, else None.
+
+    Presence of this file is the sole switch between the two backend modes
+    documented in the module docstring's "Backend modes" section."""
+    candidate = backend_dir / BACKEND_EXE_NAME
+    return candidate if candidate.exists() else None
+
+
 def resolve_python(backend_dir: Path) -> str:
     override = os.environ.get("BLACKBOX_PYTHON")
     if override:
@@ -479,6 +540,31 @@ def start_uvicorn(python_exe: str, backend_dir: Path, backend_port: int, child_e
         cmd,
         cwd=str(backend_dir),
         env=child_env,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
+        creationflags=creationflags,
+    )
+    return proc
+
+
+def start_backend_exe(exe_path: Path, backend_port: int, child_env: dict, log_path: Path, log: logging.Logger):
+    """Launch the bundled backend.exe directly (release / assembled dev-bundle
+    mode). backend_entry.py (the exe's frozen entry point) reads
+    BACKEND_HOST/BACKEND_PORT/BACKEND_LOG_LEVEL from the environment and
+    serves app.main:app via uvicorn -- there is no separate schema-bootstrap
+    invocation here; see "Backend modes" in the module docstring for why and
+    what that trades off."""
+    env = dict(child_env)
+    env["BACKEND_HOST"] = "127.0.0.1"
+    env["BACKEND_PORT"] = str(backend_port)
+    env.setdefault("BACKEND_LOG_LEVEL", "info")
+    log.info("Starting bundled backend exe: %s", exe_path)
+    log_fh = open(log_path, "a", encoding="utf-8")
+    creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    proc = subprocess.Popen(
+        [str(exe_path)],
+        cwd=str(exe_path.parent),
+        env=env,
         stdout=log_fh,
         stderr=subprocess.STDOUT,
         creationflags=creationflags,
@@ -662,12 +748,20 @@ def main() -> int:
             log.warning("BLACKBOX_SKIP_PG set: assuming an externally managed Postgres is already reachable")
 
         child_env = build_child_env(cfg)
-        python_exe = resolve_python(paths["backend_dir"])
-
-        run_schema_bootstrap(python_exe, paths["backend_dir"], child_env, log)
-
         backend_log_path = paths["logs_dir"] / "backend.log"
-        uvicorn_proc = start_uvicorn(python_exe, paths["backend_dir"], backend_port, child_env, backend_log_path, log)
+        backend_exe = resolve_backend_exe(paths["backend_dir"])
+
+        if backend_exe is not None:
+            log.info("Bundled backend exe found at %s; running it directly", backend_exe)
+            # create_all must run in-process on every launch (idempotent) since
+            # this mode has no separate scripts.init_db subprocess step -- see
+            # "Backend modes" in the module docstring.
+            child_env.pop("SKIP_CREATE_ALL", None)
+            uvicorn_proc = start_backend_exe(backend_exe, backend_port, child_env, backend_log_path, log)
+        else:
+            python_exe = resolve_python(paths["backend_dir"])
+            run_schema_bootstrap(python_exe, paths["backend_dir"], child_env, log)
+            uvicorn_proc = start_uvicorn(python_exe, paths["backend_dir"], backend_port, child_env, backend_log_path, log)
 
         url = f"http://127.0.0.1:{backend_port}/"
         wait_for_backend_ready(url, log)
