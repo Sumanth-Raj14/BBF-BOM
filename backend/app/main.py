@@ -698,7 +698,7 @@ else:
 if _serve_frontend and os.path.isdir(_frontend_dist_dir) and os.path.isfile(
     os.path.join(_frontend_dist_dir, "index.html")
 ):
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, RedirectResponse
     from fastapi.staticfiles import StaticFiles
 
     _frontend_assets_dir = os.path.join(_frontend_dist_dir, "assets")
@@ -710,14 +710,22 @@ if _serve_frontend and os.path.isdir(_frontend_dist_dir) and os.path.isfile(
     _API_PREFIX = settings.API_V1_STR.lstrip("/") + "/"
 
     @app.get("/{full_path:path}", include_in_schema=False)
-    async def serve_frontend(full_path: str):
-        # Never intercept API, docs, health, or websocket paths -- let them
-        # 404 normally if no earlier route matched.
+    async def serve_frontend(full_path: str, request: Request):
+        # Never intercept API, docs, health, or websocket paths. BUT: because
+        # this catch-all fully matches any GET path, Starlette's built-in
+        # trailing-slash retry (redirect_slashes) never fires once it exists —
+        # so GET /api/v1/vendors would hard-404 even though /api/v1/vendors/
+        # is a real route. Recreate that redirect here for API paths, then
+        # 404 anything under the API prefix that still has no match.
         if (
             full_path.startswith(_API_PREFIX)
             or full_path.startswith("ws/")
             or full_path in ("health", "ws")
         ):
+            if full_path.startswith(_API_PREFIX) and not full_path.endswith("/"):
+                query = request.url.query
+                target = "/" + full_path + "/" + (f"?{query}" if query else "")
+                return RedirectResponse(url=target, status_code=307)
             raise StarletteHTTPException(status_code=404, detail="Not Found")
         candidate = os.path.join(_frontend_dist_dir, full_path) if full_path else None
         if candidate and os.path.isfile(candidate):
