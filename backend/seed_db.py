@@ -249,6 +249,31 @@ async def seed_database():
         # Seed projects
         for project_data in SEED_PROJECTS:
             session.add(Project(**_row(Project, project_data)))
+        await session.flush()  # assign project ids for the BOMs below
+
+        # Seed one BOM per project. The BOM editor opens against an existing
+        # BOM; without this a fresh install has parts but no BOM to edit
+        # ("Failed to add item to BOM: BOM not found").
+        from app.models.bom import BOM  # local import to avoid cycles
+
+        projects = (await session.scalars(select(Project))).all()
+        for i, proj in enumerate(projects, start=1):
+            session.add(
+                BOM(
+                    **_row(
+                        BOM,
+                        {
+                            "bom_number": f"BOM-2026-{i:04d}",
+                            "name": f"{proj.name} - Main Assembly",
+                            "description": f"Demo BOM for the {proj.name} project",
+                            "status": "draft",
+                            "version": "1.0",
+                            "revision": 1,
+                            "project_id": proj.id,
+                        },
+                    )
+                )
+            )
 
         # Create admin user (only when explicitly configured, never in production)
         env = (os.getenv("ENVIRONMENT") or "").lower()

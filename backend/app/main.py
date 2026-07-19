@@ -279,6 +279,52 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 init_sentry()
 
+
+class ApiTrailingSlashMiddleware:
+    """Rewrite slash-less API paths to their canonical slashed route.
+
+    FastAPI collection routes here are defined WITH a trailing slash
+    (``/api/v1/parts/``) while parts of the frontend call WITHOUT it.
+    Starlette's built-in redirect_slashes handles that for a plain API app,
+    but the desktop SPA catch-all (``GET /{full_path:path}``) fully matches
+    any GET, and merely *partially* matches other methods — so slash-less
+    GETs got swallowed and slash-less POST/PUT/DELETE returned 405
+    ("Save failed: Method Not Allowed"). This middleware fixes ALL methods
+    at once: if the incoming API path has no full route match but the
+    slashed variant does, rewrite the ASGI scope path before routing.
+    No redirects, no method downgrades, bodies preserved.
+    """
+
+    def __init__(self, app, api_prefix: str):
+        self.app = app
+        self.api_prefix = api_prefix if api_prefix.endswith("/") else api_prefix + "/"
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            path = scope.get("path", "")
+            if path.startswith(self.api_prefix) and not path.endswith("/"):
+                from starlette.routing import Match
+
+                def _full_match(p: str) -> bool:
+                    probe = dict(scope, path=p)
+                    for route in app.router.routes:
+                        # Ignore the SPA catch-all: it matches everything and
+                        # would mask real API routes in this probe.
+                        if getattr(route, "path", None) == "/{full_path:path}":
+                            continue
+                        match, _ = route.matches(probe)
+                        if match == Match.FULL:
+                            return True
+                    return False
+
+                if not _full_match(path) and _full_match(path + "/"):
+                    new_path = path + "/"
+                    scope = dict(scope, path=new_path, raw_path=new_path.encode("utf-8"))
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(ApiTrailingSlashMiddleware, api_prefix=settings.API_V1_STR)
+
 app.add_middleware(SessionTimeoutMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(SlowAPIMiddleware)
