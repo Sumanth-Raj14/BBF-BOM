@@ -143,6 +143,25 @@ class Settings(BaseSettings):
                 return [host.strip() for host in v.split(",") if host.strip()]
         return v
 
+    @field_validator("ALLOWED_HOSTS", mode="after")
+    @classmethod
+    def _allow_testserver_under_test(cls, v):
+        # Test clients (httpx / Starlette TestClient) connect with host
+        # "testserver", which TrustedHostMiddleware would otherwise reject with
+        # HTTP 400. Allow it ONLY when running under pytest / with a test DB
+        # configured — this is NEVER widened for production.
+        import os
+        import sys
+
+        under_test = bool(
+            os.environ.get("TEST_DATABASE_URL")
+            or os.environ.get("PYTEST_CURRENT_TEST")
+            or "pytest" in sys.modules
+        )
+        if under_test and "testserver" not in v:
+            return list(v) + ["testserver"]
+        return v
+
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v):
