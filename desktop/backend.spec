@@ -111,7 +111,10 @@ a = Analysis(  # noqa: F821
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # Headless server bundle: exclude GUI toolkits that get pulled into the
+    # build env transitively. PyInstaller refuses to bundle two Qt bindings
+    # (PyQt6 + PySide6 both present here), and none are needed by the backend.
+    excludes=["PyQt5", "PyQt6", "PySide2", "PySide6", "tkinter", "matplotlib", "IPython"],
     noarchive=False,
     cipher=block_cipher,
 )

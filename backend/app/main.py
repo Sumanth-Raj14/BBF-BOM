@@ -628,6 +628,20 @@ async def websocket_endpoint(websocket: WebSocket, channel: str):
 
 @app.get("/")
 async def root():
+    # Desktop bundle: when the built frontend is present/enabled, serve the SPA
+    # entry at "/" so the browser opens the app UI instead of this API message.
+    # No-op for normal API/dev runs (no dist dir, SERVE_FRONTEND unset) — returns
+    # the JSON welcome exactly as before.
+    _flag = os.environ.get("SERVE_FRONTEND", "").strip().lower()
+    if _flag not in ("0", "false", "no"):
+        _dist = os.environ.get("FRONTEND_DIST_DIR") or os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "..", "frontend", "dist"
+        )
+        _index = os.path.join(_dist, "index.html")
+        if (_flag in ("1", "true", "yes") or os.path.isdir(_dist)) and os.path.isfile(_index):
+            from fastapi.responses import FileResponse
+
+            return FileResponse(_index)
     return {"message": "Welcome to Blackbox BOM API"}
 
 
