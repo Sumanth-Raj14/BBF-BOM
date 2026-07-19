@@ -134,6 +134,10 @@ from app.models.user_data import (
 )
 from app.models.vendor import Vendor
 
+# Zoho Books two-way sync state (spec §2) — imported here so
+# register_tenant_listeners() sees them as TenantAwareMixin subclasses.
+from app.models.zoho_sync import ZohoSyncCursor, ZohoSyncLog, ZohoSyncState
+
 # Integration models
 from app.models.webhook import WebhookDelivery, WebhookSubscription
 from app.models.work_order import WorkOrder, WorkOrderMaterial, WorkOrderOperation

@@ -8,6 +8,9 @@ from app.core.deps import get_current_user
 from app.core.pagination import PageParams, get_page_params
 from app.core.rbac import require_parts_delete, require_parts_write
 from app.db.session import get_db
+from app.integrations.events import emit_integration_event
+from app.integrations.zoho_inbound import cascade_clean
+from app.integrations.zoho_snapshots import part_snapshot
 from app.models.user import User
 from app.schemas.part import PartCreate, PartListResponse, PartResponse, PartUpdate
 from app.services import part_service
@@ -52,7 +55,13 @@ async def create_part(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_parts_write),
 ):
-    return await part_service.create_part(db, part.model_dump(), current_user.tenantId)
+    obj = await part_service.create_part(db, part.model_dump(), current_user.tenantId)
+    # Outbound integration event (no-op unless an enabled connector opts into
+    # 'part' via config.enabled_entity_types — local-first preserved).
+    await emit_integration_event(
+        db, current_user.tenantId, "part", obj.id, "created", part_snapshot(obj))
+    await db.commit()
+    return obj
 
 
 @router.get("/{part_id}", response_model=PartResponse)
@@ -71,7 +80,11 @@ async def update_part(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_parts_write),
 ):
-    return await part_service.update_part(db, part_id, part_update.model_dump(exclude_unset=True))
+    obj = await part_service.update_part(db, part_id, part_update.model_dump(exclude_unset=True))
+    await emit_integration_event(
+        db, current_user.tenantId, "part", obj.id, "updated", part_snapshot(obj))
+    await db.commit()
+    return obj
 
 
 @router.patch("/{part_id}", response_model=PartResponse)
@@ -81,7 +94,11 @@ async def patch_part(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_parts_write),
 ):
-    return await part_service.update_part(db, part_id, part_update.model_dump(exclude_unset=True))
+    obj = await part_service.update_part(db, part_id, part_update.model_dump(exclude_unset=True))
+    await emit_integration_event(
+        db, current_user.tenantId, "part", obj.id, "updated", part_snapshot(obj))
+    await db.commit()
+    return obj
 
 
 @router.delete("/{part_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -91,6 +108,10 @@ async def delete_part(
     current_user: User = Depends(require_parts_delete),
 ):
     await part_service.delete_part(db, part_id)
+    # Cascade-clean the polymorphic Zoho mapping so a stale link can't later
+    # mis-drive a create/update (spec §4.7/§10-K).
+    await cascade_clean(db, current_user.tenantId, "part", part_id)
+    await db.commit()
     return None
 
 
@@ -105,6 +126,9 @@ async def bulk_delete_parts(
     current_user: User = Depends(require_parts_delete),
 ):
     deleted = await part_service.bulk_delete_parts(db, req.ids)
+    for pid in req.ids:
+        await cascade_clean(db, current_user.tenantId, "part", pid)
+    await db.commit()
     return {"deleted": deleted}
 
 

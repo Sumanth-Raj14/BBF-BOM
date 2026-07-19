@@ -65,4 +65,5 @@ from app.api.endpoints import (
     webhooks,
     work_order_api,
     work_queue,
+    zoho_books,
 )

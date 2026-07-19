@@ -200,3 +200,6 @@ export const IntegrationsScreen = createLazyScreen(function () {
 export const AuditTrailScreen = createLazyScreen(function () {
   return import("./screens/AuditTrailScreen.jsx");
 }, "AuditTrailScreen");
+export const ZohoBooksScreen = createLazyScreen(function () {
+  return import("./screens/ZohoBooksScreen.jsx");
+}, "ZohoBooksScreen");
