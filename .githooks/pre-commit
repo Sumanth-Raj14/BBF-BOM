@@ -1,0 +1,15 @@
+#!/bin/sh
+# Nudge (non-blocking): keep PROJECT_REFERENCE.md in sync with code changes.
+# Activate in a fresh clone with:  git config core.hooksPath .githooks
+changed=$(git diff --cached --name-only)
+code=$(printf '%s\n' "$changed" | grep -E '^(backend/|frontend/src/|desktop/|alembic/)' 2>/dev/null || true)
+ref=$(printf '%s\n' "$changed" | grep -E '^PROJECT_REFERENCE\.md$' 2>/dev/null || true)
+if [ -n "$code" ] && [ -z "$ref" ]; then
+  echo "-----------------------------------------------------------------------"
+  echo "  Reminder: code changed but PROJECT_REFERENCE.md was NOT updated."
+  echo "  If this affects architecture / features / DB / deploy / state,"
+  echo "  update PROJECT_REFERENCE.md (and its section 0 snapshot)."
+  echo "  This is a reminder only — the commit will proceed."
+  echo "-----------------------------------------------------------------------"
+fi
+exit 0

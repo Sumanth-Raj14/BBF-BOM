@@ -622,7 +622,7 @@ Theme: **Blackbox styling**
 
 -   Bulk import/export
 
-# **8. Suggested Tech Architecture (Claude can propose better)**
+# **8. Suggested Tech Architecture (the AI assistant can suggest alternatives)**
 
 -   Frontend: React / Next.js
 

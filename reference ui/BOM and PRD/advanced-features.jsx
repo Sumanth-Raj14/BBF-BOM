@@ -274,12 +274,12 @@ function AIAssistant({ open, onClose }) {
     setMessages(m => [...m, { role: "user", text }]);
     setInput("");
     setLoading(true);
-    // Use window.claude if available; otherwise mock
+    // Use window.aiAssistant if available; otherwise mock
     try {
       const ctx = window.useAppStore ? window.STORE_SNAPSHOT : null;
       const system = "You are a BOM management assistant. Answer briefly in 1-3 sentences. Be specific. The active project is ATLAS Mainframe with 87 parts, ₹4.2k BOM cost. Top risks: EL-BMS-12S (35d lead), HW-FAS-M3-08 (duplicate), EL-MCU-STM32H7 (single-source).";
-      const reply = window.claude?.complete
-        ? await window.claude.complete({ messages: [{ role: "user", content: system + "\n\nUser: " + text }] })
+      const reply = window.aiAssistant?.complete
+        ? await window.aiAssistant.complete({ messages: [{ role: "user", content: system + "\n\nUser: " + text }] })
         : mockReply(text);
       setMessages(m => [...m, { role: "assistant", text: reply }]);
     } catch (e) {

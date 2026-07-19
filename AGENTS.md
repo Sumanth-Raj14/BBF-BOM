@@ -1,5 +1,7 @@
 # Blackbox BOM — Agent Conventions
 
+> **START HERE:** Read `PROJECT_REFERENCE.md` (repo root) first — it is the single source of truth for architecture, layout, features, DB, deployment, repos, and current state, so you don't have to re-scan the codebase. **Keep it current:** update the relevant section (and its §0 snapshot) in the *same* change that alters the code. A non-blocking reminder hook is available: `git config core.hooksPath .githooks`.
+
 ## Lint & Format Commands
 
 ### Backend (Python)

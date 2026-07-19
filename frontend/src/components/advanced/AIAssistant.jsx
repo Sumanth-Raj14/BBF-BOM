@@ -48,8 +48,8 @@ function AIAssistant({ open, onClose }) {
       return "I don't have a precise answer for that yet. Try asking about cost, vendors, lead times, supply risk, or duplicates.";
     };
     try {
-      const reply = window.claude?.complete
-        ? await window.claude.complete({
+      const reply = window.aiAssistant?.complete
+        ? await window.aiAssistant.complete({
             messages: [{ role: "user", content: text }],
           })
         : mockReply(text);
