@@ -37,7 +37,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.tenant_context import TenantContext
 from app.db.rls import apply_rls_tenant_context
@@ -617,3 +617,26 @@ async def resolve_conflict(db, tenant_id, log_id, resolution, *, resolved_by=Non
         resolution=resolution, resolved_by=resolved_by, resolved_at=_now(),
         message=f"resolved {resolution}"))
     return row
+
+
+# --- lifecycle cascade-clean (spec §4.7 / §10-K) ----------------------------
+
+async def cascade_clean(db, tenant_id, entity_type, entity_id):
+    """On local HARD-DELETE of a Part/Vendor/PO, remove the polymorphic
+    ZohoSyncState + IntegrationExternalLink rows for that entity so a stale
+    mapping can never later mis-drive a spurious create/update (spec §4.7/§10-K).
+
+    ZohoSyncState.entity_id / IntegrationExternalLink.entity_id are polymorphic
+    (no hard FK to the entity tables), so nothing else removes these rows when
+    the local row is deleted — this app-layer hook is the cleanup of record.
+    Idempotent no-op when nothing is mapped. Does NOT commit (the caller owns the
+    transaction boundary)."""
+    await db.execute(delete(ZohoSyncState).where(
+        ZohoSyncState.tenantId == tenant_id,
+        ZohoSyncState.entity_type == entity_type,
+        ZohoSyncState.entity_id == entity_id))
+    await db.execute(delete(IntegrationExternalLink).where(
+        IntegrationExternalLink.tenantId == tenant_id,
+        IntegrationExternalLink.provider == PROVIDER,
+        IntegrationExternalLink.entity_type == entity_type,
+        IntegrationExternalLink.entity_id == entity_id))

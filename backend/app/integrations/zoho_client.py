@@ -203,3 +203,9 @@ class ZohoBooksClient:
         resolve opaque Books foreign keys on create (spec §4.1/§4.2). Read-only.
         """
         return await self._request("GET", f"/settings/{kind}")
+
+    async def list_records(self, module: str, *, params: dict | None = None) -> dict:
+        """GET /{module} for the inbound incremental poll / reconciliation. Returns
+        the raw body (records list under the plural module key + `page_context`).
+        Read-only."""
+        return await self._request("GET", f"/{module}", params=params)

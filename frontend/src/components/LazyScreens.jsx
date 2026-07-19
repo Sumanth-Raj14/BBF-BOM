@@ -195,3 +195,7 @@ export const WorkQueueScreen = createLazyScreen(function () {
 export const IntegrationsScreen = createLazyScreen(function () {
   return import("./screens/IntegrationsScreen.jsx");
 }, "IntegrationsScreen");
+
+export const ZohoBooksScreen = createLazyScreen(function () {
+  return import("./screens/ZohoBooksScreen.jsx");
+}, "ZohoBooksScreen");

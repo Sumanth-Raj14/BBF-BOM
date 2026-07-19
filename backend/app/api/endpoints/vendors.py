@@ -11,6 +11,7 @@ from app.core.pagination import PageParams, get_page_params, paginate
 from app.core.rbac import require_vendors_write
 from app.db.session import get_db
 from app.integrations.events import emit_integration_event
+from app.integrations.zoho_inbound import cascade_clean
 from app.integrations.zoho_snapshots import vendor_snapshot
 from app.models.user import User
 from app.models.vendor import Vendor
@@ -171,6 +172,9 @@ async def delete_vendor(
 
     await db.delete(db_vendor)
     await db.commit()
+    # Cascade-clean the polymorphic Zoho mapping (spec §4.7/§10-K).
+    await cascade_clean(db, current_user.tenantId, "vendor", vendor_id)
+    await db.commit()
     return None
 
 
@@ -187,5 +191,8 @@ async def bulk_delete_vendors(
     result = await db.execute(
         delete(Vendor).where(Vendor.id.in_(req.ids), Vendor.tenantId == current_user.tenantId)
     )
+    await db.commit()
+    for vid in req.ids:
+        await cascade_clean(db, current_user.tenantId, "vendor", vid)
     await db.commit()
     return {"deleted": result.rowcount}

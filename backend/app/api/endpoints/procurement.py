@@ -171,4 +171,9 @@ async def delete_procurement(
     current_user: User = Depends(require_procurement_write),
 ):
     await procurement_service.delete_procurement(db, order_id)
+    # Cascade-clean the polymorphic Zoho mapping (spec §4.7/§10-K).
+    from app.integrations.zoho_inbound import cascade_clean
+
+    await cascade_clean(db, current_user.tenantId, "purchase_order", order_id)
+    await db.commit()
     return None

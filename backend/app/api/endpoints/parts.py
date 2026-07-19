@@ -9,6 +9,7 @@ from app.core.pagination import PageParams, get_page_params
 from app.core.rbac import require_parts_delete, require_parts_write
 from app.db.session import get_db
 from app.integrations.events import emit_integration_event
+from app.integrations.zoho_inbound import cascade_clean
 from app.integrations.zoho_snapshots import part_snapshot
 from app.models.user import User
 from app.schemas.part import PartCreate, PartListResponse, PartResponse, PartUpdate
@@ -107,6 +108,10 @@ async def delete_part(
     current_user: User = Depends(require_parts_delete),
 ):
     await part_service.delete_part(db, part_id)
+    # Cascade-clean the polymorphic Zoho mapping so a stale link can't later
+    # mis-drive a create/update (spec §4.7/§10-K).
+    await cascade_clean(db, current_user.tenantId, "part", part_id)
+    await db.commit()
     return None
 
 
@@ -121,6 +126,9 @@ async def bulk_delete_parts(
     current_user: User = Depends(require_parts_delete),
 ):
     deleted = await part_service.bulk_delete_parts(db, req.ids)
+    for pid in req.ids:
+        await cascade_clean(db, current_user.tenantId, "part", pid)
+    await db.commit()
     return {"deleted": deleted}
 
 
