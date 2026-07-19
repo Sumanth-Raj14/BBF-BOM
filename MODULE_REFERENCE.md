@@ -1,7 +1,7 @@
 # Blackbox BOM Platform — Module Reference
 
 **Date**: 2026-07-19  
-**Version**: v2.0.0  
+**Version**: v2.1.0  
 **Scope**: Backend services, core modules, database layer, ORM models, and frontend component architecture
 
 ---
@@ -374,6 +374,82 @@ timestamp: datetime
 - Validates token signature and expiry
 - Rejects upgrade with 403 if invalid
 - Stores authenticated user context for subsequent messages
+
+---
+
+### 14. Desktop Packaging & Auto-Update (`desktop/`)
+
+**Scope**: Windows desktop deployment (bundled PostgreSQL + PyInstaller backend + launcher + auto-updater).
+
+#### launcher.py (Process Lifecycle Manager)
+
+**Responsibilities**:
+- PostgreSQL cluster initialization and lifecycle (start, stop, crash recovery)
+- Single-instance lock (prevents duplicate launches)
+- Backend (Uvicorn) subprocess management
+- Health polling (`/health` endpoint until ready)
+- Browser launch (`http://localhost:8000`)
+- Graceful shutdown (Ctrl+C handling, process cleanup)
+
+**Key Functions**:
+```python
+init_postgres()         # Start embedded Postgres, wait for readiness
+start_backend()         # Spawn Uvicorn, poll health
+launch_browser()        # Open default browser to localhost:8000
+handle_sigterm()        # Graceful shutdown (stop backend, close Postgres)
+```
+
+**Startup Sequence**:
+1. Check lock file; if running, focus window and exit
+2. Call `scripts/init_db.py` (schema bootstrap or upgrade)
+3. Start embedded Postgres
+4. Start Uvicorn backend
+5. Open browser
+6. Monitor and restart if crashed
+
+#### updater.py (Auto-Update Engine, 31 Tests)
+
+**Responsibilities**:
+- Version feed polling (local file or HTTP)
+- Installer download + SHA-256 verification
+- Silent install via Inno Setup (`/SILENT /NORESTART`)
+- Data preservation (`%ProgramData%` unchanged)
+- Post-install schema migration (auto-run `init_db.py upgrade head`)
+- Exponential backoff on download failures
+
+**Key Functions**:
+```python
+check_for_updates()     # Compare local vs. feed version; return (has_update, url, sha256)
+download_installer()    # Download to cache with progress callback
+verify_checksum()       # SHA-256 validate
+apply_update()          # Execute Inno Setup silently, run post-install migration
+```
+
+**Error Handling**:
+- Network unreachable: Skip check, retry next interval
+- Download corrupted: Log error, retry with exponential backoff (5 min → 15 min → 60 min → daily)
+- Checksum mismatch: Delete corrupted file, retry
+- Post-install migration failure: Log error (data intact, roll back to previous version on next restart)
+
+#### build.py (One-Command Build Pipeline)
+
+**Responsibilities**:
+- Frontend build (`npm run build`)
+- Backend packaging (PyInstaller → `.exe`)
+- Installer creation (Inno Setup → `setup.exe`)
+- Code signing (digital signature with certificate)
+
+**Key Functions**:
+```python
+build_frontend()        # Vite build output to dist/
+bundle_backend()        # PyInstaller with hidden imports, data files
+create_installer()      # Inno Setup compilation
+sign_installer()        # Authenticode signing (optional)
+```
+
+**Configuration**:
+- Reads `build-config.json`: version, cert path, signing password
+- Outputs to `dist/` directory
 
 ---
 
@@ -1318,4 +1394,4 @@ api.boms = {
 ---
 
 **Document History**:
-- **v2.0.0** (2026-07-19): Initial comprehensive module reference for v2.0.0 release; covers 16 backend services, core modules, 50+ data models, frontend component architecture, and known limitations
+- **v2.1.0** (2026-07-19): Comprehensive module reference for v2.1.0 release; added desktop packaging modules (launcher.py, updater.py, build.py); covers 16 backend services, core modules, 50+ data models, frontend component architecture, and known limitations

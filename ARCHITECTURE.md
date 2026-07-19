@@ -1,6 +1,6 @@
 # Architecture: Blackbox BOM
 
-**Date:** 2026-07-19 · **Release:** v2.0.0 (branch `master`)
+**Date:** 2026-07-19 · **Release:** v2.1.0 (branch `master`)
 
 A comprehensive technical overview of the Blackbox BOM platform architecture, patterns, and deployment topology. This document describes the shipped system as of the current release and is the single source of truth for system design decisions, constraints, and future directions.
 
@@ -792,6 +792,97 @@ Docker Compose (3.9)
 3. Generate `SECRET_KEY` / `ENCRYPTION_KEY`.
 4. Build Docker images.
 5. Start services via `docker compose up`.
+
+### Desktop Deployment (WS7)
+
+**Scope:** Single-click Windows installation bundling PostgreSQL + PyInstaller backend + built frontend + launcher + auto-updater.
+
+**Components:**
+1. **Portable PostgreSQL** (`postgres/` directory in install root)
+   - PostgreSQL 15 binary (minimal footprint, no system-wide registry changes)
+   - Data directory: `%ProgramData%\Blackbox BOM\postgres_data` (persists across updates)
+   - Configuration: `postgresql.conf.template` with durability settings (WAL, checkpoints)
+
+2. **Backend (PyInstaller Bundle)** (`backend/` directory)
+   - Python 3.12 + FastAPI + SQLAlchemy compiled to single `.exe`
+   - Static size: ~80–120 MB (compressed)
+   - Entrypoint: `uvicorn app.main:app --host 127.0.0.1 --port 8000`
+
+3. **Frontend (Built SPA)** (`frontend/` directory)
+   - React + Vite pre-built output (`dist/` directory)
+   - Served by backend's `/` route (guarded by `SERVE_FRONTEND=true` flag)
+   - Static files: `~2–5 MB` (gzipped)
+
+4. **Launcher** (`launcher.py`)
+   - Initializes and manages the bundled PostgreSQL cluster
+   - Starts/stops backend (Uvicorn via subprocess)
+   - Opens browser to `http://localhost:8000`
+   - Crash detection & recovery (restart on unexpected termination)
+   - Single-instance lock (prevents multiple launches)
+
+5. **Auto-Updater** (`updater.py`)
+   - Checks version-feed URL for new releases (local-first, no cloud required)
+   - Downloads installer silently in background
+   - SHA-256 verification of downloaded package
+   - Silent install via Inno Setup (preserves data directory + `.env`)
+   - Auto-applies schema migrations post-update (via `init_db.py`)
+
+6. **Installer** (`installer.iss`)
+   - Inno Setup script for single-click Windows setup
+   - Installs to `%ProgramFiles%\Blackbox BOM` (read-only application files)
+   - Data persisted to `%ProgramData%\Blackbox BOM` (writable, survives uninstall)
+   - Creates Start Menu shortcuts + system tray icon
+
+**Schema Ownership:** `scripts/init_db.py` is the schema owner (not SQLAlchemy `create_all()`).
+- Greenfield: `init_db.py` → `create_all()` + `alembic stamp head`
+- Existing: `init_db.py` → `alembic upgrade head`
+- Wired into launcher startup and post-update flow
+
+**Workflow:**
+```
+User downloads installer.exe
+      │
+      ▼
+Inno Setup extracts to %ProgramFiles% + %ProgramData%
+      │
+      ▼
+Launcher.py initialized on first run
+      │
+      ├─ Start embedded Postgres (if not running)
+      ├─ Run init_db.py (schema bootstrap or upgrade)
+      ├─ Start backend (Uvicorn)
+      └─ Open browser to http://localhost:8000
+      │
+      ▼
+App runs fully local-first (no cloud required)
+      │
+      ▼
+Auto-updater runs background check (15-min interval)
+      │
+      ├─ Version feed → new version available?
+      ├─ Download + verify SHA-256
+      ├─ Silent install (Inno Setup /SILENT /NORESTART)
+      ├─ Preserve %ProgramData% (data + .env)
+      └─ Auto-apply migrations (init_db.py upgrade head)
+      │
+      ▼
+User continues working uninterrupted
+```
+
+**Key Files:**
+- `desktop/launcher.py` — PostgreSQL cluster lifecycle, process management, crash recovery
+- `desktop/updater.py` — Version check, download, verify, apply logic (31 tests)
+- `desktop/build.py` — One-command build+sign pipeline
+- `scripts/init_db.py` — Idempotent schema bootstrap/upgrade
+- `installer.iss` — Inno Setup installer configuration
+- `postgresql.conf.template` — Durability settings (WAL, checkpoints)
+- `DESKTOP_PACKAGING.md` — Detailed deployment guide
+
+**Benefits:**
+- Zero-dependencies: No Docker required, no network (unless using optional cloud sync)
+- Data sovereignty: All data persists locally in `%ProgramData%`
+- One-click install + auto-update: Enterprise-grade silent updates with schema migration
+- Crash-safe: Launcher detects stale processes, recovers gracefully
 
 ---
 

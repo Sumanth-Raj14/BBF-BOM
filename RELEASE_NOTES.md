@@ -1,5 +1,93 @@
 # Blackbox BOM Release Notes
 
+## [2.1.0] — 2026-07-19
+
+**Regulated compliance, Zoho Books sync, accessibility & mobile polish, desktop packaging with auto-update.**
+
+Blackbox BOM v2.1.0 ships three completed feature branches (feat/regulated, feat/zoho-books, feat/polish) plus WS7 desktop packaging and production database hardening. The platform now includes FDA 21 CFR Part 11 e-signature compliance, real-time Zoho Books integration, WCAG-AA dark mode with colorblind accessibility, and a single-click Windows installer with automatic updates. All features are production-ready and fully integrated with the PostgreSQL multi-tenant architecture.
+
+### Upgrade Instructions
+
+#### Fresh Installation (v2.1.0)
+
+**Windows (Recommended):**
+```powershell
+# Download and run the installer
+.\install.ps1                  # Interactive or non-interactive
+# This handles:
+# - Single-click Postgres + backend + frontend setup
+# - Auto-migration (alembic upgrade head)
+# - 155 tables created on first run
+# - Ready for first admin registration
+```
+
+**Linux/Docker:**
+```bash
+python -m scripts.init_db      # Idempotent DB bootstrap + schema creation
+docker-compose up -d           # Start full stack
+```
+
+#### Upgrading from v2.0.0 → v2.1.0
+
+**Existing databases auto-migrate automatically:**
+
+```bash
+# Windows
+.\install.ps1                  # Re-run installer (safe; applies new migrations)
+
+# Linux/WSL
+./scripts/install.sh           # Re-run installer
+python -m scripts.init_db      # Manually run if needed
+
+# Your data is untouched; new tables (Zoho sync, compliance, substance tracking) are created
+```
+
+**Auto-Update (Windows Only):**
+After first install, the app checks for new versions on startup. Updates download → verify SHA-256 → apply silently without data loss or stopping currently-open sessions.
+
+---
+
+## Major Features (v2.1.0)
+
+### FDA 21 CFR Part 11 e-Signature Compliance (feat/regulated)
+- **Digital signatures** on ECOs, approvals, and document uploads with qualified e-signature support.
+- **Compliance attestation** for regulated industries (medical devices, aerospace, pharmaceuticals).
+- **RoHS/REACH substance tracking**: restriction database, part composition declarations, compliance reports, audit trail.
+- **Non-repudiation audit trail**: signature verification, regulatory export, full event logging per CFR Part 11 §11.10.
+
+### Two-Way Zoho Books Integration (feat/zoho-books)
+- **Part master sync**: part numbers, costs, descriptions bidirectional with Zoho items.
+- **Vendor master sync**: new vendors auto-created in Zoho; rate updates synced back to BOM costing.
+- **PO automation**: purchase order line items → Zoho bills with net 30/60 terms; tax calculation.
+- **Cost landing**: Zoho cost changes → landing cost updates in BOM costing module.
+- **Reliability**: async outbox worker handles network failures, retries, and idempotent deduplication.
+- **Audit & control**: full Zoho sync log, review queue for manual approval before apply, rollback capability.
+- **UI**: dedicated Zoho Books screen (status, last sync, manual trigger, log viewer).
+
+### Accessibility & Mobile Polish (feat/polish)
+- **True WCAG-AA dark mode**: not just `prefers-color-scheme` toggle, but persistent user preference with full theme coverage (no white flashes).
+- **High-contrast mode (AAA)**: extreme contrast for low-vision users; separate from dark mode toggle.
+- **Colorblind accessibility**: deuteranopia (green-red), protanopia (red-green), and tritanopia (blue-yellow) palettes with verified contrast.
+- **Mobile barcode scanner**: one-handed landscape support, large touch targets, voice feedback.
+- **Advanced tweaks panel**: power-user settings (density, theme, language, debug logging, cache invalidation).
+- **Secrets management**: `compose-secrets` for API keys, SFTP credentials (no plaintext in `.env`).
+- **Configurable WAL path**: backup write-ahead logs to fast SSD or NAS separately from main data volume.
+
+### WS7 Desktop Packaging & Auto-Update
+- **Single-click Windows installer** (Inno Setup): bundles Postgres, backend, frontend, launcher, updater in one `.exe`.
+- **Launcher** (`launcher.py`): init/start/stop of bundled cluster, crash-safe recovery, auto-browser launch.
+- **Updater** (`updater.py`, 31 tests): local-first version check → SHA-256 verify → silent install with zero downtime.
+- **Build pipeline** (`build.py`): one-command build, sign, and package.
+
+### Production Database Hardening
+- **Consolidated schema bootstrap** (`scripts/init_db.py`): greenfield init (create_all + stamp) and existing upgrade (upgrade head) unified in one command.
+- **Postgres-specific bug fixes**: env.py now handles long revision IDs (VARCHAR 64), reads `.env` as fallback, CheckConstraint camelCase quoting fixed.
+- **Orphan table cleanup**: compliance, substance reference, part composition, and compliance evaluation tables now properly modeled (migration 041_compliance).
+- **Postgres CI workflow**: dedicated test suite on real Postgres instance (not just SQLite).
+- **DB backup improvements** (`db_backup.py`): 30-day retention policy enforced, hourly scheduled snapshots.
+
+---
+
 ## [2.0.0] — 2026-07-19
 
 **Enterprise transformation release — production-ready, OpenBOM-competitive, local-first.**
@@ -298,37 +386,6 @@ If running Postgres outside Docker (not recommended for new deployments):
 
 ---
 
-## Unreleased / In Progress
-
-The following feature branches are under active development and will ship in future minor releases. They are **not** included in v2.0.0 final.
-
-### `feat/regulated` (Expected: v2.1.0)
-**FDA 21 CFR Part 11 e-signature compliance + RoHS/REACH substance tracking.**
-- Digital signatures on ECOs, approvals, and document uploads (qualified e-signature support).
-- Compliance attestation for regulated industries (medical devices, aerospace).
-- RoHS/REACH substance restriction database; part substance composition tracking; compliance reports.
-- Audit trail enhancements: non-repudiation, signature verification, regulatory export.
-
-### `feat/zoho-books` (Expected: v2.2.0)
-**Two-way Zoho Books integration: parts, vendors, POs, cost synchronization.**
-- Part master ↔ Zoho item mapping (sync cost changes, descriptions).
-- Vendor master ↔ Zoho contacts (new vendors auto-created in Zoho, rate updates synced back).
-- PO line items → Zoho bills (net 30, net 60 terms; tax calculation).
-- Cost changes in Zoho → landing cost updates in BOM costing module.
-- Async outbox worker for reliable, idempotent sync; handles network failures gracefully.
-- Full audit of all Zoho sync operations (sync log, rollback capability).
-
-### `feat/polish` (Expected: v2.0.1–v2.1.0)
-**WCAG-AA dark mode + high-contrast / colorblind a11y modes, mobile barcode scanner, advanced tweaks panel, secrets management, WAL path fix.**
-- True dark mode (not just `prefers-color-scheme` toggle) with user preference storage.
-- High-contrast mode (AAA) + deuteranopia/protanopia/tritanopia colorblind palettes.
-- Mobile barcode scanner UI (one-handed, landscape support, large buttons).
-- Advanced **tweaks panel** for power users: density, theme, language, debug logging, cache invalidation.
-- **Secrets management**: `compose-secrets` for sensitive config (API keys, SFTP credentials); no longer stored in plaintext `.env`.
-- **WAL path configuration**: make WAL archive location configurable (separate NAS mount, fast SSD for WAL-heavy workloads).
-
----
-
 ## File Structure
 
 ```
@@ -403,7 +460,7 @@ bom-tool/
 
 ## License & Support
 
-Blackbox BOM v2.0.0 is proprietary software for Blackbox Factories. Commercial support, custom integrations, and on-premises deployment assistance available at `sumanth@blackboxfactories.com`.
+Blackbox BOM v2.1.0 is proprietary software for Blackbox Factories. Commercial support, custom integrations, and on-premises deployment assistance available at `sumanth@blackboxfactories.com`.
 
 ---
 

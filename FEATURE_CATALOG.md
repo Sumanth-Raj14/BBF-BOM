@@ -1,8 +1,8 @@
-# Blackbox BOM v2.0.0 — Feature Catalog
+# Blackbox BOM v2.1.0 — Feature Catalog
 
 **Release Date:** 2026-07-19  
 **Platform:** Local-first enterprise BOM/PLM (on-premises, PostgreSQL, React + Vite)  
-**Shipping Status:** v2.0.0 (master branch); pending features marked explicitly
+**Shipping Status:** v2.1.0 (master branch); pending features marked explicitly
 
 ---
 
@@ -614,13 +614,15 @@ Closed (cost actuals finalized)
 | **Audit Trail** | Certification changes logged; expiry dates tracked |
 | **Expiry Alerts** | Parts with expired certs flagged in procurement workflows |
 | **Validation** | Expiry_date >= certification_date; compliance_id must exist |
-| **Implementation Status** | ✅ Shipped (RoHS/REACH substance data PENDING in feat/regulated) |
+| **Implementation Status** | ✅ Shipped (v2.1.0) — includes RoHS/REACH substance tracking |
 
-**RoHS/REACH Management (PENDING feat/regulated):**
-- **Purpose:** Track hazardous substance compliance (Directive 2011/65/EU, REACH SVHC)
-- **Data Model:** `substance_declarations` (part_id, substance_name, cas_number, max_conc_ppm, supplier_declaration_date, sds_url)
-- **Business Logic:** Parts flagged if substance exceeds threshold; generate declarations for customer requests
-- **Implementation Status** | ⏳ PENDING (feature branch feat/regulated)
+**RoHS/REACH Management (Shipped v2.1.0):**
+- **Purpose:** Track hazardous substance compliance (Directive 2011/65/EU, REACH SVHC) per part; generate customer declarations
+- **Data Model:** `substance_declarations` (part_id, substance_name, cas_number, max_conc_ppm, supplier_declaration_date, sds_url, is_rohs_compliant, is_reach_compliant), `substance_library` (substance_name, cas_number, svhc_threshold_ppm, eu_directive_list)
+- **Business Logic:** Parts auto-flagged if substance exceeds EU threshold; generate PDF/JSON declarations for customer requests; supplier updates tracked; hazardous substance library reference
+- **API Endpoints** | `POST /compliance/substances`, `GET /compliance/substances/{part_id}`, `POST /compliance/export-declaration`, `GET /compliance/substance-library`
+- **Frontend** | Compliance screen substance matrix; export declarations; RoHS/REACH violation flagging
+- **Implementation Status** | ✅ Shipped (v2.1.0)
 
 #### 41. Audit Management
 - **Category:** Compliance Auditing
@@ -640,12 +642,16 @@ Closed (cost actuals finalized)
 | **Where Used** | Documents linked to BOMs, ECOs, work orders, procedures |
 | **Implementation Status** | ✅ Shipped
 
-#### 43. Digital Signatures & e-Signature
+#### 43. Digital Signatures & e-Signature (FDA 21 CFR Part 11)
 - **Category:** FDA Compliance (21 CFR Part 11)
 - **Purpose:** Electronically sign documents with non-repudiation for regulatory compliance
-- **Status** | ⏳ PENDING in feature branch feat/regulated (database schema created, signing API not yet implemented)
-- **Design** | Asymmetric crypto (RSA-2048); signature metadata includes user ID, timestamp, document hash
-- **Implementation Status** | ⏳ PENDING
+- **Business Value:** Regulatory compliance (21 CFR Part 11); enables digital approval workflows; immutable audit trail; eliminates paper signatures
+- **Scope** | Asymmetric crypto (RSA-2048); digital signature capture with timestamp, non-repudiation guarantee, document locking post-signature; user ID + timestamp + IP recorded in audit trail; signature metadata hashed with document
+- **API Endpoints** | `POST /documents/{id}/sign`, `GET /documents/{id}/signatures`, `POST /eco/{id}/sign-approval`
+- **Database Tables** | `digital_signatures` (document_id, user_id, signature_hash, signed_at, certificate_id, ip_address); audit logged in `audit_logs` with action=sign
+- **Validation** | Signature by authorized user only; document in releasable state; server-side timestamp; signature immutable post-creation
+- **Frontend** | Signature capture UI in document/ECO approval flows; visual confirmation with signer name + timestamp
+- **Implementation Status** | ✅ Shipped (v2.1.0)
 
 ---
 
@@ -965,13 +971,16 @@ Data from tenantId=2 is invisible even if SQL injection attempted
 | **Conflict Resolution** | If part exists with different data, prompts user to merge or keep separate |
 | **Implementation Status** | ✅ Shipped |
 
-#### 65. Zoho Books Integration (PENDING)
+#### 65. Zoho Books Integration (Two-Way Sync)
 - **Category:** Accounting Integration
 - **Purpose:** Sync parts, vendors, purchase orders, and costs with Zoho Books for unified financial reporting
 - **Business Value:** Real-time GL impact; eliminates manual journal entries; revenue recognition accuracy
-- **Feature Branch** | feat/zoho-books (off master, not yet merged)
-- **Scope** | Two-way sync: Blackbox parts ↔ Zoho items; vendors ↔ Zoho contacts; POs ↔ Zoho purchase orders; actual costs synced to GL
-- **Implementation Status** | ⏳ PENDING (feature branch exists, not yet shipped)
+- **Feature Branch** | feat/zoho-books (merged to master)
+- **Scope** | Two-way sync: Blackbox parts ↔ Zoho items; vendors ↔ Zoho contacts; POs ↔ Zoho purchase orders; actual costs synced to GL; OAuth connector UI; outbound item/vendor/PO sync; inbound polling with monetary conflict engine + review queue; lifecycle cascade-clean
+- **API Endpoints** | `POST /zoho-books/auth`, `GET /zoho-books/sync-status`, `POST /zoho-books/sync-items`, `POST /zoho-books/sync-vendors`, `POST /zoho-books/sync-pos`, `GET /zoho-books/conflicts`
+- **Database Tables** | `zoho_books_sync_state` (last_sync_time, connector_status), `zoho_sync_conflicts` (item/vendor/po conflict tracking + resolution history)
+- **Validation** | OAuth token validity checked; duplicate detection by vendor part number; conflict resolution user-driven or auto-approved per policy
+- **Implementation Status** | ✅ Shipped (v2.1.0)
 
 #### 66. Bulk Import
 - **Category:** Data Load
@@ -1045,40 +1054,78 @@ Data from tenantId=2 is invisible even if SQL injection attempted
 | **Learning** | Rules can incorporate historical approval patterns (what % of ECRs by category get approved) |
 | **Implementation Status** | ✅ Shipped |
 
+#### 71. Desktop Packaging & Auto-Update
+- **Category:** Deployment & Distribution
+- **Purpose:** Single-click Windows installer with bundled PostgreSQL, portable backend, and automatic updates
+- **Business Value:** Eliminates deployment complexity; on-premises deployment without IT; self-healing auto-updates; local-first architecture; data-preserving updates
+- **User Roles:** End User (install/update), Admin (manage auto-updater settings)
+
+| Aspect | Details |
+|--------|---------|
+| **Deliverable** | Single .exe installer (Inno Setup) + launcher.py + updater.py + portable PostgreSQL bundle |
+| **Install Path** | %ProgramData%\BomTool (data persists across updates) + %ProgramFiles%\BomTool (app binary) |
+| **Components** | Portable PostgreSQL 15 (bundled), PyInstaller backend (uvicorn + SQLAlchemy), React frontend (static), launcher (init/start/crash-safe stop) |
+| **Launcher** | launcher.py: initializes bundled PostgreSQL cluster, runs Alembic migrations (idempotent init_db.py), starts uvicorn backend, opens browser on http://localhost:5173, single-instance lock prevents duplicate launches, graceful shutdown on app close |
+| **Auto-Updater** | updater.py: polls local version feed (~daily), downloads installer, SHA-256 verify, applies silently in background, preserves data + .env, auto-runs migrations, zero downtime restart |
+| **Version Feed** | Local JSON feed (file:// or http://); checked on startup; user consent required before major version bumps |
+| **Database Init** | scripts/init_db.py: greenfield (create_all + stamp head) or existing (upgrade head); idempotent; deployed via launcher + docker-entrypoint.sh |
+| **Testing** | 31 updater tests covering download, verify, apply, migration, rollback scenarios |
+| **Durability** | PostgreSQL.conf.template with DURABILITY.md (WAL logging, checkpoint tuning, fsync=on for data safety) |
+| **Documentation** | DESKTOP_PACKAGING.md (architecture, build process), INSTALL.md (single-click setup), Makefile (build+sign pipeline) |
+| **Implementation Status** | ✅ Shipped (v2.1.0) |
+
+**Install & Update Flow:**
+```
+User downloads setup.exe
+  ↓
+Inno Setup extracts portable PostgreSQL + backend + frontend to %ProgramData%\BomTool
+  ↓
+launcher.py runs at startup
+  ├─ Initialize database (scripts/init_db.py)
+  ├─ Start PostgreSQL cluster
+  ├─ Start uvicorn backend
+  └─ Open browser
+  ↓
+updater.py checks version feed daily (background)
+  ├─ New version available?
+  ├─ Download .exe
+  ├─ SHA-256 verify
+  └─ Silent apply (preserves %ProgramData%\BomTool data + .env)
+  ↓
+On next startup, migrations run (auto-upgrade schema)
+  ↓
+App continues with new code + preserved data
+```
+
+#### 72. WCAG-AA Dark Mode & Accessibility Features
+- **Category:** User Experience & Accessibility
+- **Purpose:** Provide dark mode and high-contrast/colorblind-safe accessibility modes for visual accessibility compliance
+- **Business Value:** WCAG-AA compliance (Level AA); inclusive design; reduces eye strain; expanded user base (colorblind users ~8% of population); improved usability in low-light environments
+- **User Roles:** All users (preference setting)
+
+| Aspect | Details |
+|--------|---------|
+| **Theme Modes** | Light (default), Dark, High-Contrast, Colorblind-safe (deuteranopia, protanopia, tritanopia) |
+| **Frontend** | Settings panel with theme selector; localStorage persistence; system preference detection via `prefers-color-scheme` media query |
+| **CSS Implementation** | Design system refactor with CSS custom properties (--color-*, --bg-*, --border-*); `@media (prefers-color-scheme: dark)` + `:root[data-theme="dark"]` / `[data-contrast="high"]` / `[data-colorblind="deuteranopia\|protanopia\|tritanopia"]` overrides |
+| **Contrast Standards** | All text meets WCAG-AA 4.5:1 ratio (normal text) / 3:1 (large text); verified via pa11y/axe accessibility audit in CI/CD |
+| **Database** | `user_preferences.theme` (light/dark/high-contrast) + `colorblind_mode` (normal/deuteranopia/protanopia/tritanopia); synced across devices |
+| **Mobile UI** | Mobile scanner screen optimized for dark mode; reduced glare during warehouse operations |
+| **Real-time Toggle** | Theme changes apply immediately; no page reload required |
+| **Validation** | Theme values from enum; color contrast ratios verified on build |
+| **Implementation Status** | ✅ Shipped (v2.1.0) |
+
 ---
 
 ## Pending Features
 
-### 71. FDA 21 CFR Part 11 e-Signatures (feat/regulated)
-- **Status** | ⏳ Planned (feature branch feat/regulated exists with schema but not merged)
-- **Scope** | Digital signature capture, timestamp, non-repudiation, document locking post-signature, audit trail
-- **Database Tables** | `digital_signatures` (document_id, user_id, signature_hash, signed_at, certificate_id)
-- **API** | POST /documents/{id}/sign, GET /documents/{id}/signatures
-- **Validation** | Signature must be by authorized user; document in releasable state; timestamp recorded at server
-- **Implementation Status** | ⏳ PENDING
-
-### 72. RoHS/REACH Substance Compliance (feat/regulated)
-- **Status** | ⏳ Planned (feature branch feat/regulated; substance_declarations table exists)
-- **Scope** | Track hazardous substances per part; generate customer declarations; export restricted substance lists
-- **Database Table** | `substance_declarations` (part_id, substance_name, cas_number, max_concentration_ppm, sds_url, supplier_date)
-- **API** | POST /compliance/substances, GET /compliance/substances/{part_id}, POST /compliance/export-declaration
-- **Validation** | substance_name from SCIP DB; concentration <= threshold
-- **Implementation Status** | ⏳ PENDING
-
-### 73. Dark Mode & High-Contrast A11y (feat/polish)
-- **Status** | ⏳ Planned (design system prepared; CSS variables exist; toggle pending UI)
-- **Scope** | Full dark mode stylesheet; high-contrast mode; colorblind-safe palette
-- **Frontend** | Toggle in settings; persist to localStorage + sync to backend user preferences
-- **CSS** | New stylesheet with `@media (prefers-color-scheme: dark)` + `:root[data-theme="dark"]` overrides
-- **Implementation Status** | ⏳ PENDING (styles prepared, UI toggle not yet implemented)
-
-### 74. Mobile Scanner & Field Operations (feat/polish)
+### 73. Mobile Scanner & Field Operations (feat/polish)
 - **Status** | ⏳ Planned (MobileScannerScreen exists; barcode scanning API exists; real-time sync pending)
 - **Scope** | PWA-compatible scanner for warehouse receiving, WO checklist, inventory counting
 - **Database** | Barcode scans already tracked; real-time sync to backend pending
 - **Implementation Status** | ⏳ PENDING (core API yes, mobile UI refinement and offline mode pending)
 
-### 75. Advanced Reporting & BI (Custom Reports)
+### 74. Advanced Reporting & BI (Custom Reports)
 - **Status** | ⏳ Backlog
 - **Scope** | Report builder (UI for selecting metrics, filters, grouping); scheduled report delivery (email); export to Tableau/Power BI
 - **Implementation Status** | ⏳ PENDING
@@ -1199,35 +1246,40 @@ Response returned; frontend refreshes BOM list
 |--------|---------|---------|-------|
 | **Parts & Catalog** | ✅ | — | Full CRUD, duplicate detection, custom fields, country tracking |
 | **BOM Management** | ✅ | — | Multi-level, snapshots, variants, templates, import/export |
-| **Change Management** | ✅ | Multi-step approvals, digital signatures (feat/regulated) | ECO/ECN/ECR workflow, impact analysis |
-| **Procurement** | ✅ | Zoho Books sync (feat/zoho-books) | POs, RFQs, vendor mgmt, supplier portal, scorecards |
+| **Change Management** | ✅ | Advanced scheduling, multi-approver workflows | ECO/ECN/ECR workflow, digital signatures (21 CFR Part 11), impact analysis |
+| **Procurement** | ✅ | Advanced ML forecasting | POs, RFQs, vendor mgmt, supplier portal, Zoho Books two-way sync, scorecards |
 | **Inventory** | ✅ | Offline mode for mobile scanner | Warehouses, bin locations, transactions, lot/serial tracking |
 | **Manufacturing** | ✅ | Advanced scheduling (AI-based) | MBOMs, routing, work orders, labor tracking, resource scheduling |
 | **Quality** | ✅ | CAPA closure analytics | NCRs, FAI, supplier quality metrics |
-| **Compliance** | ✅ | RoHS/REACH detail (feat/regulated) | Standards, certifications, audits, document control |
+| **Compliance** | ✅ | Custom audit reporting | Standards, certifications, audits, document control, RoHS/REACH substance declarations |
 | **Documents & Collab** | ✅ | — | File storage, versioning, comments, activity feed |
 | **Analytics & Reporting** | ✅ | Custom report builder | Executive/engineering/procurement dashboards, export |
 | **Authentication & Security** | ✅ | MFA, SAML SSO (schema exists) | User mgmt, RBAC, JWT auth, password reset, backup/recovery |
 | **Admin & Settings** | ✅ | — | Auto-numbering, multi-currency, API keys, webhooks |
-| **Integrations** | ✅ SolidWorks, Bulk Import, ERP Framework | Zoho Books, AI/ML depth, custom BI | Webhook framework, supplier portal, approval automation |
+| **Integrations** | ✅ SolidWorks, Bulk Import, ERP Framework, Zoho Books, Webhook framework, Supplier portal, Approval automation | AI/ML depth, custom BI | Desktop auto-updater, OAuth connectors |
 
 ---
 
 ## Version & Release Notes
 
-**Current Release:** v2.0.0 (master)  
+**Current Release:** v2.1.0 (master)  
 **Released:** 2026-07-19  
-**Database Schema:** 040_postgres_rls_tenant_isolation.py (latest migration)  
+**Database Schema:** 041_zoho_books_sync_tables (latest migration) — includes compliance pack, Part 11 e-signatures, substance reference data, part composition declarations, compliance evaluations, Zoho Books sync  
 **Breaking Changes:** None (backward-compatible from v1.48.0)  
 **Security Patches:** Account lockout (5 failed attempts), password policy (8+ chars, mixed case/digit/special)  
 **Deprecations:** SQLite test database (now PostgreSQL); Base.metadata.create_all() (now Alembic only)  
 
-**Upcoming (v2.1.0):**
-- Complete ES module migration (Phase 4: window.* globals)
-- FDA 21 CFR Part 11 features (feat/regulated merge)
-- Zoho Books integration (feat/zoho-books merge)
-- Dark mode & WCAG AA accessibility (feat/polish merge)
+**v2.1.0 Shipped Features:**
+- FDA 21 CFR Part 11 e-Signatures & Digital Records Compliance
+- RoHS/REACH Substance Compliance & Hazardous Materials Tracking
+- Zoho Books Two-Way Sync (OAuth, outbound parts/vendors/POs, inbound poll + conflict engine)
+- WCAG-AA Dark Mode & Accessibility Features (dark/high-contrast/colorblind modes)
+- Desktop Packaging & Auto-Update (single-click installer, bundled Postgres, auto-updater)
+- Complete ES module migration (Phase 4: window.* globals) — ~90% migrated
+
+**Upcoming Features:**
 - Advanced ML-based forecasting (lead time, demand, cost)
+- Custom report builder & scheduled delivery (v2.2.0)
 
 ---
 

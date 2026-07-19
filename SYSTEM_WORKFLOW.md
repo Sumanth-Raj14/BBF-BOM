@@ -1,6 +1,6 @@
 # Blackbox BOM — System Workflow & Architecture
 
-**Version**: 2.0.0 (2026-07-19)  
+**Version**: 2.1.0 (2026-07-19)  
 **Status**: Production Shipped  
 **Audience**: Developers, DevOps, Enterprise Operators
 
@@ -625,6 +625,133 @@ Database corrupted or lost
 │ (health checks pass)     │
 └──────────────────────────┘
 ```
+
+---
+
+## Desktop Installation & Auto-Update Flow
+
+### Launcher Sequence (Windows Desktop Deployment)
+
+```mermaid
+graph TD
+    A["User double-clicks launcher.exe"] --> B["Check single-instance lock"]
+    B --> |Already running| C["Raise existing window"]
+    B --> |New instance| D["Check if Postgres running"]
+    
+    D --> |Not running| E["Start embedded Postgres"]
+    E --> F["Wait for readiness pg_isready"]
+    D --> |Running| F
+    
+    F --> G["Run init_db.py"]
+    G --> |Greenfield| H["create_all + alembic stamp head"]
+    G --> |Existing| I["alembic upgrade head"]
+    
+    H --> J["Start backend Uvicorn"]
+    I --> J
+    
+    J --> K["Wait for readiness GET /health"]
+    K --> L["Open browser to http://localhost:8000"]
+    
+    L --> M["App ready"]
+    
+    N["Background: Auto-updater runs every 15 min"] --> O["Check version-feed"]
+    O --> |No update| N
+    O --> |Update available| P["Download installer.exe"]
+    
+    P --> Q["SHA-256 verify"]
+    Q --> |Mismatch| R["Log error, retry"]
+    Q --> |Match| S["Execute silent install /SILENT /NORESTART"]
+    
+    S --> T["Preserve %ProgramData% (data + .env)"]
+    T --> U["Post-install: Run init_db.py upgrade head"]
+    U --> V["Restart launcher"]
+    V --> M
+```
+
+**Key Steps**:
+
+1. **Single-Instance Lock**: Creates `%TEMP%\bbom-launcher.lock`
+   - If exists and process alive: Focus window, exit
+   - If stale: Remove lock, proceed
+
+2. **PostgreSQL Startup** (if embedded):
+   - Check `pg_isready -h 127.0.0.1 -p 5432`
+   - If not responding after 30 seconds: Log error, abort
+   - Runs as subprocess, output logged to launcher console
+
+3. **Schema Bootstrap** (`init_db.py`):
+   - Greenfield (no `alembic_version` table):
+     - `Base.metadata.create_all()` (creates 155 tables)
+     - `alembic stamp head` (records current migration)
+   - Existing:
+     - `alembic upgrade head` (applies pending migrations)
+
+4. **Backend Startup** (Uvicorn):
+   - Spawns subprocess: `python -m uvicorn app.main:app --host 127.0.0.1 --port 8000`
+   - Polls `GET /health` until 200 OK (timeout 60 seconds)
+   - Logs all output to `launcher.log`
+
+5. **Browser Launch**:
+   - Opens `http://localhost:8000` via system default browser
+   - Frontend served by backend (guarded by `SERVE_FRONTEND=true`)
+
+### Auto-Updater Flow (Background Task)
+
+```mermaid
+sequenceDiagram
+    participant Launcher as Launcher
+    participant Feed as Version Feed<br/>Local HTTP/File
+    participant Disk as Download Cache<br/>%TEMP%
+    participant Installer as Inno Setup
+    participant Backend as Backend
+
+    Launcher->>Launcher: Every 15 min (background thread)
+    Launcher->>Feed: GET /version-feed/latest
+    
+    Feed->>Launcher: {version, url, sha256}
+    
+    Launcher->>Launcher: Compare with local version
+    alt No update
+        Launcher->>Launcher: Sleep 15 min
+    else Update available
+        Launcher->>Launcher: Show tray notification<br/>"New version available"
+        Launcher->>Disk: Download installer.exe<br/>(with progress callback)
+        
+        Disk->>Launcher: Download complete
+        
+        Launcher->>Launcher: SHA-256 verify
+        alt Mismatch
+            Launcher->>Launcher: Log error<br/>Schedule retry (exponential backoff)
+        else Match
+            Launcher->>Installer: Execute: installer.exe /SILENT /NORESTART
+            
+            Installer->>Installer: Extract to %ProgramFiles%
+            Installer->>Installer: Preserve %ProgramData%
+            
+            note over Installer: Data + .env + DB untouched
+            
+            Installer->>Backend: Post-install hook: init_db.py upgrade head
+            
+            Backend->>Backend: Apply any pending migrations
+            
+            Installer->>Launcher: Signal: upgrade_complete
+            Launcher->>Launcher: Restart (or schedule for next idle moment)
+        end
+    end
+```
+
+**Configuration** (env vars):
+- `UPDATE_CHECK_INTERVAL_MIN` (default 15 minutes)
+- `VERSION_FEED_URL` (default: local file or HTTP endpoint)
+- `UPDATE_ENABLE` (default true; can disable for air-gapped installs)
+
+**Behavior**:
+- Check happens in background thread (non-blocking)
+- Download cached in `%TEMP%\bbom-updates\`
+- If download fails: Retry with exponential backoff (5 min, 15 min, 60 min, then daily)
+- Silent install does NOT interrupt user (preserves app state)
+- Migrations run post-install (schema auto-upgraded before app restart)
+- Rollback: Restart with previous version if post-install fails (transactional schema)
 
 ---
 

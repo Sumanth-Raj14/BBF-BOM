@@ -5,6 +5,31 @@ All notable changes to the Blackbox BOM Management Tool will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-07-19
+**Regulated compliance, Zoho Books integration, polish a11y/mobile, WS7 desktop packaging + auto-update shipped.**
+
+### Added
+- **WS7 Desktop Packaging & Auto-Update**: Single-click Windows installer (via Inno Setup `installer.iss`) bundles portable Postgres + PyInstaller backend + built frontend. Launcher (`launcher.py`) handles init/start/crash-safe stop of bundled cluster, DB bootstrap, uvicorn, and browser launch. Updater (`updater.py`, 31 tests) performs local-first version-feed check → download → SHA-256 verify → silent installer apply, auto-migrates existing data, preserves `.env`. Build pipeline (`build.py`) with signing support.
+- **DB Bootstrap Consolidation**: `scripts/init_db.py` is now the single schema owner — idempotent greenfield bootstrap (create_all + alembic stamp head) and existing DB upgrade (alembic upgrade head) in one invocation. Wired into deploy path (Makefile, docker-entrypoint.sh, compose, INSTALL, runbook). Fixes 3 Postgres-only bugs (env.py version_num VARCHAR + .env fallback; CheckConstraint camelCase quoting; 3 orphan compliance tables now modeled + migration 041_compliance).
+- **Postgres Production Hardening**: Postgres-track CI workflow added; `db_backup.py` fixed (30-retention); fresh install via installer or `python -m scripts.init_db` now production-ready.
+- **feat/regulated (MERGED)**: FDA 21 CFR Part 11 e-signatures + RoHS/REACH substance compliance — digital signatures on ECOs/approvals/uploads, compliance attestation, substance restriction database, audit trail enhancements (non-repudiation, signature verification, regulatory export).
+- **feat/zoho-books (MERGED)**: Two-way Zoho Books sync — part master ↔ Zoho item mapping, vendor master ↔ Zoho contacts, PO line items → Zoho bills, cost changes → landing cost updates, async outbox worker, full audit log, sync UI + Zoho Books screen.
+- **feat/polish (MERGED)**: WCAG-AA dark mode (true dark, not just `prefers-color-scheme`), high-contrast (AAA) + colorblind modes (deuteranopia/protanopia/tritanopia), mobile barcode scanner UI, advanced tweaks panel (density/theme/language/debug/cache), secrets management (`compose-secrets`), configurable WAL path.
+
+### Fixed
+- **Test Infrastructure**: ALLOWED_HOSTS now allows `testserver` under pytest (prod-safe) — unblocked ~412 of 414 previously-failing/erroring tests (single TrustedHostMiddleware misconfig, not 73 broken features).
+
+### Changed
+- Alembic migration head now: `041_zoho_books_sync_tables` (linear chain: 040 → 041_compliance → 041_part11 → 042_substance_ref → 043_part_composition → 044_compliance_evals → 041_zoho_books). Fresh install creates 155 tables.
+- Version: product bumped to 2.1.0 from 2.0.0.
+
+### Database Schema
+- **Head**: 041_zoho_books_sync_tables
+- **Table count**: 155 (fresh install)
+- **All three feature branches** (regulated, zoho-books, polish) now reflected in schema
+
+---
+
 ## [2.0.1-rc] - 2026-07-19
 **Postgres Production Bring-Up: Schema Migration Complete, Alembic Bugs Identified**
 
