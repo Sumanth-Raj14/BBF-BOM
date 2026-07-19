@@ -31,7 +31,17 @@ async def get_current_supplier_user(
     credentials: HTTPAuthorizationCredentials = Security(supplier_auth_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> SupplierUser:
-    credentials_exception = HTTPException(status_code=401, detail="Invalid or missing token")
+    # 403, NOT 401: these endpoints use a separate supplier-token realm. A
+    # normal logged-in app user who lands here (e.g. an admin opening the
+    # supplier-portal screen) is *authenticated* — just not with a supplier
+    # token. Returning 401 made the app's shared API client treat it as an
+    # expired session (refresh -> fail -> logout), silently logging admins out
+    # whenever the supplier-portal screen loaded. 403 = "no access", which the
+    # client surfaces without killing the session. Suppliers themselves get
+    # their errors handled by the portal's own login flow.
+    credentials_exception = HTTPException(
+        status_code=403, detail="Supplier authentication required"
+    )
     if not credentials:
         raise credentials_exception
     payload = verify_token(credentials.credentials)
