@@ -70,8 +70,6 @@ export default function TopBar() {
           />
         </div>
         <div className="wordmark">
-          <span className="bbf-chevron">&lt;&lt;</span>
-          <span className="bbf-wordmark-black">BLACKBOX</span>
           <span className="bbf-wordmark-bom">BOM</span>
           {apiConnected && (
             <span className="bbf-badge bbf-badge-olive fs-9">

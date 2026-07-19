@@ -187,13 +187,13 @@ SEED_PROJECTS = [
         "code": "ATLAS",
         "name": "ATLAS Rover",
         "description": "Autonomous rover for planetary exploration",
-        "status": "active",
+        "status": "Released",
     },
     {
         "code": "HORIZON",
         "name": "HORIZON Drone",
         "description": "Long-endurance surveillance drone",
-        "status": "active",
+        "status": "Released",
     },
 ]
 
