@@ -83,14 +83,14 @@ jobs:
       - name: Fresh install bootstrap against EMPTY Postgres (scripts/init_db)
         run: python -m scripts.init_db
 
-      - name: Verify alembic_version is stamped at head (041_compliance_pack_tables)
+      - name: Verify alembic_version is stamped at head (041_zoho_books_sync_tables)
         run: |
           python -c "
           import asyncio
           from sqlalchemy import text
           from sqlalchemy.ext.asyncio import create_async_engine
 
-          EXPECTED_HEAD = '041_compliance_pack_tables'
+          EXPECTED_HEAD = '041_zoho_books_sync_tables'
 
           async def main():
               engine = create_async_engine('${{ env.DATABASE_URL }}')
@@ -114,7 +114,7 @@ jobs:
           python -m alembic current
           CURRENT=$(python -m alembic current 2>/dev/null | head -n1)
           echo "alembic current: $CURRENT"
-          echo "$CURRENT" | grep -q '041_compliance_pack_tables' || (echo "::error::alembic current does not report head 041_compliance_pack_tables" && exit 1)
+          echo "$CURRENT" | grep -q '041_zoho_books_sync_tables' || (echo "::error::alembic current does not report head 041_zoho_books_sync_tables" && exit 1)
 
       - name: Re-run init_db against an already-migrated DB (idempotency check)
         run: python -m scripts.init_db
