@@ -17,9 +17,14 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-WAL_ARCHIVE_DIR = "/var/lib/postgresql/wal_archive"
-PG_DATA_DIR = "/var/lib/postgresql/data"
-RESTORE_COMMAND = "cp /var/lib/postgresql/wal_archive/%f %p"
+WAL_ARCHIVE_DIR = os.environ.get("WAL_ARCHIVE_DIR", "/var/lib/postgresql/wal_archive")
+PG_DATA_DIR = os.environ.get("PGDATA", "/var/lib/postgresql/data")
+# Platform-aware: Postgres runs restore_command via the host shell — cmd.exe on
+# the Windows desktop bundle (`copy`) vs sh on Linux/containers (`cp`).
+if os.name == "nt":
+    RESTORE_COMMAND = f'copy /Y "{os.path.join(WAL_ARCHIVE_DIR, "%f")}" "%p"'
+else:
+    RESTORE_COMMAND = f"cp {WAL_ARCHIVE_DIR}/%f %p"
 
 
 def generate_recovery_conf(target_time: str = None, target_xid: str = None) -> str:
