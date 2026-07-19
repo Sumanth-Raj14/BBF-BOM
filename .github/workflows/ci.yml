@@ -65,7 +65,7 @@ jobs:
         image: postgres:15
         env:
           POSTGRES_USER: bom_user
-          POSTGRES_PASSWORD: bom_password
+          POSTGRES_PASSWORD: ${{ secrets.CI_PG_PASSWORD }}
           POSTGRES_DB: bom_db
         ports:
           - 5432:5432
@@ -96,10 +96,10 @@ jobs:
       - name: Run migrations
         run: alembic upgrade head
         env:
-          TEST_DATABASE_URL: postgresql+asyncpg://bom_user:bom_password@127.0.0.1:5432/bom_db
+          TEST_DATABASE_URL: postgresql+asyncpg://bom_user:${{ secrets.CI_PG_PASSWORD }}@127.0.0.1:5432/bom_db
           POSTGRES_SERVER: 127.0.0.1
           POSTGRES_USER: bom_user
-          POSTGRES_PASSWORD: bom_password
+          POSTGRES_PASSWORD: ${{ secrets.CI_PG_PASSWORD }}
           POSTGRES_DB: bom_db
           SECRET_KEY: test-secret-key-ci-1234567890
           ENCRYPTION_KEY: test-encryption-key-ci
@@ -110,10 +110,10 @@ jobs:
         run: |
           python -m pytest tests/ -v --tb=short --asyncio-mode=auto --cov=app --cov-report=xml --cov-report=term
         env:
-          TEST_DATABASE_URL: postgresql+asyncpg://bom_user:bom_password@127.0.0.1:5432/bom_db
+          TEST_DATABASE_URL: postgresql+asyncpg://bom_user:${{ secrets.CI_PG_PASSWORD }}@127.0.0.1:5432/bom_db
           POSTGRES_SERVER: 127.0.0.1
           POSTGRES_USER: bom_user
-          POSTGRES_PASSWORD: bom_password
+          POSTGRES_PASSWORD: ${{ secrets.CI_PG_PASSWORD }}
           POSTGRES_DB: bom_db
           SECRET_KEY: test-secret-key-ci-1234567890
           ENCRYPTION_KEY: test-encryption-key-ci
@@ -183,7 +183,7 @@ jobs:
         run: |
           docker compose -f docker-compose.yml build
         env:
-          POSTGRES_PASSWORD: build_test
+          POSTGRES_PASSWORD: ${{ secrets.CI_PG_PASSWORD }}
           SECRET_KEY: build_test_key
           ENCRYPTION_KEY: build_encryption_key_32char!
 

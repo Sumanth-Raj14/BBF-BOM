@@ -7,7 +7,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: bom_user
-      POSTGRES_PASSWORD: bom_test_password
+      # No secret committed: supply via environment / .env (fail-closed).
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD for the test DB}"
       POSTGRES_DB: bom_test_db
     ports:
       - "5433:5432"
