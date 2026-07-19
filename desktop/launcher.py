@@ -171,8 +171,13 @@ def resolve_paths() -> dict:
     logs_dir = data_dir / "logs"
     backups_dir = data_dir / "backups"
     wal_archive_dir = data_dir / "wal_archive"
+    # Writable dirs for backend state that must NOT live under the read-only
+    # INSTALL_DIR (Program Files). The backend reads these from env
+    # (UPLOAD_DIR / RSA_KEY_DIR) via app.core.config.settings; see build_child_env.
+    uploads_dir = data_dir / "uploads"
+    rsa_key_dir = data_dir / "rsa_keys"
 
-    for d in (data_dir, logs_dir, backups_dir, wal_archive_dir):
+    for d in (data_dir, logs_dir, backups_dir, wal_archive_dir, uploads_dir, rsa_key_dir):
         d.mkdir(parents=True, exist_ok=True)
 
     return {
@@ -185,6 +190,8 @@ def resolve_paths() -> dict:
         "logs_dir": logs_dir,
         "backups_dir": backups_dir,
         "wal_archive_dir": wal_archive_dir,
+        "uploads_dir": uploads_dir,
+        "rsa_key_dir": rsa_key_dir,
     }
 
 
@@ -358,11 +365,33 @@ def run_initdb(pgsql_bin: Path, pgdata: Path, log: logging.Logger) -> None:
 
 def pg_ctl_start(pgsql_bin: Path, pgdata: Path, log_file: Path, log: logging.Logger) -> None:
     pg_ctl_exe = pgsql_bin / "pg_ctl.exe"
-    cmd = [str(pg_ctl_exe), "start", "-D", str(pgdata), "-l", str(log_file), "-w", "-t", "60"]
+    # Two Windows-specific hazards are handled here; BOTH caused the launcher to
+    # freeze at "Starting Postgres" with no app ever coming up:
+    #   1. Do NOT use pg_ctl's own wait (-w): it can block indefinitely on some
+    #      setups even when the server is already up. We poll readiness ourselves
+    #      via wait_for_postgres_ready() right after this call.
+    #   2. Do NOT capture_output / pipe: pg_ctl launches a LONG-LIVED postgres
+    #      that inherits pg_ctl's stdout/stderr handles, so a piped
+    #      subprocess.run() blocks reading that pipe until postgres exits (i.e.
+    #      forever). Send pg_ctl's own chatter to DEVNULL — the server log is
+    #      already captured via -l. This was the actual cause of the freeze.
+    cmd = [str(pg_ctl_exe), "start", "-D", str(pgdata), "-l", str(log_file)]
     log.info("Starting Postgres: %s", " ".join(cmd))
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        result = subprocess.run(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+            creationflags=creationflags,
+        )
+    except subprocess.TimeoutExpired:
+        log.error("pg_ctl start did not return within 60s (launch dispatch hung)")
+        raise RuntimeError("pg_ctl start timed out")
     if result.returncode != 0:
-        log.error("pg_ctl start failed (exit %s): %s", result.returncode, result.stderr.strip())
+        log.error("pg_ctl start failed (exit %s)", result.returncode)
         raise RuntimeError(f"pg_ctl start failed with exit code {result.returncode}")
 
 
@@ -513,6 +542,17 @@ def build_child_env(cfg: dict) -> dict:
             "S3_SECRET_KEY": cfg["S3_SECRET_KEY"],
             "BACKUP_DIR": str(cfg["backups_dir"]),
             "WAL_ARCHIVE_DIR": str(cfg["wal_archive_dir"]),
+            # Must point at writable DATA_DIR paths; the backend defaults these
+            # to app-relative dirs (./uploads, ./rsa_keys) that are read-only
+            # under Program Files and would crash the backend on startup.
+            "UPLOAD_DIR": str(cfg["uploads_dir"]),
+            "RSA_KEY_DIR": str(cfg["rsa_key_dir"]),
+            # Serve the bundled SPA at / so the launcher's browser opens the app
+            # UI, not the JSON API root. The backend's auto-detect resolves to a
+            # nonexistent _internal/frontend/dist inside the frozen exe, so point
+            # it at the real INSTALL_DIR\frontend\dist explicitly.
+            "SERVE_FRONTEND": "1",
+            "FRONTEND_DIST_DIR": str(cfg["frontend_dist_dir"]),
         }
     )
     if cfg.get("environment_override"):
@@ -735,6 +775,9 @@ def main() -> int:
     cfg["pg_port"] = pg_port
     cfg["backups_dir"] = paths["backups_dir"]
     cfg["wal_archive_dir"] = paths["wal_archive_dir"]
+    cfg["uploads_dir"] = paths["uploads_dir"]
+    cfg["rsa_key_dir"] = paths["rsa_key_dir"]
+    cfg["frontend_dist_dir"] = paths["install_dir"] / "frontend" / "dist"
     env_override = os.environ.get("BLACKBOX_ENVIRONMENT")
     if env_override:
         cfg["environment_override"] = env_override

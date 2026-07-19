@@ -13,6 +13,7 @@ api_router.include_router(endpoints.projects.router, prefix="/projects", tags=["
 api_router.include_router(endpoints.vendors.router, prefix="/vendors", tags=["vendors"])
 api_router.include_router(endpoints.procurement.router, prefix="/procurement", tags=["procurement"])
 api_router.include_router(endpoints.documents.router, prefix="/documents", tags=["documents"])
+api_router.include_router(endpoints.catalogs.router, prefix="/catalogs", tags=["catalogs"])
 api_router.include_router(endpoints.users.router, prefix="/users", tags=["users"])
 api_router.include_router(endpoints.auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(endpoints.user_sync.router, prefix="/user-sync", tags=["user-sync"])

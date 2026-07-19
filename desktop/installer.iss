@@ -37,6 +37,21 @@
   #define AppVersion "2.1.0"
 #endif
 
+; SourceDir: the assembled INSTALL_DIR mirror produced by desktop\build.py
+; (stage_assemble -> launcher.exe at the root + backend\ + frontend\dist\ +
+; pgsql\ + postgresql.conf.template). build.py passes it via /DSourceDir;
+; falls back to that same path for a manual `iscc installer.iss` run.
+#ifndef SourceDir
+  #define SourceDir "build\install"
+#endif
+
+; OutputDir: where the compiled installer .exe is written. build.py passes its
+; dist\ dir via /DOutputDir and then looks for BlackboxBOM-Setup-{version}.exe
+; there, so this MUST honor the define rather than hardcode a path.
+#ifndef OutputDir
+  #define OutputDir "build\Output"
+#endif
+
 #define MyAppName "Blackbox BOM"
 #define MyAppPublisher "Blackbox Factories"
 #define MyAppExeName "launcher.exe"
@@ -61,7 +76,7 @@ DirExistsWarning=no
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 
-OutputDir=build\Output
+OutputDir={#OutputDir}
 OutputBaseFilename=BlackboxBOM-Setup-{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
@@ -117,17 +132,25 @@ Name: "{commonappdata}\{#MyDataDirName}\logs"; Permissions: users-modify; Flags:
 Name: "{commonappdata}\{#MyDataDirName}\wal_archive"; Permissions: users-modify; Flags: uninsneveruninstall
 
 [Files]
-; Launcher (single EXE + any side-by-side deps produced by the launcher build)
-Source: "build\launcher\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+; Everything below is sourced from the assembled INSTALL_DIR mirror
+; ({#SourceDir}, produced by desktop\build.py stage_assemble) -- NOT from the
+; raw per-stage build dirs. Assembled layout: launcher.exe at the root,
+; backend\, frontend\dist\, pgsql\, and postgresql.conf.template.
+
+; Launcher (single EXE at the INSTALL_DIR root)
+Source: "{#SourceDir}\launcher.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Frozen backend bundle (entrypoint app.main:app, run by uvicorn from launcher)
-Source: "build\backend\*"; DestDir: "{app}\backend"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SourceDir}\backend\*"; DestDir: "{app}\backend"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 ; Frontend production build (served by the backend via StaticFiles + SPA fallback)
-Source: "..\frontend\dist\*"; DestDir: "{app}\frontend\dist"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SourceDir}\frontend\dist\*"; DestDir: "{app}\frontend\dist"; Flags: recursesubdirs createallsubdirs ignoreversion
 
-; Portable Postgres 16 runtime (bin + lib + share) - see fetch_postgres.ps1
-Source: "build\pgsql\*"; DestDir: "{app}\pgsql"; Flags: recursesubdirs createallsubdirs ignoreversion
+; Portable Postgres runtime (bin + lib + share) - see fetch_postgres.ps1
+Source: "{#SourceDir}\pgsql\*"; DestDir: "{app}\pgsql"; Flags: recursesubdirs createallsubdirs ignoreversion
+
+; Durability template the launcher uses to seed a fresh pgdata\postgresql.conf
+Source: "{#SourceDir}\postgresql.conf.template"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"

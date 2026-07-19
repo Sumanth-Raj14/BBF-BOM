@@ -2452,6 +2452,62 @@ a:hover { text-decoration: underline; }
 .col-actions { width: 60px; }
 .col-check { width: 28px; padding-left: 10px !important; }
 .col-drag { width: 18px; padding: 0 !important; }
+.col-thumb { width: 34px; }
+.col-exclude { width: 60px; }
+.col-custom-attr { width: 120px; }
+
+/* Per-line BOM thumbnail (upload/replace) */
+.bom-thumb-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.bom-thumb-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--r-2, 4px);
+  border: 1px dashed var(--line);
+  background: var(--bg-elev);
+  color: var(--fg-4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.bom-thumb-btn:hover { border-color: var(--accent); color: var(--accent); }
+.bom-thumb-btn.uploading { opacity: 0.5; cursor: wait; }
+.bom-thumb-btn:disabled { cursor: wait; }
+.bom-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 3px;
+  display: block;
+}
+
+/* Ad-hoc custom-attribute columns (entity_type='bom_item') */
+.custom-attr-select {
+  width: 100%;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg);
+}
+.custom-attr-select:hover { border-color: var(--line); background: var(--bg-elev); }
+
+/* Excluded rows (exclude_from_bom): visibly de-emphasized, not deleted */
+.bom-table tbody tr.excluded td { opacity: 0.5; }
+.bom-table tbody tr.excluded:hover td { opacity: 0.7; }
+.bom-table tbody tr.excluded .row-name .label,
+.bom-table tbody tr.excluded td.mono span {
+  text-decoration: line-through;
+  text-decoration-color: var(--fg-4);
+}
 
 /* ============================================
    Toasts

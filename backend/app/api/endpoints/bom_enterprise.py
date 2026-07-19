@@ -6,7 +6,7 @@ Multi-level BOM, quantity rollups, snapshots, where-used, variants
 from decimal import Decimal
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +32,10 @@ class BomItemCreateRequest(BaseModel):
     unit_cost_snapshot: Optional[Decimal] = None
     extended_cost: Optional[Decimal] = None
     notes: Optional[str] = None
+    # Line-item media / visibility (migration 045) — see BomItemUpdateRequest.
+    image_document_id: Optional[int] = None
+    thumbnail_path: Optional[str] = None
+    exclude_from_bom: Optional[bool] = None
 
 
 class BomItemUpdateRequest(BaseModel):
@@ -45,10 +49,22 @@ class BomItemUpdateRequest(BaseModel):
     unit_cost_snapshot: Optional[Decimal] = None
     extended_cost: Optional[Decimal] = None
     notes: Optional[str] = None
+    # Line-item media / visibility (migration 045: bom_items_master gained
+    # image_document_id / thumbnail_path / exclude_from_bom). Exposed here so
+    # the BOM grid's thumbnail-upload control and exclude toggle can persist
+    # to the canonical bom_items_master row, not just mutate local state.
+    image_document_id: Optional[int] = None
+    thumbnail_path: Optional[str] = None
+    exclude_from_bom: Optional[bool] = None
 
 
 class BomItemReorderRequest(BaseModel):
     item_ids: list[int]
+
+
+class BomItemCustomAttributeSetRequest(BaseModel):
+    attribute_definition_id: int
+    value: Optional[str] = None
 
 
 class BomSnapshotRequest(BaseModel):
@@ -77,6 +93,56 @@ class BomVariantItemRequest(BaseModel):
     substitute_part_id: Optional[int] = None
     is_optional: bool = False
     condition_expression: Optional[str] = None
+
+
+class BomCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    status: Optional[str] = None
+    version: Optional[str] = None
+    project_id: Optional[int] = None
+
+
+@router.get("/")
+async def list_boms(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    boms, total = await bom_service.list_boms(db, skip=skip, limit=limit)
+    return {
+        "items": [
+            {
+                "id": b.id,
+                "name": b.name,
+                "description": b.description,
+                "status": b.status,
+                "version": b.version,
+            }
+            for b in boms
+        ],
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+    }
+
+
+@router.post("/", status_code=201)
+async def create_bom(
+    request: BomCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_engineering),
+):
+    bom = await bom_service.create_bom(
+        db, request.model_dump(exclude_unset=True), tenant_id=current_user.tenantId
+    )
+    return {
+        "id": bom.id,
+        "name": bom.name,
+        "description": bom.description,
+        "status": bom.status,
+        "version": bom.version,
+    }
 
 
 @router.get("/{bom_id}/explosion")
@@ -161,6 +227,61 @@ async def reorder_bom_items(
     current_user: User = Depends(require_engineering),
 ):
     return await bom_service.reorder_bom_items(db, bom_id, request.item_ids)
+
+
+@router.post("/{bom_id}/items/{item_id}/image")
+async def attach_bom_item_image(
+    bom_id: int,
+    item_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_engineering),
+):
+    return await bom_service.attach_bom_item_image(
+        db,
+        bom_id,
+        item_id,
+        file,
+        tenant_id=current_user.tenantId,
+        uploaded_by=current_user.email,
+    )
+
+
+@router.delete("/{bom_id}/items/{item_id}/image")
+async def clear_bom_item_image(
+    bom_id: int,
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_engineering),
+):
+    return await bom_service.clear_bom_item_image(db, bom_id, item_id)
+
+
+@router.get("/{bom_id}/items/{item_id}/custom-attributes")
+async def get_bom_item_custom_attributes(
+    bom_id: int,
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    return await bom_service.get_bom_item_custom_attributes(db, bom_id, item_id)
+
+
+@router.put("/{bom_id}/items/{item_id}/custom-attributes")
+async def set_bom_item_custom_attribute(
+    bom_id: int,
+    item_id: int,
+    request: BomItemCustomAttributeSetRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_engineering),
+):
+    return await bom_service.set_bom_item_custom_attribute(
+        db,
+        bom_id,
+        item_id,
+        request.attribute_definition_id,
+        request.value,
+        tenant_id=current_user.tenantId,
+    )
 
 
 @router.get("/where-used/{part_id}")

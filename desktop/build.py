@@ -105,7 +105,8 @@ def stage_frontend(skip: bool) -> Path:
     dist = FRONTEND_DIR / "dist"
     if skip:
         _log(stage, "skipped (--skip-frontend); using existing frontend/dist")
-        return _require_file(dist / "index.html", "run without --skip-frontend at least once")
+        _require_file(dist / "index.html", "run without --skip-frontend at least once")
+        return dist
 
     script = _require_file(
         DESKTOP_DIR / "build_frontend.ps1",

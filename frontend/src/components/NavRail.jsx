@@ -66,6 +66,7 @@ export const SECTIONS = [
       { id: "docs", label: __t("navGroup.documents") || "Documents", icon: <Icon.Folder size={size} /> },
       { id: "ocr", label: "OCR Upload", icon: <Icon.Upload size={size} /> },
       { id: "bulk-import", label: "Bulk Import", icon: <Icon.Import size={size} /> },
+      { id: "catalogs", label: "Catalogs", icon: <Icon.Folder size={size} /> },
     ],
   },
   {

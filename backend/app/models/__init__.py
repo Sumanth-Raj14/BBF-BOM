@@ -20,6 +20,7 @@ from app.models.bom_snapshot import BomBaseline, BomSnapshot
 from app.models.bom_template import BomTemplate
 from app.models.bom_variant import BomVariant, BomVariantItem
 from app.models.bulk_import import BulkImportJob, BulkImportRow
+from app.models.catalog import Catalog, PartCatalog
 from app.models.capa import CAPA, CapaAttachment
 from app.models.comment import Comment
 from app.models.compliance import Compliance

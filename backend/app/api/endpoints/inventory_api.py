@@ -86,6 +86,48 @@ class InventoryReservationRequest(BaseModel):
     reference_id: int
 
 
+@router.get("/")
+async def list_inventory(
+    page: PageParams = Depends(get_page_params),
+    part_id: Optional[int] = None,
+    warehouse_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Collection root: paginated inventory stock records."""
+    stmt = select(Inventory)
+    if part_id:
+        stmt = stmt.where(Inventory.part_id == part_id)
+    if warehouse_id:
+        stmt = stmt.where(Inventory.warehouse_id == warehouse_id)
+    stmt = stmt.order_by(Inventory.id)
+    return await paginate(db, stmt, page)
+
+
+@router.post("/")
+async def create_inventory(
+    request: InventoryAdjustRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_procurement),
+):
+    """Collection root create: establish/adjust a stock position (an inventory
+    record is materialized via an adjustment, matching /adjust semantics)."""
+    try:
+        return await service_adjust(
+            db=db,
+            current_user=current_user,
+            part_id=request.part_id,
+            warehouse_id=request.warehouse_id,
+            quantity=request.quantity,
+            adjustment_type=request.adjustment_type,
+            reason=request.reason,
+            lot_number=request.lot_number,
+            serial_number=request.serial_number,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404 if "not found" in str(e) else 400, detail=str(e))
+
+
 @router.post("/warehouses")
 async def create_warehouse(
     request: WarehouseCreateRequest,

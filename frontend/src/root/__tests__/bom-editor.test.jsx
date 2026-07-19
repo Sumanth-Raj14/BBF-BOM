@@ -85,7 +85,15 @@ beforeEach(() => {
   window.api = {
     bomEnterprise: { items: bomEnterpriseItems },
     parts: { update: vi.fn() },
+    documents: { upload: vi.fn() },
   };
+  // No entity_type='bom_item' custom-attribute definitions in this harness
+  // (window.apiRequest is left unstubbed — see bom-editor.jsx's
+  // `typeof apiRequest !== "function"` guard); each test that specifically
+  // needs the ad-hoc custom columns stubs it itself.
+  delete window.apiRequest;
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
   toast.mockClear();
 });
 
@@ -188,6 +196,83 @@ describe("BomEditor structural persistence", () => {
     expect(toast).toHaveBeenCalledWith(
       expect.stringContaining("conflict"),
       expect.objectContaining({ kind: "error" }),
+    );
+  });
+});
+
+describe("BomEditor line-item media / visibility (migration 045)", () => {
+  it("toggling Exclude from BOM persists exclude_from_bom via items.update", async () => {
+    bomEnterpriseItems.update.mockResolvedValue({ id: 501 });
+    render(<Harness initialRows={[makeRow()]} />);
+
+    const toggle = screen.getByRole("switch", {
+      name: /exclude from bom/i,
+    });
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(bomEnterpriseItems.update).toHaveBeenCalledWith(42, 501, {
+        exclude_from_bom: true,
+      }),
+    );
+  });
+
+  it("reverts the toggle and surfaces an error when the update is rejected", async () => {
+    bomEnterpriseItems.update.mockRejectedValue(new Error("server down"));
+    render(<Harness initialRows={[makeRow({ excludeFromBom: false })]} />);
+
+    const toggle = screen.getByRole("switch", {
+      name: /exclude from bom/i,
+    });
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(bomEnterpriseItems.update).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(toggle).toHaveAttribute("aria-checked", "false"),
+    );
+    expect(toast).toHaveBeenCalledWith(
+      expect.stringContaining("server down"),
+      expect.objectContaining({ kind: "error" }),
+    );
+  });
+
+  it("uploads a line image and persists image_document_id/thumbnail_path", async () => {
+    window.api.documents.upload.mockResolvedValue({
+      id: 77,
+      url: "/uploads/77.png",
+    });
+    bomEnterpriseItems.update.mockResolvedValue({ id: 501 });
+    render(<Harness initialRows={[makeRow()]} />);
+
+    const fileInput = screen.getByLabelText(/upload line image/i);
+    const file = new File(["x"], "part.png", { type: "image/png" });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() =>
+      expect(window.api.documents.upload).toHaveBeenCalledWith(
+        file,
+        expect.objectContaining({ category: "image" }),
+      ),
+    );
+    await waitFor(() =>
+      expect(bomEnterpriseItems.update).toHaveBeenCalledWith(42, 501, {
+        image_document_id: 77,
+        thumbnail_path: "/uploads/77.png",
+      }),
+    );
+  });
+
+  it("refuses to upload an image for a line not yet saved to the BOM", async () => {
+    render(<Harness initialRows={[makeRow({ bomItemId: null })]} />);
+
+    const fileInput = screen.getByLabelText(/upload line image/i);
+    const file = new File(["x"], "part.png", { type: "image/png" });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    expect(window.api.documents.upload).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(
+      expect.stringContaining("before attaching an image"),
+      expect.objectContaining({ kind: "warn" }),
     );
   });
 });

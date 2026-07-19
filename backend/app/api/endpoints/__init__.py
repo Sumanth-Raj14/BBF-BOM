@@ -14,6 +14,7 @@ from app.api.endpoints import (
     bom_templates,
     bulk_import,
     cad,
+    catalogs,
     capa,
     comments,
     compliance_api,

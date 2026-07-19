@@ -1234,6 +1234,63 @@ export const calendarEventsAPI = {
   delete: (id) => apiRequest(`/calendar/calendar-events/${id}`, { method: 'DELETE' }),
 };
 
+// Catalogs API — Track A: named groupings of parts (catalogs / part_catalogs).
+export const catalogsAPI = {
+  list: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiRequest(`/catalogs${q ? '?' + q : ''}`);
+  },
+
+  get: (id) => apiRequest(`/catalogs/${id}`),
+
+  create: (data) =>
+    apiRequest('/catalogs', { method: 'POST', body: JSON.stringify(data) }),
+
+  update: (id, data) =>
+    apiRequest(`/catalogs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  delete: (id) =>
+    apiRequest(`/catalogs/${id}`, { method: 'DELETE' }),
+
+  // Parts assigned to this catalog (part_catalogs association).
+  parts: (id, params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiRequest(`/catalogs/${id}/parts${q ? '?' + q : ''}`);
+  },
+
+  addPart: (id, data) =>
+    apiRequest(`/catalogs/${id}/parts`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  removePart: (id, partId) =>
+    apiRequest(`/catalogs/${id}/parts/${partId}`, { method: 'DELETE' }),
+
+  // "Create from folder/upload" — multipart upload of a folder selection (or
+  // a multi-file pick) that creates a new catalog and populates it with parts
+  // extracted from the uploaded files in one round trip.
+  importUpload: async (files, metadata = {}) => {
+    const formData = new FormData();
+    (files || []).forEach((file) => formData.append('files', file));
+    if (metadata.catalogCode) formData.append('catalogCode', metadata.catalogCode);
+    if (metadata.catalogName) formData.append('catalogName', metadata.catalogName);
+    if (metadata.description) formData.append('description', metadata.description);
+
+    const response = await fetch(API_BASE + '/catalogs/import', {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
+};
+
 /* ── Backward-compatible window.* shims ── */
 // These allow existing code (app.jsx, screens, etc.) to work without changes.
 // New code should import directly from this module.
@@ -1360,6 +1417,7 @@ export const api = {
   quality: qualityAPI,
   userDataSync: userDataSyncAPI,
   calendarEvents: calendarEventsAPI,
+  catalogs: catalogsAPI,
 };
 window.api = api;
 
@@ -1382,4 +1440,5 @@ window.substanceComplianceAPI = substanceComplianceAPI;
 window.inventoryAPI = inventoryAPI;
 window.qualityAPI = qualityAPI;
 window.userDataSyncAPI = userDataSyncAPI;
+window.catalogsAPI = catalogsAPI;
 window.calendarEventsAPI = calendarEventsAPI;
