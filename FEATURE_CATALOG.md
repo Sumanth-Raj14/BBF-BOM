@@ -1311,7 +1311,6 @@ Response returned; frontend refreshes BOM list
 
 **Code Standards:**
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — Commit style, PR process, code review guidelines
-- [backend/CLAUDE.md](./backend/CLAUDE.md) — RTK token optimization for development
 
 ---
 

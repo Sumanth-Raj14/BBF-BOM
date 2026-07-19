@@ -319,7 +319,7 @@ Frontend (React + Vite)  ←→  Backend (FastAPI)  ←→  PostgreSQL + Redis
 ```
 
 ### Locked Decisions (2026-07-17)
-Per CLAUDE.md: feat/regulated, feat/zoho-books, and feat/polish are feature-complete. No new features until v2.1. Focus: bug fixes, testing, merge integration.
+Per the project plan: feat/regulated, feat/zoho-books, and feat/polish are feature-complete. No new features until v2.1. Focus: bug fixes, testing, merge integration.
 
 ---
 
