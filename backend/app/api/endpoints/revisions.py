@@ -16,6 +16,10 @@ from app.models.user import User
 
 router = APIRouter()
 
+# Columns callers may sort revisions by via PageParams.sort_by — kept narrow
+# to avoid arbitrary attribute access off the ORM model.
+_SORTABLE_COLUMNS = {"id", "createdAt", "revisionNumber", "entityType"}
+
 
 class RevisionBase(BaseModel):
     entityType: Optional[str] = None
@@ -42,13 +46,29 @@ class RevisionResponse(RevisionBase):
 async def get_revisions(
     page: PageParams = Depends(get_page_params),
     partId: Optional[int] = None,
+    entityType: Optional[str] = None,
+    mine: Optional[bool] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = select(Revision)
+    """List revisions, tenant-scoped.
+
+    `mine=true` restricts to revisions authored by the current user (e.g. a
+    "recently updated by me" feed). Combine with `sort_by=createdAt&sort_dir=desc`
+    (see PageParams) to get most-recent-first ordering.
+    """
+    query = select(Revision).where(Revision.tenantId == current_user.tenantId)
     if partId:
         query = query.where(Revision.entityId == partId)
-    query = query.order_by(Revision.id)
+    if entityType:
+        query = query.where(Revision.entityType == entityType)
+    if mine:
+        query = query.where(Revision.createdById == current_user.id)
+
+    sort_col_name = page.sort_by if page.sort_by in _SORTABLE_COLUMNS else "id"
+    sort_col = getattr(Revision, sort_col_name)
+    query = query.order_by(sort_col.desc() if page.sort_dir == "desc" else sort_col.asc())
+
     return await paginate(db, query, page)
 
 

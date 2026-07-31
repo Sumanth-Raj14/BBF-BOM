@@ -274,6 +274,13 @@ api_router.include_router(
     tags=["multi-currency", "compliance-certs", "auto-numbering", "custom-attributes"],
 )
 
+# Workspace Budget (Dashboard widget)
+api_router.include_router(
+    endpoints.budgets.router,
+    prefix="/budgets",
+    tags=["budgets"],
+)
+
 # Dashboards (Engineering, Manufacturing, Procurement, Executive)
 api_router.include_router(
     endpoints.dashboards_api.router,

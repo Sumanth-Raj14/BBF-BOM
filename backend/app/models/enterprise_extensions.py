@@ -137,6 +137,11 @@ class CustomAttributeDefinition(Base, TenantAwareMixin):
     )  # DEPRECATED — use CustomAttributeValidationRule relationship instead. Will be removed after data migration.
     sort_order = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
+    # Calculated-field support: `formula` holds the expression, `is_computed`
+    # flags the attribute as derived (value computed from `formula` rather than
+    # stored directly).
+    formula = Column(Text, nullable=True)
+    is_computed = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

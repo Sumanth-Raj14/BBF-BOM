@@ -29,7 +29,7 @@ export default function ProcurementScreen({ data, openModal }) {
       setTimeout(() => reject(new Error("timeout")), 10000),
     );
     const loadPromise = Promise.all([
-      poOrdersAPI?.list({ limit: 200 }),
+      poOrdersAPI?.list({ per_page: 200 }),
       poOrdersAPI?.stats(),
     ]);
     Promise.race([loadPromise, timeout])

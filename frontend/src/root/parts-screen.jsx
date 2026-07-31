@@ -1,5 +1,6 @@
 import PropTypes from "prop-types";
 import { storage } from "../utils/storage.js";
+import { convertApiPartsToTree } from "../utils/bom.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import {
@@ -23,17 +24,35 @@ function chipKeyDown(handler) {
     }
   };
 }
-// Flatten BOM tree into unique parts list with where-used count
-function buildCatalog(data) {
+// Flatten BOM tree into a unique parts list with where-used count, then
+// layer in any tenant parts that exist in the real Parts API but aren't
+// currently used by the active BOM ("library-only" parts). `apiParts` is
+// the raw list from api.parts.list() (see ctx.apiParts / AppCtx.jsx) — when
+// it hasn't loaded yet (offline/demo/still loading) this simply degrades to
+// "whatever's in the current BOM", never fabricated rows.
+function normalizeCatalogEntry(p) {
+  return {
+    ...p,
+    rev: p.rev || "—",
+    origin: p.origin || "—",
+    vendor: p.vendor || "—",
+  };
+}
+function buildCatalog(rows, apiParts) {
   const map = new Map();
   const walk = (rs, lineage = []) =>
-    rs.forEach((r) => {
+    (rs || []).forEach((r) => {
       if (r.assembly && r.children) {
         walk(r.children, [...lineage, r.name]);
       } else {
         const key = r.pn;
         if (!map.has(key)) {
-          map.set(key, { ...r, whereUsed: [], totalQty: 0, instances: 0 });
+          map.set(key, {
+            ...normalizeCatalogEntry(r),
+            whereUsed: [],
+            totalQty: 0,
+            instances: 0,
+          });
         }
         const entry = map.get(key);
         entry.whereUsed.push(lineage.join(" / "));
@@ -41,253 +60,50 @@ function buildCatalog(data) {
         entry.instances += 1;
       }
     });
-  walk(data.rows);
-  // Add some "library-only" parts (not currently in active BOM) for realism
-  const libraryOnly = [
-    {
-      id: "lib1",
-      pn: "EL-CAP-100UF-25V",
-      name: "Capacitor, 100µF 25V Electrolytic",
-      rev: "A",
-      qty: 0,
-      uom: "EA",
-      category: "Electrical",
-      vendor: "Nichicon",
-      manufacturer: "Nichicon",
-      cost: 0.14,
-      lead: 14,
-      origin: "JP",
-      status: "Released",
-      trend: [0.13, 0.14, 0.14, 0.14, 0.14, 0.14, 0.14],
-      whereUsed: [],
-      totalQty: 0,
-      instances: 0,
-      material: "Aluminum/Electrolyte",
-      weight: 2,
-      dimensions: "Ø10 × 16 mm",
-      tags: ["passive", "capacitor"],
-      compliance: ["RoHS"],
-      freight: 0.02,
-      tax: 0.03,
-      landedCost: 0.19,
-    },
-    {
-      id: "lib2",
-      pn: "EL-RES-10K-1%",
-      name: "Resistor, 10kΩ ±1% 0805",
-      rev: "—",
-      qty: 0,
-      uom: "EA",
-      category: "Electrical",
-      vendor: "Yageo",
-      manufacturer: "Yageo",
-      cost: 0.01,
-      lead: 7,
-      origin: "TW",
-      status: "Released",
-      trend: null,
-      whereUsed: [],
-      totalQty: 0,
-      instances: 0,
-      material: "Thick Film/Ceramic",
-      weight: 0.03,
-      dimensions: "2.0 × 1.25 mm (0805)",
-      tags: ["passive", "resistor"],
-      compliance: ["RoHS"],
-      freight: 0.001,
-      tax: 0.002,
-      landedCost: 0.013,
-    },
-    {
-      id: "lib3",
-      pn: "MEC-SPR-08X20",
-      name: "Compression Spring, 8mm × 20mm",
-      rev: "A",
-      qty: 0,
-      uom: "EA",
-      category: "Mechanical",
-      vendor: "Lee Spring",
-      manufacturer: "Lee Spring",
-      cost: 1.2,
-      lead: 10,
-      origin: "US",
-      status: "Released",
-      trend: [1.15, 1.15, 1.18, 1.2, 1.2, 1.2, 1.2],
-      whereUsed: [],
-      totalQty: 0,
-      instances: 0,
-      material: "Spring Steel",
-      weight: 4,
-      dimensions: "Ø8 × 20 mm",
-      customFields: { "Wire Diameter": "0.8 mm", "Max Load": "12 N" },
-      tags: ["spring", "mechanical"],
-      compliance: ["RoHS"],
-      freight: 0.1,
-      tax: 0.22,
-      landedCost: 1.52,
-    },
-    {
-      id: "lib4",
-      pn: "HW-WSH-M3-FL",
-      name: "Washer, M3 Flat Stainless",
-      rev: "—",
-      qty: 0,
-      uom: "EA",
-      category: "Hardware",
-      vendor: "McMaster",
-      manufacturer: "McMaster-Carr",
-      cost: 0.03,
-      lead: 2,
-      origin: "US",
-      status: "Released",
-      trend: null,
-      whereUsed: [],
-      totalQty: 0,
-      instances: 0,
-      material: "Stainless Steel 304",
-      weight: 0.3,
-      dimensions: "M3 × Ø7 × 0.5 mm",
-      tags: ["hardware", "washer"],
-      compliance: ["RoHS"],
-      freight: 0.004,
-      tax: 0.006,
-      landedCost: 0.04,
-    },
-    {
-      id: "lib5",
-      pn: "OPT-FLT-IR850",
-      name: "IR Bandpass Filter, 850nm Ø25mm",
-      rev: "B",
-      qty: 0,
-      uom: "EA",
-      category: "Optical",
-      vendor: "Thorlabs",
-      manufacturer: "Thorlabs",
-      cost: 42.0,
-      lead: 21,
-      origin: "US",
-      status: "Released",
-      trend: [40, 40, 41, 41, 42, 42, 42],
-      whereUsed: [],
-      totalQty: 0,
-      instances: 0,
-      material: "Soda Lime Glass",
-      weight: 3,
-      dimensions: "Ø25 × 1 mm",
-      customFields: { Bandwidth: "850±10 nm", Transmission: ">90%" },
-      tags: ["filter", "ir", "optical"],
-      compliance: ["RoHS"],
-      freight: 3.2,
-      tax: 7.7,
-      landedCost: 52.9,
-    },
-    {
-      id: "lib6",
-      pn: "CB-HDMI-50CM",
-      name: "Cable, HDMI 2.1 50cm Shielded",
-      rev: "—",
-      qty: 0,
-      uom: "EA",
-      category: "Cable",
-      vendor: "Belkin",
-      manufacturer: "Belkin",
-      cost: 8.4,
-      lead: 9,
-      origin: "CN",
-      status: "Released",
-      trend: null,
-      whereUsed: [],
-      totalQty: 0,
-      instances: 0,
-      material: "PVC/Copper",
-      weight: 42,
-      dimensions: "500 mm length",
-      tags: ["cable", "hdmi"],
-      compliance: ["RoHS"],
-      freight: 0.6,
-      tax: 1.5,
-      landedCost: 10.5,
-    },
-    {
-      id: "lib7",
-      pn: "EL-MCU-STM32F4",
-      name: "MCU, STM32F407VGT6 (legacy)",
-      rev: "D",
-      qty: 0,
-      uom: "EA",
-      category: "Electrical",
-      vendor: "STMicro",
-      manufacturer: "STMicroelectronics",
-      cost: 7.2,
-      lead: 35,
-      origin: "FR",
-      status: "Deprecated",
-      trend: [8, 7.8, 7.6, 7.4, 7.2, 7.2, 7.2],
-      whereUsed: [],
-      totalQty: 0,
-      instances: 0,
-      material: "Silicon/LQFP-100",
-      weight: 4,
-      dimensions: "14 × 14 mm (LQFP-100)",
-      tags: ["mcu", "legacy", "deprecated"],
-      compliance: ["RoHS", "REACH"],
-      freight: 0.6,
-      tax: 1.3,
-      landedCost: 9.1,
-    },
-    {
-      id: "lib8",
-      pn: "HW-FAS-M3-08-A",
-      name: "Screw, M3×8 Socket Head A2",
-      rev: "—",
-      qty: 0,
-      uom: "EA",
-      category: "Hardware",
-      vendor: "Bossard",
-      manufacturer: "Bossard",
-      cost: 0.09,
-      lead: 5,
-      origin: "DE",
-      status: "Released",
-      trend: null,
-      whereUsed: [],
-      totalQty: 0,
-      instances: 0,
-      dupOf: "HW-FAS-M3-08",
-      material: "Stainless Steel A2-70",
-      weight: 1.3,
-      dimensions: "M3 × 8 mm",
-      tags: ["hardware", "screw", "fastener"],
-      compliance: ["RoHS"],
-      freight: 0.01,
-      tax: 0.02,
-      landedCost: 0.12,
-    },
-  ];
-  libraryOnly.forEach((p) => map.set(p.pn, p));
+  walk(rows);
+  const libraryOnly = convertApiPartsToTree(apiParts || []);
+  libraryOnly.forEach((p) => {
+    if (!map.has(p.pn)) {
+      map.set(p.pn, {
+        ...normalizeCatalogEntry(p),
+        whereUsed: [],
+        totalQty: 0,
+        instances: 0,
+      });
+    }
+  });
   return Array.from(map.values());
 }
-// Duplicate detection (simplified: by name similarity)
+// Duplicate detection — groups real catalog parts that share a normalized
+// name but differ by part number (a generic heuristic over whatever parts
+// actually exist, rather than hard-coded demo part numbers).
 function detectDuplicates(parts) {
+  const byName = new Map();
+  parts.forEach((p) => {
+    const key = (p.name || "").trim().toLowerCase();
+    if (!key) return;
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(p);
+  });
   const groups = [];
-  // Hard-coded one duplicate group for demo
-  const a = parts.find((p) => p.pn === "HW-FAS-M3-08");
-  const b = parts.find((p) => p.pn === "HW-FAS-M3-08-A");
-  if (a && b)
-    groups.push({
-      similarity: 0.95,
-      parts: [a, b],
-      reason: "Name + dimensions match",
-    });
-  const c = parts.find((p) => p.pn === "EL-MCU-STM32F4");
-  const d = parts.find((p) => p.pn === "EL-MCU-STM32H7");
-  if (c && d)
-    groups.push({
-      similarity: 0.62,
-      parts: [c, d],
-      reason: "Same family, different generation",
-    });
-  return groups;
+  byName.forEach((group) => {
+    if (group.length < 2) return;
+    const sorted = [...group].sort(
+      (a, b) => (b.instances || 0) - (a.instances || 0),
+    );
+    for (let i = 1; i < sorted.length; i++) {
+      const sameDims =
+        sorted[0].dimensions && sorted[0].dimensions === sorted[i].dimensions;
+      groups.push({
+        similarity: sameDims ? 0.95 : 0.7,
+        parts: [sorted[0], sorted[i]],
+        reason: sameDims
+          ? __t("parts.dupReasonNameDims") || "Name + dimensions match"
+          : __t("parts.dupReasonName") || "Same name, different part number",
+      });
+    }
+  });
+  return groups.slice(0, 5);
 }
 const PARTS_VIEW_TABS_ID = "parts-view-tabs";
 function PartsScreen({ openModal, onOpenDetail }) {
@@ -298,7 +114,68 @@ function PartsScreen({ openModal, onOpenDetail }) {
   const data = BOM_DATA;
   const ctx = useAppStore();
   const rows = ctx?.rows || data.rows;
-  const allParts = React.useMemo(() => buildCatalog({ rows }), [rows]);
+  // Optimistic patches applied on top of the real catalog after a
+  // successful api.parts.update() — see applyPartPatch below. Keyed by pn
+  // since AppCtx doesn't expose a setter for ctx.apiParts.
+  const [localOverrides, setLocalOverrides] = React.useState({});
+  const baseParts = React.useMemo(
+    () => buildCatalog(rows, ctx?.apiParts),
+    [rows, ctx?.apiParts],
+  );
+  const allParts = React.useMemo(() => {
+    if (!Object.keys(localOverrides).length) return baseParts;
+    return baseParts.map((p) =>
+      localOverrides[p.pn] ? { ...p, ...localOverrides[p.pn] } : p,
+    );
+  }, [baseParts, localOverrides]);
+  // Persist a patch to the real Part record when this catalog entry is
+  // backed by one (p.partId, set by convertApiPartsToTree for anything
+  // sourced from api.parts.list()). Falls back to a local-only patch of the
+  // current BOM tree for demo/offline rows that have no backend id, so the
+  // UI still reflects the change without crashing or fabricating a write.
+  const applyPartPatch = React.useCallback(
+    async (part, patch) => {
+      if (part?.partId != null) {
+        try {
+          await api.parts.update(part.partId, patch);
+          setLocalOverrides((prev) => ({
+            ...prev,
+            [part.pn]: { ...prev[part.pn], ...patch },
+          }));
+          return true;
+        } catch (e) {
+          toast(
+            (__t("parts.updateFailed") || "Failed to update") +
+              " " +
+              part.pn +
+              ": " +
+              (e?.message || ""),
+            { kind: "error" },
+          );
+          return false;
+        }
+      }
+      const next = ctx?.rows || data.rows;
+      const patched = next.map((r) =>
+        r.pn === part.pn ? { ...r, ...patch } : r,
+      );
+      ctx?.setRows?.(patched);
+      return true;
+    },
+    [ctx, data.rows],
+  );
+  const markObsoleteOne = React.useCallback(
+    async (p) => {
+      const ok = await applyPartPatch(p, { status: "Obsolete" });
+      if (ok) {
+        toast(
+          p.pn + " " + (__t("parts.markedObsolete") || "marked obsolete"),
+          { kind: "warn" },
+        );
+      }
+    },
+    [applyPartPatch],
+  );
   const addPartToBom = React.useCallback(
     (p) => {
       const currentRows = ctx?.rows || data.rows;
@@ -791,14 +668,13 @@ function PartsScreen({ openModal, onOpenDetail }) {
                   const pns = [...selectedIds];
                   openModal("bulk-edit", {
                     count: pns.length,
-                    onApply: (patch) => {
-                      const next = ctx?.rows || data.rows;
-                      const patched = next.map((r) => {
-                        const n = { ...r };
-                        if (selectedIds.has(n.pn)) Object.assign(n, patch);
-                        return n;
-                      });
-                      ctx?.setRows?.(patched);
+                    onApply: async (patch) => {
+                      const targets = allParts.filter((p) =>
+                        selectedIds.has(p.pn),
+                      );
+                      await Promise.all(
+                        targets.map((p) => applyPartPatch(p, patch)),
+                      );
                       setSelectedIds(new Set());
                       toast(
                         __t("parts.updatedParts") ||
@@ -854,17 +730,20 @@ function PartsScreen({ openModal, onOpenDetail }) {
               </button>
               <span className="flex-1" />
               <button
-                onClick={() => {
-                  const next = ctx?.rows || data.rows;
-                  const patched = next.map((r) => {
-                    if (!selectedIds.has(r.pn)) return r;
-                    return { ...r, status: "Obsolete" };
-                  });
-                  ctx?.setRows?.(patched);
+                onClick={async () => {
+                  const count = selectedIds.size;
+                  const targets = allParts.filter((p) =>
+                    selectedIds.has(p.pn),
+                  );
+                  await Promise.all(
+                    targets.map((p) =>
+                      applyPartPatch(p, { status: "Obsolete" }),
+                    ),
+                  );
                   setSelectedIds(new Set());
                   toast(
                     __t("parts.markedObsolete") ||
-                      selectedIds.size + " parts marked obsolete",
+                      count + " parts marked obsolete",
                     { kind: "warn" },
                   );
                 }}
@@ -1022,6 +901,7 @@ function PartsScreen({ openModal, onOpenDetail }) {
                   onOpenDetail={onOpenDetail}
                   dupGroups={dupGroups}
                   addPartToBom={addPartToBom}
+                  onMarkObsolete={markObsoleteOne}
                 />
               </TabPanel>
               <TabPanel
@@ -1037,6 +917,7 @@ function PartsScreen({ openModal, onOpenDetail }) {
                   toggleSelectAll={toggleSelectAll}
                   dupGroups={dupGroups}
                   addPartToBom={addPartToBom}
+                  onMarkObsolete={markObsoleteOne}
                 />
               </TabPanel>
             </>
@@ -1079,22 +960,18 @@ function PartsScreen({ openModal, onOpenDetail }) {
             </Button>
             <Button
               variant="primary"
-              onClick={() => {
-                const next = ctx?.rows || data.rows;
-                const patched = next.map((r) => {
-                  if (
-                    focusedDup?.parts?.length >= 2 &&
-                    r.pn === focusedDup.parts[1].pn
-                  ) {
-                    return {
-                      ...r,
-                      status: "Deprecated",
-                      dupOf: focusedDup.parts[0].pn,
-                    };
-                  }
-                  return r;
-                });
-                ctx?.setRows?.(patched);
+              onClick={async () => {
+                const newer = focusedDup?.parts?.[0];
+                const older = focusedDup?.parts?.[1];
+                if (older) {
+                  await applyPartPatch(older, {
+                    status: "Deprecated",
+                    customFields: {
+                      ...(older.customFields || {}),
+                      dupOf: newer?.pn,
+                    },
+                  });
+                }
                 setFocusedDup(null);
                 toast(
                   __t("parts.partsMerged") ||
@@ -1176,9 +1053,9 @@ function PartsGrid({
   onOpenDetail,
   dupGroups,
   addPartToBom,
+  onMarkObsolete,
 }) {
   const ctx = useAppStore();
-  const data = BOM_DATA;
   const dupSet = new Set(dupGroups.flatMap((g) => g.parts.map((p) => p.pn)));
   return (
     <div className="parts-grid">
@@ -1348,19 +1225,7 @@ function PartsGrid({
                     icon: <Icon.Trash size={11} />,
                     label: __t("parts.markObsolete") || "Mark obsolete",
                     danger: true,
-                    onClick: () => {
-                      const next = ctx?.rows || data.rows;
-                      const patched = next.map((r) =>
-                        r.pn === p.pn ? { ...r, status: "Obsolete" } : r,
-                      );
-                      ctx?.setRows?.(patched);
-                      toast(
-                        p.pn +
-                          " " +
-                          (__t("parts.markedObsolete") || "marked obsolete"),
-                        { kind: "warn" },
-                      );
-                    },
+                    onClick: () => onMarkObsolete(p),
                   },
                 ]}
               />
@@ -1378,6 +1243,7 @@ PartsGrid.propTypes = {
   onOpenDetail: PropTypes.func,
   dupGroups: PropTypes.any,
   addPartToBom: PropTypes.any,
+  onMarkObsolete: PropTypes.func,
 };
 // ============ List view ============
 function PartsList({
@@ -1388,9 +1254,9 @@ function PartsList({
   toggleSelectAll,
   dupGroups,
   addPartToBom,
+  onMarkObsolete,
 }) {
   const ctx = useAppStore();
-  const data = BOM_DATA;
   const dupSet = new Set(dupGroups.flatMap((g) => g.parts.map((p) => p.pn)));
   const allSelected =
     parts.length > 0 && parts.every((p) => selectedIds.has(p.pn));
@@ -1588,17 +1454,7 @@ function PartsList({
                 icon: <Icon.Trash size={11} />,
                 label: __t("parts.markObsolete") || "Mark obsolete",
                 danger: true,
-                onClick: () => {
-                  const next = ctx?.rows || data.rows;
-                  const patched = next.map((r) =>
-                    r.pn === p.pn ? { ...r, status: "Obsolete" } : r,
-                  );
-                  ctx?.setRows?.(patched);
-                  toast(
-                    p.pn + " " + (__t("parts.markedObsolete") || "marked obsolete"),
-                    { kind: "warn" },
-                  );
-                },
+                onClick: () => onMarkObsolete(p),
               },
             ]}
           />
@@ -1628,6 +1484,7 @@ PartsList.propTypes = {
   toggleSelectAll: PropTypes.any,
   dupGroups: PropTypes.any,
   addPartToBom: PropTypes.any,
+  onMarkObsolete: PropTypes.func,
 };
 export { PartsScreen };
 window.PartsScreen = PartsScreen;

@@ -1,6 +1,7 @@
 import PropTypes from "prop-types";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import { api } from "../globals";
 import {
   Button,
   Card,
@@ -10,26 +11,20 @@ import {
   Field,
   Input,
   ScreenHeader,
+  EmptyState,
+  Spinner,
 } from "../components/ui";
+// Live workspace budget snapshot, hydrated from GET /budgets/workspace on
+// mount (see DashboardScreen below) and kept in sync after saves. Starts
+// zeroed — never fabricated — so CostTrendTile, which reads
+// WORKSPACE_BUDGET.monthly directly, has a safe, honest value before the
+// first fetch resolves.
 export const WORKSPACE_BUDGET = {
-  annual: 10000000,
-  spent: 4200000,
-  committed: 1800000,
-  byProject: {
-    ATLAS: { spent: 1200000, committed: 800000, budget: 3000000 },
-    HORIZON: { spent: 2500000, committed: 500000, budget: 4000000 },
-    "ATLAS-LITE": { spent: 300000, committed: 200000, budget: 1500000 },
-    NEBULA: { spent: 200000, committed: 300000, budget: 1500000 },
-  },
-  byCategory: {
-    Electrical: 0.42,
-    Optical: 0.18,
-    Mechanical: 0.2,
-    Hardware: 0.06,
-    Cable: 0.08,
-    Other: 0.06,
-  },
-  monthly: [1.2, 1.4, 1.3, 1.6, 1.8, 1.9, 1.7, 1.9, 2.1, 2.0, 1.8, 1.9],
+  annual: 0,
+  spent: 0,
+  committed: 0,
+  byProject: {},
+  monthly: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
 };
 function DashboardScreen() {
   const ctx = useAppStore();
@@ -37,6 +32,46 @@ function DashboardScreen() {
   const [period, setPeriod] = React.useState("FY 2026");
   const [editingBudget, setEditingBudget] = React.useState(false);
   const [budgetEdits, setBudgetEdits] = React.useState(null);
+  // null = still loading the first fetch; once resolved this holds the real
+  // { annual, spent, committed, byProject, monthly } snapshot from the API.
+  const [budgetData, setBudgetData] = React.useState(null);
+  // Period-selector labels + the slug sent to the backend, which resolves it
+  // to a real calendar date range (see backend/app/api/endpoints/budgets.py).
+  // No fabricated scaling ratios — the backend computes real spent/committed
+  // for the selected range from purchase-order data.
+  const PERIODS = {
+    "FY 2026": { slug: "fy", label: "FY 2026" },
+    "Q3 2026": { slug: "q3", label: "Q3 2026 (Jul–Sep)" },
+    "Q2 2026": { slug: "q2", label: "Q2 2026 (Apr–Jun)" },
+    "Q1 2026": { slug: "q1", label: "Q1 2026 (Jan–Mar)" },
+    "Last 30d": { slug: "last30", label: "Last 30 days" },
+    "Last 7d": { slug: "last7", label: "Last 7 days" },
+  };
+  const scale = PERIODS[period] || PERIODS["FY 2026"];
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(api?.budgets?.workspace?.(scale.slug))
+      .then((data) => {
+        if (cancelled || !data) return;
+        // Keep the shared WORKSPACE_BUDGET object in sync for CostTrendTile,
+        // which reads it directly.
+        WORKSPACE_BUDGET.annual = Number(data.annual) || 0;
+        WORKSPACE_BUDGET.spent = Number(data.spent) || 0;
+        WORKSPACE_BUDGET.committed = Number(data.committed) || 0;
+        WORKSPACE_BUDGET.byProject = data.byProject || {};
+        if (Array.isArray(data.monthly) && data.monthly.length === 12) {
+          WORKSPACE_BUDGET.monthly = data.monthly;
+        }
+        setBudgetData(data);
+      })
+      .catch(() => {
+        // Honest failure — do not fall back to fabricated/sample figures.
+        if (!cancelled) setBudgetData((prev) => prev || { ...WORKSPACE_BUDGET });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scale.slug]);
   const startBudgetEdit = () => {
     setBudgetEdits({
       annual: WORKSPACE_BUDGET.annual,
@@ -51,32 +86,39 @@ function DashboardScreen() {
   };
   const saveBudget = () => {
     if (!budgetEdits) return;
-    WORKSPACE_BUDGET.annual = budgetEdits.annual;
-    Object.entries(budgetEdits.byProject).forEach(([k, v]) => {
-      WORKSPACE_BUDGET.byProject[k] = v;
-    });
-    setEditingBudget(false);
-    toast(__t("dashboard.budgetUpdated") || "Workspace budget updated", {
-      kind: "success",
-    });
+    const payload = {
+      annual: budgetEdits.annual,
+      byProject: Object.fromEntries(
+        Object.entries(budgetEdits.byProject).map(([k, v]) => [k, v.budget]),
+      ),
+    };
+    Promise.resolve(api?.budgets?.updateWorkspace?.(payload, scale.slug))
+      .then((data) => {
+        if (!data) throw new Error("empty response");
+        WORKSPACE_BUDGET.annual = Number(data.annual) || 0;
+        WORKSPACE_BUDGET.spent = Number(data.spent) || 0;
+        WORKSPACE_BUDGET.committed = Number(data.committed) || 0;
+        WORKSPACE_BUDGET.byProject = data.byProject || {};
+        if (Array.isArray(data.monthly) && data.monthly.length === 12) {
+          WORKSPACE_BUDGET.monthly = data.monthly;
+        }
+        setBudgetData(data);
+        setEditingBudget(false);
+        toast(__t("dashboard.budgetUpdated") || "Workspace budget updated", {
+          kind: "success",
+        });
+      })
+      .catch(() => {
+        toast(
+          __t("dashboard.budgetSaveError") || "Failed to save workspace budget",
+          { kind: "danger" },
+        );
+      });
   };
-  // Period-scaled budget — same annual; spent/committed scale to the period
-  const PERIODS = {
-    "FY 2026": { spent: 1.0, committed: 1.0, label: "FY 2026" },
-    "Q3 2026": { spent: 0.28, committed: 0.42, label: "Q3 2026 (Jul–Sep)" },
-    "Q2 2026": { spent: 0.34, committed: 0.18, label: "Q2 2026 (Apr–Jun)" },
-    "Q1 2026": { spent: 0.24, committed: 0.08, label: "Q1 2026 (Jan–Mar)" },
-    "Last 30d": { spent: 0.09, committed: 0.42, label: "Last 30 days" },
-    "Last 7d": { spent: 0.024, committed: 0.42, label: "Last 7 days" },
-  };
-  const scale = PERIODS[period] || PERIODS["FY 2026"];
-  const wb = {
-    ...WORKSPACE_BUDGET,
-    spent: Math.round(WORKSPACE_BUDGET.spent * scale.spent),
-    committed: Math.round(WORKSPACE_BUDGET.committed * scale.committed),
-  };
-  const pctSpent = (wb.spent / wb.annual) * 100;
-  const pctCommitted = ((wb.spent + wb.committed) / wb.annual) * 100;
+  const wb = budgetData || WORKSPACE_BUDGET;
+  const pctSpent = wb.annual > 0 ? (wb.spent / wb.annual) * 100 : 0;
+  const pctCommitted =
+    wb.annual > 0 ? ((wb.spent + wb.committed) / wb.annual) * 100 : 0;
   const remaining = wb.annual - wb.spent - wb.committed;
   const overBudget = pctCommitted > 100;
   // Role-specific tile set. Each role sees the widgets relevant to its job:
@@ -256,7 +298,7 @@ function DashboardScreen() {
                 {INR(remaining, 0)}
               </div>
               <div className="font-mono fs-10 fg-3">
-                {((remaining / wb.annual) * 100).toFixed(1)}%{" "}
+                {(wb.annual > 0 ? (remaining / wb.annual) * 100 : 0).toFixed(1)}%{" "}
                 {__t("dashboard.headroom") || "headroom"}
               </div>
             </div>
@@ -278,12 +320,12 @@ function DashboardScreen() {
           <div
             className="flex items-center pl-6 fg font-mono fs-10 fw-600"
             style={{
-              width: (wb.committed / wb.annual) * 100 + "%",
+              width: (wb.annual > 0 ? (wb.committed / wb.annual) * 100 : 0) + "%",
               background:
                 "color-mix(in oklch, var(--accent) 50%, var(--bg-sunk))",
             }}
           >
-            {(wb.committed / wb.annual) * 100 > 5
+            {wb.annual > 0 && (wb.committed / wb.annual) * 100 > 5
               ? __t("dashboard.committedLabel") || "COMMITTED"
               : ""}
           </div>
@@ -314,12 +356,19 @@ function DashboardScreen() {
           <div className="font-mono fs-10 uppercase letter-sp-6 fg-3 mb-10">
             {__t("dashboard.byProject") || "By project"}
           </div>
+          {Object.keys(wb.byProject).length === 0 ? (
+            <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
+              {__t("dashboard.noProjectBudgets") ||
+                "No project budgets configured yet."}
+            </div>
+          ) : (
           <div
             className="d-grid gap-10"
             style={{ gridTemplateColumns: "repeat(4, 1fr)" }}
           >
             {Object.entries(wb.byProject).map(([k, p]) => {
-              const used = ((p.spent + p.committed) / p.budget) * 100;
+              const used =
+                p.budget > 0 ? ((p.spent + p.committed) / p.budget) * 100 : 0;
               const cFill =
                 used > 100
                   ? "var(--danger)"
@@ -391,6 +440,7 @@ function DashboardScreen() {
               );
             })}
           </div>
+          )}
         </div>
       </Card>
       {/* Role-specific tile grid */}
@@ -441,40 +491,108 @@ Tile.propTypes = {
   children: PropTypes.node,
 };
 function RiskTile() {
-  const items = [
-    { pn: "EL-BMS-12S", reason: "Lead time 28d → 35d", sev: "high" },
-    { pn: "HW-FAS-M3-08", reason: "Duplicate detected", sev: "med" },
-    { pn: "EL-MCU-STM32H7", reason: "Single-source CN", sev: "med" },
-  ];
+  // Real supply-risk rollup — GET /analytics/at-risk-parts, derived server-side
+  // from part_vendors (lead time, single-source, quality/on-time) + parts.
+  const [items, setItems] = React.useState(null); // null = loading
+  const [loadError, setLoadError] = React.useState(false);
+  React.useEffect(() => {
+    let cancelled = false;
+    api.analytics
+      .atRiskParts(5)
+      .then((res) => {
+        if (cancelled) return;
+        setItems(Array.isArray(res?.items) ? res.items : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLoadError(true);
+        setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   return (
     <Tile
       title={__t("dashboard.supplyRisk") || "Supply Risk"}
       action={__t("dashboard.viewAll") || "View all"}
       onAction={() => window.__nav?.("bom")}
     >
-      {items.map((it) => (
-        <div
-          key={it.pn}
-          className="flex justify-between items-center gap-8"
-          style={{
-            padding: "6px 0",
-            borderBottom: "1px solid var(--line-soft)",
-          }}
-        >
-          <div>
-            <div className="font-mono fs-11 fw-600">{it.pn}</div>
-            <div className="fs-10 fg-3">{it.reason}</div>
-          </div>
-          <Badge tone={it.sev === "high" ? "danger" : "warning"}>
-            {it.sev.toUpperCase()}
-          </Badge>
+      {items === null ? (
+        <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
+          {__t("common.loading") || "Loading…"}
         </div>
-      ))}
+      ) : items.length === 0 ? (
+        <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
+          {loadError
+            ? __t("dashboard.riskLoadError") ||
+              "Unable to load supply risk data"
+            : __t("dashboard.noRisk") || "No at-risk parts detected"}
+        </div>
+      ) : (
+        items.map((it) => (
+          <div
+            key={it.partId ?? it.pn}
+            className="flex justify-between items-center gap-8"
+            style={{
+              padding: "6px 0",
+              borderBottom: "1px solid var(--line-soft)",
+            }}
+          >
+            <div>
+              <div className="font-mono fs-11 fw-600">{it.pn}</div>
+              <div className="fs-10 fg-3">{it.reason}</div>
+            </div>
+            <Badge tone={it.severity === "high" ? "danger" : "warning"}>
+              {(it.severity || "").toUpperCase()}
+            </Badge>
+          </div>
+        ))
+      )}
     </Tile>
   );
 }
+// Approval `type` values come from the backend's ApprovalType enum
+// (ecr/eco/ncr/capa/document/purchase). There is no explicit department
+// field, so pending approvals are bucketed into the three inbox rows using
+// the closest real-world owner of each type: engineering change/quality
+// control types → Engineering, purchase approvals → Procurement, and
+// document sign-offs → Finance.
+const APPROVAL_TYPE_DEPARTMENT = {
+  ecr: "engineering",
+  eco: "engineering",
+  ncr: "engineering",
+  capa: "engineering",
+  purchase: "procurement",
+  document: "finance",
+};
 function ApprovalsTile({ role }) {
-  const counts = { engineering: 2, procurement: 3, finance: 1 };
+  // null = loading, [] = loaded-empty/error
+  const [items, setItems] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    api.approvals
+      .list({ status: "pending", per_page: 500 })
+      .then((result) => {
+        if (cancelled) return;
+        const rows = Array.isArray(result) ? result : result?.items || [];
+        setItems(rows);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Honest failure — do not fall back to fabricated/sample counts.
+        setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const loading = items === null;
+  const counts = { engineering: 0, procurement: 0, finance: 0 };
+  (items || []).forEach((a) => {
+    const dept = APPROVAL_TYPE_DEPARTMENT[String(a.type || "").toLowerCase()];
+    if (dept) counts[dept] += 1;
+  });
   const my =
     role === "Engineering"
       ? counts.engineering
@@ -489,32 +607,45 @@ function ApprovalsTile({ role }) {
       action={__t("dashboard.open") || "Open"}
       onAction={() => window.__nav?.("approvals")}
     >
-      <div className="flex items-baseline gap-8 mb-10">
-        <span
-          className="font-mono fs-28 fw-700"
-          style={{ color: my > 0 ? "var(--accent-text)" : "var(--fg)" }}
-        >
-          {my}
-        </span>
-        <span className="font-mono fs-11 fg-3">
-          {__t("dashboard.awaiting") || "awaiting"}{" "}
-          {role === "Admin"
-            ? __t("dashboard.team") || "team"
-            : __t("dashboard.you") || "you"}
-        </span>
-      </div>
-      {["Engineering", "Procurement", "Finance"].map((r) => (
-        <div key={r} className="vendor-row fg-2">
-          <span>{r}</span>
-          <span
-            style={{
-              color: counts[r.toLowerCase()] ? "var(--accent-text)" : "var(--fg-4)",
-            }}
-          >
-            {counts[r.toLowerCase()]}
+      {loading ? (
+        <div className="flex items-center gap-8" style={{ padding: "6px 0" }}>
+          <Spinner size="sm" />
+          <span className="fs-11 fg-3">
+            {__t("common.loading") || "Loading…"}
           </span>
         </div>
-      ))}
+      ) : (
+        <>
+          <div className="flex items-baseline gap-8 mb-10">
+            <span
+              className="font-mono fs-28 fw-700"
+              style={{ color: my > 0 ? "var(--accent-text)" : "var(--fg)" }}
+            >
+              {my}
+            </span>
+            <span className="font-mono fs-11 fg-3">
+              {__t("dashboard.awaiting") || "awaiting"}{" "}
+              {role === "Admin"
+                ? __t("dashboard.team") || "team"
+                : __t("dashboard.you") || "you"}
+            </span>
+          </div>
+          {["Engineering", "Procurement", "Finance"].map((r) => (
+            <div key={r} className="vendor-row fg-2">
+              <span>{r}</span>
+              <span
+                style={{
+                  color: counts[r.toLowerCase()]
+                    ? "var(--accent-text)"
+                    : "var(--fg-4)",
+                }}
+              >
+                {counts[r.toLowerCase()]}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
     </Tile>
   );
 }
@@ -522,6 +653,36 @@ ApprovalsTile.propTypes = {
   role: PropTypes.any,
 };
 function InFlightTile() {
+  // null = loading; [] resolved (possibly null/error) once both calls settle
+  const [poStats, setPoStats] = React.useState(null);
+  const [trackingStats, setTrackingStats] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      api.poOrders.stats().catch(() => null),
+      api.orderTracking.stats().catch(() => null),
+    ]).then(([po, tracking]) => {
+      if (cancelled) return;
+      // Honest failure — do not fall back to fabricated/sample counts.
+      setPoStats(po || null);
+      setTrackingStats(tracking || null);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const byStatus = poStats?.byStatus || {};
+  const rfqCount = byStatus["RFQ Sent"]?.count || 0;
+  const poCount = byStatus["Ordered"]?.count || 0;
+  const transitCount = trackingStats?.byStage?.in_transit || 0;
+  const totalInFlight = poStats?.totalValue || 0;
+  const cells = [
+    [__t("dashboard.rfq") || "RFQ", rfqCount],
+    [__t("dashboard.po") || "PO", poCount],
+    [__t("dashboard.transit") || "Transit", transitCount],
+  ];
   return (
     <Tile
       title={__t("dashboard.inFlight") || "In Flight"}
@@ -532,17 +693,15 @@ function InFlightTile() {
         className="d-grid gap-8 mb-8"
         style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
       >
-        {[
-          [__t("dashboard.rfq") || "RFQ", 2],
-          [__t("dashboard.po") || "PO", 3],
-          [__t("dashboard.transit") || "Transit", 4],
-        ].map(([l, v]) => (
+        {cells.map(([l, v]) => (
           <div
             key={l}
             className="bg-sunk rounded-r2 text-center"
             style={{ padding: 8 }}
           >
-            <div className="font-mono fs-18 fw-700">{v}</div>
+            <div className="font-mono fs-18 fw-700">
+              {loading ? <Spinner size="sm" /> : v}
+            </div>
             <div className="font-mono fs-9 fg-3 uppercase letter-sp-6">{l}</div>
           </div>
         ))}
@@ -552,47 +711,160 @@ function InFlightTile() {
         style={{ borderTop: "1px solid var(--line-soft)" }}
       >
         {__t("dashboard.totalInFlight") || "Total in flight"}:{" "}
-        <strong className="fg">{INR(WORKSPACE_BUDGET.committed, 0)}</strong>
+        <strong className="fg">
+          {loading ? "—" : INR(totalInFlight, 0)}
+        </strong>
       </div>
     </Tile>
   );
 }
+// Relative-time label for a revision timestamp ("18m", "3h", "6d", or the
+// localized "just now" for anything under a minute old).
+function myBomsTimeAgo(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  const ms = Date.now() - d.getTime();
+  if (Number.isNaN(ms)) return null;
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return __t("dashboard.justNow") || "just now";
+  if (min < 60) return min + "m";
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return hr + "h";
+  return Math.floor(hr / 24) + "d";
+}
+function capitalize(s) {
+  return s ? String(s).charAt(0).toUpperCase() + String(s).slice(1) : s;
+}
 function MyBOMsTile() {
-  const list = [
-    { name: "ATLAS · Mainframe Rev D", status: "Draft", updated: "2h" },
-    { name: "HORIZON · Sensor Pod Rev B", status: "Review", updated: "5h" },
-    { name: "NEBULA · IO Module v0.3", status: "Draft", updated: "1d" },
-  ];
+  // Recently updated BOMs/parts revisions authored by the current user —
+  // GET /revisions?mine=true&sort_by=createdAt&sort_dir=desc. Revisions
+  // carry no workflow-status field, so the entity type stands in for the
+  // status pill rather than fabricating a Draft/Review value.
+  // null = loading, [] = loaded-but-empty/error
+  const [items, setItems] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(
+      api?.revisions?.list?.({
+        mine: true,
+        sort_by: "createdAt",
+        sort_dir: "desc",
+        per_page: 5,
+      }),
+    )
+      .then((res) => {
+        if (cancelled) return;
+        const rows = Array.isArray(res) ? res : res?.items || [];
+        setItems(rows);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        // Honest failure — do not fall back to fabricated/sample rows.
+        setError(
+          e?.message || __t("dashboard.bomsLoadError") || "Failed to load BOMs",
+        );
+        setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const justNowLabel = __t("dashboard.justNow") || "just now";
   return (
     <Tile
       title={__t("dashboard.myBoms") || "My BOMs"}
       action={__t("dashboard.openEditor") || "Open editor"}
       onAction={() => window.__nav?.("bom")}
     >
-      {list.map((b) => (
-        <div
-          key={b.name}
-          className="d-grid gap-8 items-center"
-          style={{
-            gridTemplateColumns: "1fr auto",
-            padding: "6px 0",
-            borderBottom: "1px solid var(--line-soft)",
-          }}
-        >
-          <div>
-            <div className="fs-12 fw-500">{b.name}</div>
-            <div className="font-mono fs-10 fg-3">
-              {__t("dashboard.updated") || "Updated"} {b.updated}{" "}
-              {__t("dashboard.ago") || "ago"}
-            </div>
-          </div>
-          <StatusPill status={b.status} />
+      {items === null ? (
+        <div className="flex items-center gap-8" style={{ padding: "6px 0" }}>
+          <Spinner size="sm" />
+          <span className="fs-11 fg-3">
+            {__t("common.loading") || "Loading…"}
+          </span>
         </div>
-      ))}
+      ) : items.length === 0 ? (
+        <EmptyState
+          message={error || __t("dashboard.noBoms") || "No recent BOMs yet"}
+        />
+      ) : (
+        items.map((r) => {
+          const name =
+            r.revisionLabel ||
+            r.description ||
+            `${capitalize(r.entityType) || "Item"} #${r.entityId}`;
+          const ago = myBomsTimeAgo(r.updatedAt || r.createdAt);
+          return (
+            <div
+              key={r.id}
+              className="d-grid gap-8 items-center"
+              style={{
+                gridTemplateColumns: "1fr auto",
+                padding: "6px 0",
+                borderBottom: "1px solid var(--line-soft)",
+              }}
+            >
+              <div>
+                <div className="fs-12 fw-500">{name}</div>
+                <div className="font-mono fs-10 fg-3">
+                  {ago
+                    ? ago === justNowLabel
+                      ? ago
+                      : `${__t("dashboard.updated") || "Updated"} ${ago} ${
+                          __t("dashboard.ago") || "ago"
+                        }`
+                    : "—"}
+                </div>
+              </div>
+              <StatusPill status={capitalize(r.entityType) || "Item"} />
+            </div>
+          );
+        })
+      )}
     </Tile>
   );
 }
 function VendorsTile() {
+  // vendors === null -> still loading; [] -> loaded but empty (or fetch failed).
+  const [vendors, setVendors] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(api?.vendors?.list?.({ per_page: 500 }))
+      .then((res) => {
+        if (cancelled) return;
+        const items = Array.isArray(res)
+          ? res
+          : Array.isArray(res?.items)
+            ? res.items
+            : [];
+        setVendors(items);
+      })
+      .catch(() => {
+        if (!cancelled) setVendors([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const list = vendors || [];
+  // Vendor rows don't carry explicit preferred/risk flags today — approximate
+  // from reliabilityRating (0-5 scale) so the tile still reflects real data.
+  const activeCount = list.filter((v) => v.active !== false).length;
+  const preferredCount = list.filter(
+    (v) => v.preferred === true || (v.reliabilityRating ?? 0) >= 4,
+  ).length;
+  const highRiskCount = list.filter(
+    (v) =>
+      v.risk === "High" ||
+      (v.reliabilityRating != null && v.reliabilityRating < 2),
+  ).length;
+  const topVendor = list.reduce((best, v) => {
+    const rating = v.reliabilityRating ?? 0;
+    return !best || rating > (best.reliabilityRating ?? 0) ? v : best;
+  }, null);
+
   return (
     <Tile
       title={__t("nav.vendors") || "Vendors"}
@@ -601,32 +873,56 @@ function VendorsTile() {
     >
       <div className="vendor-row">
         <span className="fg-3 fw-600">{__t("vendor.active") || "Active"}</span>
-        <span>14</span>
+        <span>{activeCount}</span>
       </div>
       <div className="vendor-row">
         <span className="fg-3 fw-600 fg-accent">
           {__t("vendor.preferred") || "Preferred"}
         </span>
-        <span>8</span>
+        <span>{preferredCount}</span>
       </div>
       <div className="vendor-row">
         <span className="fg-3 fw-600 fg-danger">
           {__t("dashboard.highRisk") || "High risk"}
         </span>
-        <span>1</span>
+        <span>{highRiskCount}</span>
       </div>
       <div
         className="mt-8 pt-8 font-mono fs-10 fg-3"
         style={{ borderTop: "1px solid var(--line-soft)" }}
       >
-        {__t("dashboard.topVendorSummary") ||
-          "Top: McMaster · A+ score · 99% on-time"}
+        {vendors === null
+          ? __t("common.loading") || "Loading…"
+          : topVendor
+            ? (__t("dashboard.topVendorLabel") || "Top") +
+              ": " +
+              topVendor.name +
+              (topVendor.reliabilityRating != null
+                ? " · " +
+                  Number(topVendor.reliabilityRating).toFixed(1) +
+                  "/5 rating"
+                : "")
+            : __t("dashboard.noVendors") || "No vendors yet"}
       </div>
     </Tile>
   );
 }
 function SpendMixTile() {
-  const data = WORKSPACE_BUDGET.byCategory;
+  // rows: null = loading, [] = loaded-but-empty, [...] = real category spend
+  const [rows, setRows] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(api?.analytics?.categories?.())
+      .then((res) => {
+        if (!cancelled) setRows(Array.isArray(res) ? res : []);
+      })
+      .catch(() => {
+        if (!cancelled) setRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const colors = {
     Electrical: "oklch(0.55 0.13 240)",
     Optical: "oklch(0.55 0.13 320)",
@@ -635,39 +931,68 @@ function SpendMixTile() {
     Cable: "oklch(0.55 0.10 280)",
     Other: "var(--fg-3)",
   };
+  const palette = [
+    "oklch(0.55 0.13 240)",
+    "oklch(0.55 0.13 320)",
+    "oklch(0.55 0.08 60)",
+    "oklch(0.55 0.10 145)",
+    "oklch(0.55 0.10 280)",
+    "oklch(0.55 0.10 20)",
+  ];
+  const totalCost = (rows || []).reduce((s, r) => s + (Number(r.totalCost) || 0), 0);
+  const data =
+    totalCost > 0
+      ? (rows || []).map((r, i) => ({
+          key: r.category || "Other",
+          pct: (Number(r.totalCost) || 0) / totalCost,
+          color: colors[r.category] || palette[i % palette.length],
+        }))
+      : [];
   return (
     <Tile
       title={__t("dashboard.spendMix") || "Spend Mix"}
       action={__t("nav.analytics") || "Analytics"}
       onAction={() => window.__nav?.("analytics")}
     >
-      <div className="flex h-14 br-4 overflow-h mb-10">
-        {Object.entries(data).map(([k, v]) => (
-          <div
-            key={k}
-            style={{ width: v * 100 + "%", background: colors[k] }}
-            title={`${k}: ${(v * 100).toFixed(0)}%`}
-          />
-        ))}
-      </div>
-      {Object.entries(data).map(([k, v]) => (
-        <div
-          key={k}
-          className="flex justify-between font-mono fs-10"
-          style={{ padding: "2px 0" }}
-        >
-          <span className="flex-inline-c w-8 h-8 br-2">
-            <span style={{ background: colors[k] }} /> {k}
-          </span>
-          <span className="fg-3">{(v * 100).toFixed(0)}%</span>
+      {rows === null ? (
+        <div className="fs-11 fg-3" style={{ padding: "10px 0" }}>
+          {__t("common.loading") || "Loading…"}
         </div>
-      ))}
+      ) : data.length === 0 ? (
+        <div className="fs-11 fg-3" style={{ padding: "10px 0" }}>
+          {__t("dashboard.noSpendData") || "No spend data yet"}
+        </div>
+      ) : (
+        <>
+          <div className="flex h-14 br-4 overflow-h mb-10">
+            {data.map((d) => (
+              <div
+                key={d.key}
+                style={{ width: d.pct * 100 + "%", background: d.color }}
+                title={`${d.key}: ${(d.pct * 100).toFixed(0)}%`}
+              />
+            ))}
+          </div>
+          {data.map((d) => (
+            <div
+              key={d.key}
+              className="flex justify-between font-mono fs-10"
+              style={{ padding: "2px 0" }}
+            >
+              <span className="flex-inline-c w-8 h-8 br-2">
+                <span style={{ background: d.color }} /> {d.key}
+              </span>
+              <span className="fg-3">{(d.pct * 100).toFixed(0)}%</span>
+            </div>
+          ))}
+        </>
+      )}
     </Tile>
   );
 }
 function CostTrendTile() {
   const data = WORKSPACE_BUDGET.monthly;
-  const max = Math.max(...data);
+  const max = Math.max(...data, 1);
   return (
     <Tile
       title={__t("dashboard.monthlySpend") || "Monthly Spend (₹Cr)"}
@@ -702,74 +1027,213 @@ function CostTrendTile() {
     </Tile>
   );
 }
+function activityTimeAgo(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const diffMs = Date.now() - d.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "now";
+  if (mins < 60) return mins + "m";
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return hours + "h";
+  return Math.floor(hours / 24) + "d";
+}
 function ActivityTile() {
-  const items = [
-    { who: "M. Park", what: "edited", obj: "STM32H7", time: "12m" },
-    { who: "K. Singh", what: "approved", obj: "PO-0481", time: "2h" },
-    { who: "System", what: "flagged", obj: "EL-BMS-12S", time: "5h" },
-  ];
+  // null = loading, [] = loaded-but-empty/error
+  const [items, setItems] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    api.auditLogs
+      .list({ page: 1, per_page: 5 })
+      .then((result) => {
+        if (cancelled) return;
+        const rows = Array.isArray(result) ? result : result?.items || [];
+        setItems(rows);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        // Honest failure — do not fall back to fabricated/sample rows.
+        setError(e?.message || __t("dashboard.activityLoadError") || "Failed to load activity");
+        setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   return (
     <Tile
       title={__t("dashboard.recentActivity") || "Recent Activity"}
       action={__t("dashboard.viewAll") || "View all"}
       onAction={() => window.__nav?.("activity")}
     >
-      {items.map((a, i) => (
-        <div
-          key={a.who + "-" + a.time}
-          className="fs-11"
-          style={{
-            padding: "6px 0",
-            borderBottom: "1px solid var(--line-soft)",
-          }}
-        >
-          <strong>{a.who}</strong>{" "}
-          <span className="fg-3 font-mono bg-sunk br-2">{a.what}</span>{" "}
-          <span style={{ padding: "0 4px" }}>{a.obj}</span>
-          <span className="font-mono fs-10 fg-3 ml-6">{a.time}</span>
+      {items === null ? (
+        <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
+          {__t("common.loading") || "Loading…"}
         </div>
-      ))}
+      ) : items.length === 0 ? (
+        <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
+          {error || __t("dashboard.noActivity") || "No recent activity"}
+        </div>
+      ) : (
+        items.map((a) => (
+          <div
+            key={a.id ?? a.createdAt + "-" + a.action}
+            className="fs-11"
+            style={{
+              padding: "6px 0",
+              borderBottom: "1px solid var(--line-soft)",
+            }}
+          >
+            <strong>
+              {a.userEmail || (a.userId != null ? "User #" + a.userId : "System")}
+            </strong>{" "}
+            <span className="fg-3 font-mono bg-sunk br-2">{a.action}</span>{" "}
+            <span style={{ padding: "0 4px" }}>
+              {a.entityType || ""}
+              {a.entityId != null ? " #" + a.entityId : ""}
+            </span>
+            <span className="font-mono fs-10 fg-3 ml-6">
+              {activityTimeAgo(a.createdAt)}
+            </span>
+          </div>
+        ))
+      )}
     </Tile>
   );
 }
 // ── Admin: users / tenant / system health / audit ──────────────────────────
 function UsersTile() {
-  const users = [
-    { name: "Elena Chen", role: "Admin", status: "active" },
-    { name: "M. Park", role: "Engineering", status: "active" },
-    { name: "K. Singh", role: "Procurement", status: "active" },
-    { name: "R. Alvarez", role: "Finance", status: "invited" },
-  ];
+  // users: null = loading, [] = loaded-but-empty/error. total tracks the
+  // real seat count (from pagination), independent of how many rows we
+  // fetch to display.
+  const [users, setUsers] = React.useState(null);
+  const [total, setTotal] = React.useState(0);
+  const [error, setError] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(api?.users?.list?.({ per_page: 8 }))
+      .then((res) => {
+        if (cancelled) return;
+        const rows = Array.isArray(res) ? res : res?.items || [];
+        setUsers(rows);
+        setTotal(typeof res?.total === "number" ? res.total : rows.length);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        // Honest failure — do not fall back to fabricated/sample rows.
+        setError(
+          e?.message || __t("dashboard.usersLoadError") || "Failed to load users",
+        );
+        setUsers([]);
+        setTotal(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const pending = (users || []).filter((u) => u.isActive === false).length;
   return (
     <Tile
       title={__t("dashboard.users") || "Users & Tenant"}
       action={__t("dashboard.manage") || "Manage"}
       onAction={() => window.__nav?.("tenant-admin")}
     >
-      <div className="flex items-baseline gap-8 mb-10">
-        <span className="font-mono fs-28 fw-700">{users.length}</span>
-        <span className="font-mono fs-11 fg-3">
-          {__t("dashboard.seats") || "seats"} ·{" "}
-          {users.filter((u) => u.status === "invited").length}{" "}
-          {__t("dashboard.pending") || "pending"}
-        </span>
-      </div>
-      {users.map((u) => (
-        <div key={u.name} className="vendor-row">
-          <span>
-            {u.name} <span className="fg-3 fs-10">{u.role}</span>
+      {users === null ? (
+        <div className="flex items-center gap-8" style={{ padding: "6px 0" }}>
+          <Spinner size="sm" />
+          <span className="fs-11 fg-3">
+            {__t("common.loading") || "Loading…"}
           </span>
-          <Badge tone={u.status === "active" ? "success" : "warning"} pill>
-            {u.status}
-          </Badge>
         </div>
-      ))}
+      ) : (
+        <>
+          <div className="flex items-baseline gap-8 mb-10">
+            <span className="font-mono fs-28 fw-700">{total}</span>
+            <span className="font-mono fs-11 fg-3">
+              {__t("dashboard.seats") || "seats"}
+              {pending > 0 && (
+                <>
+                  {" "}
+                  · {pending} {__t("dashboard.pending") || "pending"}
+                </>
+              )}
+            </span>
+          </div>
+          {users.length === 0 ? (
+            <EmptyState
+              message={error || __t("dashboard.noUsers") || "No users yet"}
+            />
+          ) : (
+            users.map((u) => (
+              <div key={u.id} className="vendor-row">
+                <span>
+                  {u.fullName || u.username || u.email}{" "}
+                  <span className="fg-3 fs-10">
+                    {u.department ||
+                      u.jobTitle ||
+                      (u.isSuperuser
+                        ? __t("dashboard.superuser") || "Superuser"
+                        : "")}
+                  </span>
+                </span>
+                <Badge tone={u.isActive === false ? "warning" : "success"} pill>
+                  {u.isActive === false
+                    ? __t("dashboard.inactive") || "inactive"
+                    : __t("dashboard.active") || "active"}
+                </Badge>
+              </div>
+            ))
+          )}
+        </>
+      )}
     </Tile>
   );
 }
 function SystemHealthTile({ ctx }) {
-  const online = ctx?.apiConnected !== false;
+  // Real backend health snapshot — GET /health/detailed (see
+  // backend/app/monitoring/health.py::get_detailed_health). Replaces the
+  // previous hardcoded "99.98% uptime / 0.02% error rate" placeholders,
+  // which were never derived from any endpoint.
+  // null = loading, {} = loaded/error (renders honest "—" placeholders)
+  const [health, setHealth] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(api?.monitoring?.healthDetailed?.())
+      .then((res) => {
+        if (!cancelled) setHealth(res || {});
+      })
+      .catch(() => {
+        if (!cancelled) setHealth({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const sync = ctx?.syncStatus || {};
+  const loadingHealth = health === null;
+  const online = loadingHealth
+    ? ctx?.apiConnected !== false
+    : health.status
+      ? health.status === "healthy"
+      : ctx?.apiConnected !== false;
+  const dbLatency = health?.database?.latencyMs;
+  const uptimeHours = health?.systemUptimeHours;
+  const cells = [
+    [
+      __t("dashboard.dbLatency") || "DB Latency",
+      dbLatency != null ? Number(dbLatency).toFixed(1) + "ms" : "—",
+    ],
+    [
+      __t("dashboard.pendingSync") || "Pending sync",
+      String(sync.pendingCount || 0),
+    ],
+    [
+      __t("dashboard.uptime") || "Uptime",
+      uptimeHours != null ? Number(uptimeHours).toFixed(1) + "h" : "—",
+    ],
+  ];
   return (
     <Tile
       title={__t("dashboard.systemHealth") || "System Health"}
@@ -779,23 +1243,18 @@ function SystemHealthTile({ ctx }) {
       <div className="flex items-center gap-8 mb-10">
         <StatusPill status={online ? "Operational" : "Degraded"} />
         <span className="font-mono fs-10 fg-3">
-          {sync.syncing
-            ? __t("dashboard.syncing") || "Syncing…"
-            : __t("dashboard.allSynced") || "All changes synced"}
+          {loadingHealth
+            ? __t("common.loading") || "Loading…"
+            : sync.syncing
+              ? __t("dashboard.syncing") || "Syncing…"
+              : __t("dashboard.allSynced") || "All changes synced"}
         </span>
       </div>
       <div
         className="d-grid gap-8"
         style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
       >
-        {[
-          [__t("dashboard.apiUptime") || "API Uptime", "99.98%"],
-          [
-            __t("dashboard.pendingSync") || "Pending sync",
-            String(sync.pendingCount || 0),
-          ],
-          [__t("dashboard.errorRate") || "Error rate", "0.02%"],
-        ].map(([l, v]) => (
+        {cells.map(([l, v]) => (
           <div
             key={l}
             className="bg-sunk rounded-r2 text-center"
@@ -810,157 +1269,443 @@ function SystemHealthTile({ ctx }) {
   );
 }
 SystemHealthTile.propTypes = { ctx: PropTypes.object };
+// Short relative-time label ("18m", "3h", "6d") matching this tile's
+// pre-existing display convention.
+function shortTimeAgo(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const ms = Date.now() - d.getTime();
+  if (Number.isNaN(ms)) return "—";
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return __t("dashboard.justNow") || "now";
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  return `${Math.floor(hr / 24)}d`;
+}
 function AuditTile() {
-  const items = [
-    { who: "Elena Chen", what: "changed role of", obj: "R. Alvarez → Finance", time: "18m" },
-    { who: "System", what: "revoked API key", obj: "key-prod-07", time: "3h" },
-    { who: "K. Singh", what: "approved", obj: "PO-0481", time: "6h" },
-  ];
+  const [items, setItems] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api.auditLogs
+      .list({ page: 1, per_page: 3 })
+      .then((result) => {
+        if (cancelled) return;
+        const rows = Array.isArray(result) ? result : result?.items || [];
+        setItems(
+          rows.map((r) => ({
+            who:
+              r.userEmail ||
+              (r.userId != null ? `user #${r.userId}` : "System"),
+            what: r.action || "—",
+            obj:
+              (r.entityType || "") +
+              (r.entityId != null ? ` #${r.entityId}` : ""),
+            time: shortTimeAgo(r.createdAt),
+          })),
+        );
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        // Honest failure — do not fall back to fabricated/sample rows.
+        setError(e?.message || "Failed to load audit log.");
+        setItems([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   return (
     <Tile
       title={__t("dashboard.auditLog") || "Audit Log"}
       action={__t("dashboard.viewAll") || "View all"}
       onAction={() => window.__nav?.("audit-trail")}
     >
-      {items.map((a, i) => (
-        <div
-          key={a.who + i}
-          className="fs-11"
-          style={{ padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}
-        >
-          <strong>{a.who}</strong>{" "}
-          <span className="fg-3">{a.what}</span>{" "}
-          <span style={{ padding: "0 4px" }}>{a.obj}</span>
-          <span className="font-mono fs-10 fg-3 ml-6">{a.time}</span>
+      {loading ? (
+        <div className="flex items-center gap-8" style={{ padding: "6px 0" }}>
+          <Spinner size="sm" />
+          <span className="fs-11 fg-3">
+            {__t("common.loading") || "Loading…"}
+          </span>
         </div>
-      ))}
+      ) : error ? (
+        <div className="fs-11 fg-danger" style={{ padding: "6px 0" }}>
+          {error}
+        </div>
+      ) : items.length === 0 ? (
+        <EmptyState
+          message={
+            __t("dashboard.noAuditEvents") || "No recent audit events."
+          }
+        />
+      ) : (
+        items.map((a, i) => (
+          <div
+            key={a.who + i}
+            className="fs-11"
+            style={{ padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}
+          >
+            <strong>{a.who}</strong>{" "}
+            <span className="fg-3">{a.what}</span>{" "}
+            <span style={{ padding: "0 4px" }}>{a.obj}</span>
+            <span className="font-mono fs-10 fg-3 ml-6">{a.time}</span>
+          </div>
+        ))
+      )}
     </Tile>
   );
 }
 // ── Engineering: ECO / where-used ───────────────────────────────────────────
 function ECOTile() {
-  const items = [
-    { id: "ECO-0142", title: "Revise BMS harness routing", status: "Review" },
-    { id: "ECO-0139", title: "Swap MCU to STM32H7 rev B", status: "Draft" },
-    { id: "ECO-0135", title: "Update sensor pod enclosure", status: "Approved" },
-  ];
+  const [items, setItems] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api.eco
+      .list({ page: 1, per_page: 3 })
+      .then((result) => {
+        if (cancelled) return;
+        const rows = Array.isArray(result) ? result : result?.items || [];
+        setItems(rows);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        // Honest failure — do not fall back to fabricated/sample rows.
+        setError(e?.message || "Failed to load ECOs.");
+        setItems([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   return (
     <Tile
       title={__t("dashboard.openECOs") || "Open ECOs"}
       action={__t("dashboard.viewAll") || "View all"}
       onAction={() => window.__nav?.("ecr")}
     >
-      {items.map((e) => (
-        <div
-          key={e.id}
-          className="flex justify-between items-center gap-8"
-          style={{ padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}
-        >
-          <div>
-            <div className="font-mono fs-11 fw-600">{e.id}</div>
-            <div className="fs-10 fg-3">{e.title}</div>
-          </div>
-          <StatusPill status={e.status} />
+      {loading ? (
+        <div className="flex items-center gap-8" style={{ padding: "6px 0" }}>
+          <Spinner size="sm" />
+          <span className="fs-11 fg-3">
+            {__t("common.loading") || "Loading…"}
+          </span>
         </div>
-      ))}
+      ) : error ? (
+        <div className="fs-11 fg-danger" style={{ padding: "6px 0" }}>
+          {error}
+        </div>
+      ) : items.length === 0 ? (
+        <EmptyState message={__t("dashboard.noOpenEcos") || "No open ECOs."} />
+      ) : (
+        items.map((e) => (
+          <div
+            key={e.id}
+            className="flex justify-between items-center gap-8"
+            style={{ padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}
+          >
+            <div>
+              <div className="font-mono fs-11 fw-600">
+                {e.eco_number || "ECO-" + e.id}
+              </div>
+              <div className="fs-10 fg-3">{e.title}</div>
+            </div>
+            <StatusPill
+              status={e.status}
+              label={
+                e.status
+                  ? String(e.status).charAt(0).toUpperCase() +
+                    String(e.status).slice(1)
+                  : e.status
+              }
+            />
+          </div>
+        ))
+      )}
     </Tile>
   );
 }
 function WhereUsedTile() {
-  const items = [
-    { pn: "HW-FAS-M3-08", uses: 6 },
-    { pn: "EL-MCU-STM32H7", uses: 4 },
-    { pn: "EL-BMS-12S", uses: 3 },
-  ];
+  // Cross-BOM part reuse — GET /analytics/most-used-parts, derived
+  // server-side from bom_items_master (distinct BOM count per part).
+  // null = loading, [] = loaded-but-empty/error
+  const [items, setItems] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(api?.analytics?.mostUsedParts?.(5))
+      .then((res) => {
+        if (cancelled) return;
+        const rows = Array.isArray(res) ? res : res?.items || [];
+        setItems(rows);
+      })
+      .catch(() => {
+        // Honest failure — do not fall back to fabricated/sample rows.
+        if (!cancelled) setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   return (
     <Tile
       title={__t("dashboard.whereUsed") || "Where Used"}
       action={__t("nav.parts") || "Components"}
       onAction={() => window.__nav?.("parts")}
     >
-      {items.map((it) => (
-        <div key={it.pn} className="vendor-row">
-          <span className="font-mono">{it.pn}</span>
-          <span>
-            {it.uses} {__t("dashboard.boms") || "BOMs"}
-          </span>
+      {items === null ? (
+        <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
+          {__t("common.loading") || "Loading…"}
         </div>
-      ))}
+      ) : items.length === 0 ? (
+        <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
+          {__t("dashboard.noWhereUsed") ||
+            "No parts referenced in any BOM yet"}
+        </div>
+      ) : (
+        items.map((it) => (
+          <div key={it.partNumber || it.pn} className="vendor-row">
+            <span className="font-mono">{it.partNumber || it.pn}</span>
+            <span>
+              {it.uses} {__t("dashboard.boms") || "BOMs"}
+            </span>
+          </div>
+        ))
+      )}
     </Tile>
   );
 }
 // ── Procurement: receiving ───────────────────────────────────────────────
+function receivingStatusLabel(stage) {
+  if (!stage) return "—";
+  return String(stage)
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function receivingShortDate(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+function receivingEta(t) {
+  if (t.currentStage === "delivered" || t.currentStage === "completed") {
+    return (
+      receivingShortDate(t.actualDelivery) ||
+      __t("dashboard.received") ||
+      "Received"
+    );
+  }
+  return receivingShortDate(t.estimatedDelivery) || "—";
+}
 function ReceivingTile() {
-  const items = [
-    { po: "PO-0481", vendor: "McMaster", eta: "Today", status: "In transit" },
-    { po: "PO-0476", vendor: "Digi-Key", eta: "Tomorrow", status: "In transit" },
-    { po: "PO-0470", vendor: "Mouser", eta: "—", status: "Received" },
-  ];
+  // null = loading, [] = loaded-but-empty/error
+  const [items, setItems] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  const [stats, setStats] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      api.orderTracking.list({ per_page: 5 }).catch(() => null),
+      api.orderTracking.stats().catch(() => null),
+    ])
+      .then(([list, st]) => {
+        if (cancelled) return;
+        const rows = Array.isArray(list) ? list : list?.items || [];
+        setItems(rows);
+        setStats(st || null);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        // Honest failure — do not fall back to fabricated/sample rows.
+        setError(
+          e?.message ||
+            __t("dashboard.receivingLoadError") ||
+            "Failed to load receiving data",
+        );
+        setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   return (
     <Tile
       title={__t("dashboard.receiving") || "Receiving"}
       action={__t("dashboard.trackOrders") || "Track orders"}
       onAction={() => window.__nav?.("order-tracking")}
     >
-      {items.map((it) => (
-        <div
-          key={it.po}
-          className="flex justify-between items-center gap-8"
-          style={{ padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}
-        >
-          <div>
-            <div className="font-mono fs-11 fw-600">{it.po}</div>
-            <div className="fs-10 fg-3">
-              {it.vendor} · ETA {it.eta}
-            </div>
-          </div>
-          <StatusPill status={it.status} />
+      {items === null ? (
+        <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
+          {__t("common.loading") || "Loading…"}
         </div>
-      ))}
+      ) : items.length === 0 ? (
+        <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
+          {error || __t("dashboard.noReceiving") || "No purchase orders in transit"}
+        </div>
+      ) : (
+        <>
+          {items.map((it) => (
+            <div
+              key={it.id}
+              className="flex justify-between items-center gap-8"
+              style={{ padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}
+            >
+              <div>
+                <div className="font-mono fs-11 fw-600">
+                  {it.po?.poNumber || "PO #" + it.poHeaderId}
+                </div>
+                <div className="fs-10 fg-3">
+                  {it.po?.vendorName ||
+                    __t("orderTracking.unknownVendor") ||
+                    "Unknown vendor"}{" "}
+                  · {__t("dashboard.eta") || "ETA"} {receivingEta(it)}
+                </div>
+              </div>
+              <StatusPill status={receivingStatusLabel(it.currentStage)} />
+            </div>
+          ))}
+          {stats && (
+            <div
+              className="font-mono fs-10 fg-3 pt-6"
+              style={{ borderTop: "1px solid var(--line-soft)" }}
+            >
+              {stats.totalTracked ?? items.length}{" "}
+              {__t("dashboard.tracked") || "tracked"}
+              {stats.overdue
+                ? " · " + stats.overdue + " " + (__t("dashboard.overdue") || "overdue")
+                : ""}
+            </div>
+          )}
+        </>
+      )}
     </Tile>
   );
 }
 // ── Finance: cost rollups / should-cost ─────────────────────────────────────
 function CostRollupTile() {
-  const rows = Object.entries(WORKSPACE_BUDGET.byProject);
+  // rows: null = loading, [] = loaded-but-empty/error, [...] = real per-project rollup
+  const [rows, setRows] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(api?.analytics?.dashboard?.())
+      .then((res) => {
+        if (cancelled) return;
+        const list = Array.isArray(res?.byProject) ? res.byProject : [];
+        setRows(list);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        // Honest failure — do not fall back to fabricated/sample rows.
+        setError(e?.message || "Failed to load cost rollup.");
+        setRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   return (
     <Tile
       title={__t("dashboard.costRollup") || "Cost Rollup by Project"}
       action={__t("nav.analytics") || "Analytics"}
       onAction={() => window.__nav?.("analytics")}
     >
-      {rows.map(([k, p]) => (
-        <div key={k} className="vendor-row">
-          <span className="font-mono">{k}</span>
-          <span>{INR(p.spent + p.committed, 0)}</span>
+      {rows === null ? (
+        <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
+          {__t("common.loading") || "Loading…"}
         </div>
-      ))}
+      ) : rows.length === 0 ? (
+        <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
+          {error || __t("dashboard.noCostData") || "No cost data yet"}
+        </div>
+      ) : (
+        rows.map((p) => (
+          <div key={p.project} className="vendor-row">
+            <span className="font-mono">{p.project}</span>
+            <span>{INR((Number(p.spent) || 0) + (Number(p.committed) || 0), 0)}</span>
+          </div>
+        ))
+      )}
     </Tile>
   );
 }
 function ShouldCostTile() {
-  const items = [
-    { pn: "EL-BMS-12S", quoted: 42.5, should: 36.1 },
-    { pn: "HW-FAS-M3-08", quoted: 0.18, should: 0.14 },
-    { pn: "EL-MCU-STM32H7", quoted: 11.2, should: 10.6 },
-  ];
+  // null = loading, [] = loaded-but-empty/error
+  const [items, setItems] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(api.shouldCost.list({ page: 1, per_page: 5 }))
+      .then((result) => {
+        if (cancelled) return;
+        const rows = Array.isArray(result) ? result : result?.items || [];
+        setItems(rows);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        // Honest failure — do not fall back to fabricated/sample rows.
+        setError(
+          e?.message ||
+            __t("dashboard.shouldCostLoadError") ||
+            "Failed to load should-cost data",
+        );
+        setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   return (
     <Tile
       title={__t("dashboard.shouldCost") || "Should-Cost Variance"}
       action={__t("nav.analytics") || "Analytics"}
       onAction={() => window.__nav?.("analytics")}
     >
-      {items.map((it) => {
-        const delta = ((it.quoted - it.should) / it.should) * 100;
-        return (
-          <div key={it.pn} className="vendor-row">
-            <span className="font-mono">{it.pn}</span>
-            <span style={{ color: delta > 10 ? "var(--danger-text)" : "var(--fg-3)" }}>
-              +{delta.toFixed(0)}%
-            </span>
-          </div>
-        );
-      })}
+      {items === null ? (
+        <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
+          {__t("common.loading") || "Loading…"}
+        </div>
+      ) : items.length === 0 ? (
+        <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
+          {error ||
+            __t("dashboard.noShouldCostData") ||
+            "No should-cost models yet"}
+        </div>
+      ) : (
+        items.map((it) => {
+          const delta = Number(it.variancePct) || 0;
+          const label =
+            it.partNumber ||
+            it.pn ||
+            (it.partId != null ? `Part #${it.partId}` : "—");
+          return (
+            <div key={it.id ?? label} className="vendor-row">
+              <span className="font-mono">{label}</span>
+              <span
+                style={{
+                  color: delta > 10 ? "var(--danger-text)" : "var(--fg-3)",
+                }}
+              >
+                {delta >= 0 ? "+" : ""}
+                {delta.toFixed(0)}%
+              </span>
+            </div>
+          );
+        })
+      )}
     </Tile>
   );
 }

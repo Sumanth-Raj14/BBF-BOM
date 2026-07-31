@@ -71,6 +71,7 @@ from app.models.order_tracking import OrderTracking, ShipmentUpdate, TrackingMil
 from app.models.part import Part
 from app.models.part_country_history import PartCountryHistory, PartVendorPrice
 from app.models.part_custom_field import PartCustomField
+from app.models.part_derivative import PartDerivative
 from app.models.part_lifecycle import LifecycleDefinition, PartLifecycle
 from app.models.part_vendor import PartVendor
 from app.models.permission import Permission
@@ -119,6 +120,9 @@ from app.models.supplier_portal import (
     SupplierUser,
 )
 from app.models.supplier_scorecard import SupplierScorecard
+
+# SolidWorks integration state (property mappings + write-back outbox)
+from app.models.sw_integration import SwPendingChange, SwPropertyMapping
 from app.models.tag import Tag
 from app.models.team import Team, TeamMember
 from app.models.tenant import Tenant

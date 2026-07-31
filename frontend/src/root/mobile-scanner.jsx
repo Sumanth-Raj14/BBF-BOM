@@ -1,7 +1,19 @@
 import { storage } from "../utils/storage.js";
 import { __t } from "../i18n";
+import { toast } from "../utils/toast";
+import { api, INR } from "../globals";
 // Mobile Scanner PWA Screen
 // Provides: barcode scanning via camera, quick part lookup, PO receiving, inventory updates
+// Normalize a Part API response so the UI's field names (unitCost,
+// countryOfOrigin) resolve against the real backend field names (cost, origin).
+function normalizePart(raw) {
+  if (!raw) return null;
+  return {
+    ...raw,
+    unitCost: raw.unitCost ?? raw.cost,
+    countryOfOrigin: raw.countryOfOrigin ?? raw.origin,
+  };
+}
 function MobileScannerScreen() {
   const [mode, setMode] = React.useState("menu"); // menu | scan | lookup | receive | inventory
   const [scanResult, setScanResult] = React.useState(null);
@@ -18,6 +30,32 @@ function MobileScannerScreen() {
   const [poList, setPoList] = React.useState([]);
   const [selectedPo, setSelectedPo] = React.useState(null);
   const [receiveQty, setReceiveQty] = React.useState("");
+  const [defaultWarehouseId, setDefaultWarehouseId] = React.useState(null);
+  const [stockInfo, setStockInfo] = React.useState(null);
+  // Load scan history from the server on mount; the local storage cache
+  // above is only an instant-render/offline fallback, not the source of truth.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const history = await api?.userDataSync?.getScanHistory(20);
+        if (!cancelled && Array.isArray(history)) {
+          const mapped = history.map((h) => ({
+            code: h.barcode,
+            part: h.result,
+            time: h.scanned_at || new Date().toISOString(),
+          }));
+          setRecentScans(mapped);
+          storage.recentScans.set(mapped);
+        }
+      } catch (_e) {
+        // Offline or endpoint unavailable — keep the locally cached list.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Barcode scanning via camera
   const videoRef = React.useRef(null);
   const canvasRef = React.useRef(null);
@@ -57,38 +95,41 @@ function MobileScannerScreen() {
   const lookupPart = React.useCallback(
     async (code) => {
       if (!code) return;
+      const recordScan = (found) => {
+        const scan = { code, part: found, time: new Date().toISOString() };
+        const updated = [
+          scan,
+          ...recentScans.filter((s) => s.code !== code),
+        ].slice(0, 20);
+        setRecentScans(updated);
+        storage.recentScans.set(updated);
+        api?.userDataSync?.addScanEntry(code, found)?.catch(() => {});
+      };
       try {
         const result = await api?.parts?.list({ search: code, limit: 10 });
         const parts = Array.isArray(result) ? result : result?.items || [];
         if (parts.length > 0) {
-          setPartData(parts[0]);
+          const found = normalizePart(parts[0]);
+          setPartData(found);
           setScanResult(code);
-          // Save to recent scans
-          const scan = { code, part: parts[0], time: new Date().toISOString() };
-          const updated = [
-            scan,
-            ...recentScans.filter((s) => s.code !== code),
-          ].slice(0, 20);
-          setRecentScans(updated);
-          storage.recentScans.set(updated);
-        } else {
-          setPartData(null);
-          setScanResult(code);
+          recordScan(found);
+          return;
         }
       } catch (_e) {
-        // Try barcode lookup
-        try {
-          const barcode = await api?.barcodes?.lookup(code);
-          if (barcode) {
-            setPartData(barcode);
-            setScanResult(code);
-          }
-        } catch (_e2) {
-          toast(
-            __t("mobileScan.barcodeLookupFailed") || "Barcode lookup failed",
-            { kind: "error" },
-          );
-        }
+        // Text search failed (offline/server error) — fall through to a
+        // direct barcode lookup before giving up.
+      }
+      // No name/PN/MPN match (or the search call failed above) — barcodes
+      // aren't covered by that text search, so try an exact barcode match.
+      try {
+        const barcode = await api?.barcodes?.lookup(code);
+        const found = normalizePart(barcode);
+        setPartData(found);
+        setScanResult(code);
+        if (found) recordScan(found);
+      } catch (_e2) {
+        setPartData(null);
+        setScanResult(code);
       }
     },
     [recentScans],
@@ -108,7 +149,7 @@ function MobileScannerScreen() {
   // Load POs for receiving
   const loadPOs = React.useCallback(async () => {
     try {
-      const result = await poOrdersAPI?.list({
+      const result = await api?.poOrders?.list({
         status: "Order Placed",
         limit: 50,
       });
@@ -119,10 +160,115 @@ function MobileScannerScreen() {
         { kind: "error" },
       );
     }
+    try {
+      const warehouses = await api?.inventory?.warehouses?.list();
+      const whList = Array.isArray(warehouses)
+        ? warehouses
+        : warehouses?.items || [];
+      if (whList.length > 0) setDefaultWarehouseId(whList[0].id);
+    } catch (_e) {
+      // Receiving needs a warehouse to post the stock increase against; if
+      // none can be loaded the Receive action below fails gracefully.
+    }
   }, []);
+  // Persist a PO-line receipt as a real inventory receipt transaction.
+  // PO line items only carry a free-text name (no partId link), so we
+  // resolve it against the parts catalog by name before posting.
+  const receiveItem = React.useCallback(
+    async (item) => {
+      const qty = Number(receiveQty);
+      if (!qty || qty <= 0) {
+        toast(__t("mobileScan.invalidQty") || "Enter a valid quantity", {
+          kind: "warning",
+        });
+        return;
+      }
+      if (!defaultWarehouseId) {
+        toast(
+          __t("mobileScan.noWarehouse") ||
+            "No warehouse configured — quantity not recorded",
+          { kind: "warning" },
+        );
+        return;
+      }
+      try {
+        const match = await api?.parts?.list({
+          search: item.itemName,
+          limit: 1,
+        });
+        const parts = Array.isArray(match) ? match : match?.items || [];
+        if (parts.length === 0) {
+          toast(
+            (
+              __t("mobileScan.noMatchingPart") ||
+              'No matching part found for "{item}" — quantity not recorded'
+            ).replace("{item}", item.itemName),
+            { kind: "warning" },
+          );
+          return;
+        }
+        await api.inventory.adjust({
+          part_id: parts[0].id,
+          warehouse_id: defaultWarehouseId,
+          quantity: qty,
+          adjustment_type: "receipt",
+          reason: `PO ${selectedPo?.poNumber || ""} receiving (mobile scanner)`,
+        });
+        toast(
+          (__t("mobileScan.receivedToast") || "Received {qty} of {item}")
+            .replace("{qty}", receiveQty)
+            .replace("{item}", item.itemName),
+          { kind: "success" },
+        );
+        setReceiveQty("");
+      } catch (_e) {
+        toast(__t("mobileScan.receiveFailed") || "Failed to record receipt", {
+          kind: "error",
+        });
+      }
+    },
+    [receiveQty, defaultWarehouseId, selectedPo],
+  );
   React.useEffect(() => {
     return () => stopCamera();
   }, [stopCamera]);
+  // Real stock level + MOQ for the Inventory Check screen, keyed off the
+  // currently looked-up part. Missing data degrades gracefully to em-dash
+  // in the render below rather than a fabricated placeholder.
+  React.useEffect(() => {
+    if (mode !== "inventory" || !partData?.id) {
+      setStockInfo(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      let stock = null;
+      let moq = null;
+      try {
+        const inv = await api?.inventory?.list({ part_id: partData.id });
+        const items = Array.isArray(inv) ? inv : inv?.items || [];
+        if (items.length > 0) {
+          stock = items.reduce(
+            (sum, row) => sum + (Number(row.quantity_on_hand) || 0),
+            0,
+          );
+        }
+      } catch (_e) {
+        // Leave stock unknown (em dash) if inventory can't be reached.
+      }
+      try {
+        const pv = await api?.partVendors?.list({ partId: partData.id });
+        const items = Array.isArray(pv) ? pv : pv?.items || [];
+        if (items.length > 0) moq = items[0].vendorMoq ?? null;
+      } catch (_e) {
+        // Leave moq unknown (em dash) if part-vendor data can't be reached.
+      }
+      if (!cancelled) setStockInfo({ stock, moq });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, partData?.id]);
   // Menu screen
   if (mode === "menu") {
     return (
@@ -478,12 +624,24 @@ function MobileScannerScreen() {
             </div>
             <button
               className="btn mt-12"
-              onClick={() =>
-                toast(
-                  __t("mobileScan.addingPart") || "Adding to parts library...",
-                  { kind: "info" },
-                )
-              }
+              onClick={async () => {
+                if (!scanResult) return;
+                try {
+                  const created = await api?.parts?.create({
+                    pn: scanResult,
+                    name: scanResult,
+                    barcode: scanResult,
+                  });
+                  setPartData(normalizePart(created));
+                  toast(__t("mobileScan.partAdded") || "Part added to library", {
+                    kind: "success",
+                  });
+                } catch (_e) {
+                  toast(__t("mobileScan.addPartFailed") || "Failed to add part", {
+                    kind: "error",
+                  });
+                }
+              }}
             >
               {__t("mobileScan.addNewPart") || "Add New Part"}
             </button>
@@ -592,18 +750,7 @@ function MobileScannerScreen() {
                   />
                   <button
                     className="btn small primary"
-                    onClick={() => {
-                      toast(
-                        (
-                          __t("mobileScan.receivedToast") ||
-                          "Received {qty} of {item}"
-                        )
-                          .replace("{qty}", receiveQty)
-                          .replace("{item}", item.itemName),
-                        { kind: "success" },
-                      );
-                      setReceiveQty("");
-                    }}
+                    onClick={() => receiveItem(item)}
                   >
                     {__t("mobileScan.receiveBtn") || "Receive"}
                   </button>
@@ -682,7 +829,10 @@ function MobileScannerScreen() {
               <div className="mt-16 d-grid gap-12 grid-cols-3">
                 <div className="text-center">
                   <div className="fs-20 fw-700">
-                    {partData.stock ?? partData.quantity ?? "\u2014"}
+                    {stockInfo?.stock ??
+                      partData.stock ??
+                      partData.quantity ??
+                      "\u2014"}
                   </div>
                   <div className="fs-9 uppercase fg-3">
                     {__t("mobileScan.inStock") || "In Stock"}
@@ -690,14 +840,16 @@ function MobileScannerScreen() {
                 </div>
                 <div className="text-center">
                   <div className="fs-20 fw-700 fg-accent">
-                    {partData.reorderPoint ?? 10}
+                    {partData.reorderPoint ?? "\u2014"}
                   </div>
                   <div className="fs-9 uppercase fg-3">
                     {__t("mobileScan.reorderPt") || "Reorder Pt"}
                   </div>
                 </div>
                 <div className="text-center">
-                  <div className="fs-20 fw-700">{partData.moq ?? "\u2014"}</div>
+                  <div className="fs-20 fw-700">
+                    {stockInfo?.moq ?? partData.moq ?? "\u2014"}
+                  </div>
                   <div className="fs-9 uppercase fg-3">
                     {__t("mobileScan.moq") || "MOQ"}
                   </div>

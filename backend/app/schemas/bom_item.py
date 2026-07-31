@@ -3,6 +3,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.part_derivative import PartDerivativeResponse
+
 
 class BomItemBase(BaseModel):
     partId: int
@@ -32,6 +34,9 @@ class BomItemResponse(BomItemBase):
     id: int
     bomTemplateId: int
     createdAt: datetime
+    # CAD derivative links for this line's part, populated by the
+    # /bom-items/{item_id} endpoint (not the list endpoint, to avoid N+1).
+    derivatives: list[PartDerivativeResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 

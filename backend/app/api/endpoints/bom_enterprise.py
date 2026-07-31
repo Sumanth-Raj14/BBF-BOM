@@ -165,6 +165,11 @@ async def get_cost_rollup(bom_id: int, db: AsyncSession = Depends(get_db)):
     return await bom_service.get_cost_rollup(db, bom_id)
 
 
+@router.get("/{bom_id}/mass-rollup")
+async def get_mass_rollup(bom_id: int, db: AsyncSession = Depends(get_db)):
+    return await bom_service.get_mass_rollup(db, bom_id)
+
+
 @router.get("/{bom_id}/items")
 async def list_bom_items(bom_id: int, db: AsyncSession = Depends(get_db)):
     return await bom_service.list_bom_items(db, bom_id)

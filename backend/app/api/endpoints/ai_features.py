@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,7 @@ from app.schemas.ai_schemas import (
     DemandForecastResponse,
     InterchangeabilityAnalyzeRequest,
     InterchangeabilityListResponse,
+    InterchangeabilityStatusUpdate,
     InterchangeabilitySuggestionResponse,
     ValidationListResponse,
     ValidationResultResponse,
@@ -289,6 +290,43 @@ async def list_interchangeability(
     ]
 
     return result
+
+
+@router.put(
+    "/interchangeability/{suggestion_id}",
+    response_model=InterchangeabilitySuggestionResponse,
+)
+async def update_interchangeability_status(
+    suggestion_id: int,
+    data: InterchangeabilityStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Record a reviewer decision (approved/rejected/reviewed) on an
+    interchangeability suggestion — used by the "Find alternates" modal's
+    swap action so accepting an alternate persists instead of being a
+    client-only toast."""
+    result = await db.execute(
+        select(InterchangeabilitySuggestion).where(
+            InterchangeabilitySuggestion.id == suggestion_id,
+            InterchangeabilitySuggestion.tenantId == current_user.tenantId,
+        )
+    )
+    suggestion = result.scalar_one_or_none()
+    if not suggestion:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    suggestion.status = data.status
+    await db.commit()
+    await db.refresh(suggestion)
+    return InterchangeabilitySuggestionResponse(
+        id=suggestion.id,
+        partId=suggestion.partId,
+        suggestedPartId=suggestion.suggestedPartId,
+        score=suggestion.score,
+        reason=suggestion.reason,
+        status=suggestion.status,
+        createdAt=str(suggestion.createdAt) if suggestion.createdAt else None,
+    )
 
 
 # --- Validation ---

@@ -115,10 +115,14 @@ async def get_documents(
     category: Optional[str] = None,
     folder: Optional[str] = None,
     search: Optional[str] = None,
+    partId: Optional[int] = None,
+    projectId: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await document_service.list_documents(db, page, category, folder, search)
+    return await document_service.list_documents(
+        db, page, category, folder, search, part_id=partId, project_id=projectId
+    )
 
 
 @router.post("/upload", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)

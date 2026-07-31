@@ -3,6 +3,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.part_derivative import PartDerivativeResponse
+
 
 class PartBase(BaseModel):
     pn: str = Field(..., json_schema_extra={"example": "EL-MCU-STM32H7"})
@@ -105,6 +107,10 @@ class PartResponse(PartBase):
     id: int
     createdAt: datetime
     updatedAt: Optional[datetime] = None
+    # CAD derivative links (PDF/STEP/DWG/DXF/other), populated by the
+    # /parts/{part_id} endpoint. Empty by default so list endpoints that
+    # don't populate it (no per-row lookup, to avoid N+1) still validate.
+    derivatives: list[PartDerivativeResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
