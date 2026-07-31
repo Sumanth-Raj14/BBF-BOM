@@ -13,11 +13,13 @@ export default function OCRScreen() {
   const [loading, setLoading] = React.useState(false);
   const [docId, setDocId] = React.useState(null);
   const [partPn, setPartPn] = React.useState(null);
+  const [partId, setPartId] = React.useState(null);
+  const [rawText, setRawText] = React.useState(null);
   const fileInputRef = React.useRef(null);
 
-  const runExtraction = React.useCallback((documentId, partId) => {
+  const runExtraction = React.useCallback((documentId, pId) => {
     setLoading(true);
-    (api?.ocr?.extract?.(documentId, partId) || Promise.resolve(null))
+    (api?.ocr?.extract?.(documentId, pId) || Promise.resolve(null))
       .then((data) => {
         if (data && data.fields) {
           setExtracted(
@@ -27,8 +29,9 @@ export default function OCRScreen() {
               conf: f.confidence,
             })),
           );
-          setDocId(data.documentId);
-          setPartPn(data.partPn);
+          setDocId(data.documentId ?? null);
+          setPartPn(data.partPn ?? null);
+          setRawText(data.raw_text_preview || data.rawTextPreview || null);
         }
       })
       .catch((err) => {
@@ -43,45 +46,99 @@ export default function OCRScreen() {
 
   const reextract = () => {
     setReextracting(true);
-    runExtraction(docId, null);
+    runExtraction(docId, partId);
     setTimeout(() => setReextracting(false), 1100);
   };
 
-  const confirm = () => {
-    setConfirmed(true);
-    if (ctx?.setNotifications) {
-      ctx.setNotifications([
-        {
-          id: Date.now(),
-          who: "System",
-          init: "⌌",
-          color: "sys",
-          action: "OCR applied to",
-          obj: partPn || "part",
-          time: "just now",
-          read: false,
-          route: "bom",
-        },
-        ...ctx.notifications,
-      ]);
+  const confirm = async () => {
+    // The confirm/apply persists extracted fields onto a real Part record
+    // (api.ocr.confirm -> /ocr/confirm), so we need a numeric part id. The
+    // extraction response only gives us a part number string (partPn) or,
+    // failing that, whatever the "Part Number" field itself extracted — so
+    // resolve that to an id via a part search before persisting.
+    const candidatePn =
+      partPn ||
+      extracted.find(
+        (f) => f.label === "Part Number" && f.value && f.value !== "Not detected",
+      )?.value ||
+      null;
+
+    let targetPartId = partId;
+    if (!targetPartId && candidatePn && api?.parts?.list) {
+      try {
+        const res = await api.parts.list({ search: candidatePn });
+        const match = res?.items?.[0];
+        if (match?.id) targetPartId = match.id;
+      } catch (err) {
+        console.warn("[OCRScreen] part lookup failed:", err?.message || err);
+      }
     }
-    toast(
-      extracted.length +
-        " " +
-        (__t("ocr.fieldsApplied") || "fields applied to part") +
-        " " +
-        (partPn || __t("ocr.part") || "part") +
-        " · " +
-        (__t("ocr.auditLogged") || "audit logged"),
-      {
-        kind: "success",
-        action: {
-          label: __t("ocr.openPart") || "Open part",
-          onClick: () => window.__nav?.("bom"),
+
+    if (!targetPartId) {
+      toast(
+        (__t("ocr.noMatchingPart") || "No matching part found for ") +
+          (candidatePn || __t("ocr.thisDatasheet") || "this datasheet") +
+          " — " +
+          (__t("ocr.nothingApplied") || "nothing was applied"),
+        { kind: "warn" },
+      );
+      return;
+    }
+
+    setConfirmed(true);
+    try {
+      const data = await (api?.ocr?.confirm
+        ? api.ocr.confirm(
+            targetPartId,
+            extracted.map((e) => ({ label: e.label, value: e.value })),
+          )
+        : Promise.resolve(null));
+
+      setPartId(targetPartId);
+      const appliedPn = data?.partPn || candidatePn;
+      if (appliedPn) setPartPn(appliedPn);
+
+      if (ctx?.setNotifications) {
+        ctx.setNotifications([
+          {
+            id: Date.now(),
+            who: "System",
+            init: "⌌",
+            color: "sys",
+            action: "OCR applied to",
+            obj: appliedPn || "part",
+            time: "just now",
+            read: false,
+            route: "bom",
+          },
+          ...ctx.notifications,
+        ]);
+      }
+      toast(
+        (data?.updatedFields?.length ?? extracted.length) +
+          " " +
+          (__t("ocr.fieldsApplied") || "fields applied to part") +
+          " " +
+          (appliedPn || __t("ocr.part") || "part") +
+          " · " +
+          (__t("ocr.auditLogged") || "audit logged"),
+        {
+          kind: "success",
+          action: {
+            label: __t("ocr.openPart") || "Open part",
+            onClick: () => window.__nav?.("bom"),
+          },
         },
-      },
-    );
-    setTimeout(() => setConfirmed(false), 1500);
+      );
+    } catch (err) {
+      toast(
+        (__t("ocr.applyFailed") || "Failed to apply fields: ") +
+          (err?.message || __t("ocr.backendError") || "backend error"),
+        { kind: "error" },
+      );
+    } finally {
+      setTimeout(() => setConfirmed(false), 1500);
+    }
   };
 
   const updateField = (i, value) => {
@@ -101,6 +158,7 @@ export default function OCRScreen() {
       api.ocr
         .upload(file)
         .then((data) => {
+          setRawText(data?.raw_text_preview || data?.rawTextPreview || null);
           if (data && data.fields && data.fields.length > 0) {
             setExtracted(
               data.fields.map((f) => ({
@@ -111,13 +169,12 @@ export default function OCRScreen() {
             );
             setDocId(data.documentId || null);
             setPartPn(data.partPn || null);
+            setPartId(data.partId || null);
           } else {
+            setDocId(data.documentId || null);
+            setPartPn(data.partPn || null);
+            setPartId(data.partId || null);
             setExtracted([
-              {
-                label: __t("ocr.fieldPartNumber") || "Part Number",
-                value: file.name.replace(/\.[^.]+$/, ""),
-                conf: 0.5,
-              },
               {
                 label: __t("ocr.fieldStatus") || "Status",
                 value:
@@ -144,11 +201,6 @@ export default function OCRScreen() {
           );
           setExtracted([
             {
-              label: __t("ocr.fieldPartNumber") || "Part Number",
-              value: file.name.replace(/\.[^.]+$/, ""),
-              conf: 0.5,
-            },
-            {
               label: __t("ocr.fieldError") || "Error",
               value: err.message || __t("ocr.uploadFailed") || "Upload failed",
               conf: 0,
@@ -157,40 +209,15 @@ export default function OCRScreen() {
         })
         .finally(() => setLoading(false));
     } else {
-      setTimeout(() => {
-        setExtracted([
-          {
-            label: __t("ocr.fieldPartNumber") || "Part Number",
-            value: file.name.replace(/\.[^.]+$/, ""),
-            conf: 0.95,
-          },
-          {
-            label: __t("ocr.fieldDescription") || "Description",
-            value: (__t("ocr.uploaded") || "Uploaded: ") + file.name,
-            conf: 0.88,
-          },
-          {
-            label: __t("ocr.fieldManufacturer") || "Manufacturer",
-            value: "—",
-            conf: 0,
-          },
-          {
-            label: __t("ocr.fieldPackage") || "Package",
-            value: "—",
-            conf: 0,
-          },
-          {
-            label: __t("ocr.fieldVoltage") || "Voltage",
-            value: "—",
-            conf: 0,
-          },
-        ]);
-        setLoading(false);
-        toast(
-          __t("ocr.mockBackendOffline") || "Mock OCR — backend offline",
-          { kind: "warn" },
-        );
-      }, 1200);
+      // api.ocr.upload is always provided by the real API client — this
+      // branch only guards against it being unavailable (e.g. not yet
+      // loaded). Never fabricate extracted data in that case.
+      setLoading(false);
+      toast(
+        __t("ocr.uploadUnavailable") ||
+          "OCR upload is unavailable right now — please try again",
+        { kind: "error" },
+      );
     }
     e.target.value = "";
   };
@@ -247,7 +274,14 @@ export default function OCRScreen() {
 
       <div className="ocr-grid" style={{ minHeight: 520 }}>
         <div className="ocr-doc">
+          {rawText ? (
+            <div className="ocr-text">{rawText}</div>
+          ) : (
           <div className="ocr-text">
+            <div className="fs-11" style={{ opacity: 0.6, marginBottom: 8 }}>
+              {(__t("ocr.sampleLabel") ||
+                "Sample preview — upload a datasheet to see real extracted text")}
+            </div>
             {`STM32H743VIT6
 HIGH-PERFORMANCE MCU WITH ARM CORTEX-M7
 
@@ -306,6 +340,7 @@ RoHS: `}
             {`
 REACH: Compliant`}
           </div>
+          )}
         </div>
 
         <Card title={__t("ocr.extractedFields") || "Extracted Fields"}>

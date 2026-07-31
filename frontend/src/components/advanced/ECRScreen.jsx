@@ -35,6 +35,84 @@ const APPROVAL_TONE = {
   pending: "var(--bg-subtle)",
 };
 
+// Maps app.models.eco.EcoHeader's real `status`/`impact_level` enums onto
+// this screen's ECR vocabulary, for the load-on-mount backend merge below.
+// "closed" has no ECR equivalent (terminal, post-implementation) so it
+// folds into "Implemented"; "cancelled" is the closest backend analogue of
+// "Rejected" (perform_eco_action's own "reject" action instead sends the
+// ECO back to "draft" for rework — see the reject-sync comment in
+// updateStatus — so a rejected-and-not-yet-resubmitted ECO round-trips as
+// "Draft", which is honest, not a bug).
+const ECO_STATUS_TO_ECR = {
+  draft: "Draft",
+  review: "Review",
+  approved: "Approved",
+  implemented: "Implemented",
+  closed: "Implemented",
+  cancelled: "Rejected",
+};
+const ECO_IMPACT_TO_ECR = { minor: "low", major: "med", critical: "high" };
+
+function approvalsForEcoStatus(status) {
+  if (status === "Approved" || status === "Implemented") {
+    return { eng: "approved", proc: "approved", fin: "approved" };
+  }
+  if (status === "Rejected") {
+    return { eng: "rejected", proc: "rejected", fin: "rejected" };
+  }
+  return { eng: "pending", proc: "pending", fin: "pending" };
+}
+
+// Backend EcoHeader -> local ECR row shape. The ECO model has no
+// project/cost_impact/items_affected columns at all, so those are left at
+// honest, neutral placeholders here rather than fabricated — see
+// needs_followup in the wiring notes for this screen.
+function mapEcoToEcr(eco) {
+  const status = ECO_STATUS_TO_ECR[eco.status] || "Draft";
+  return {
+    id: eco.eco_number || `ECO-${eco.id}`,
+    title: eco.title || "Untitled change",
+    project: "—",
+    impact: ECO_IMPACT_TO_ECR[eco.impact_level] || "med",
+    status,
+    requester: eco.requested_by != null ? `User #${eco.requested_by}` : "—",
+    date: (eco.requested_at || eco.created_at || "").slice(0, 10) || "—",
+    cost_impact: 0,
+    items_affected: 0,
+    approvals: approvalsForEcoStatus(status),
+    ecoId: eco.id,
+  };
+}
+
+// Merges a real backend ECO list into the local-first ECR rows: refreshes
+// the fields the backend actually owns (status/title/approvals) on any row
+// already linked to a real ecoId, and appends backend ECOs with no local
+// counterpart (e.g. created from another screen/session) mapped via
+// mapEcoToEcr. Local-only enrichment (project/cost_impact/items_affected)
+// on already-known rows is left untouched rather than clobbered with
+// mapEcoToEcr's placeholders.
+function mergeBackendEcos(current, ecoRows) {
+  const knownEcoIds = new Set(
+    current.map((e) => e.ecoId).filter((id) => id != null),
+  );
+  const refreshed = current.map((e) => {
+    if (e.ecoId == null) return e;
+    const eco = ecoRows.find((row) => row.id === e.ecoId);
+    if (!eco) return e;
+    const mapped = mapEcoToEcr(eco);
+    return {
+      ...e,
+      status: mapped.status,
+      title: mapped.title,
+      approvals: mapped.approvals,
+    };
+  });
+  const additions = ecoRows
+    .filter((eco) => !knownEcoIds.has(eco.id))
+    .map(mapEcoToEcr);
+  return [...additions, ...refreshed];
+}
+
 function ApprovalDot({ role, value }) {
   return (
     <span
@@ -140,6 +218,31 @@ function ECRScreen() {
   React.useEffect(() => {
     storage.ecrs.set(ecrs);
   }, [ecrs]);
+
+  // Load-on-mount backend sync: the local-first storage/demo data above
+  // renders immediately (offline-first — see project local-first
+  // principle), and this enriches it with the real ECO list once the
+  // network responds. Silent no-op if api.eco.list is unavailable, the
+  // backend is unreachable, or it has nothing yet — never replaces the
+  // local-first data with a hard failure or an empty screen.
+  React.useEffect(() => {
+    if (!api?.eco?.list) return undefined;
+    let cancelled = false;
+    api.eco
+      .list({ per_page: 200 })
+      .then((res) => {
+        if (cancelled) return;
+        const rows = Array.isArray(res) ? res : res?.items || [];
+        if (!rows.length) return;
+        setEcrs((cur) => mergeBackendEcos(cur, rows));
+      })
+      .catch(() => {
+        // Offline / backend unreachable — local-first data stands as-is.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const counts = ecrs.reduce((a, e) => {
     a[e.status] = (a[e.status] || 0) + 1;
     return a;
@@ -293,6 +396,22 @@ function ECRScreen() {
         // Honest failure: local status still advances; a later Approve
         // attempt will surface the real backend conflict via ESignDialog
         // rather than silently succeeding.
+      });
+    }
+    // Reject isn't signature-gated (see ESIGN_ACTIONS above) but the
+    // backend still needs to hear about it — perform_eco_action's "reject"
+    // sends the ECO back to "draft" for rework rather than a dead-end
+    // status, which is why the load-on-mount merge folds a still-"draft"
+    // ECO back to "Draft" rather than "Rejected" once resynced. Same
+    // best-effort/fire-and-forget contract as the submit sync above.
+    if (
+      action === "reject" &&
+      prevEcr?.status === "Review" &&
+      prevEcr.ecoId != null &&
+      api?.eco?.action
+    ) {
+      api.eco.action(prevEcr.ecoId, { action: "reject" }).catch(() => {
+        // Honest failure — local status still reflects the user's intent.
       });
     }
   };

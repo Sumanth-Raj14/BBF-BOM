@@ -1,4 +1,4 @@
-import PropTypes from "prop-types";
+﻿import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
@@ -7,25 +7,79 @@ import {
   Icon,
   INR,
   analyticsAPI,
+  vendorsAPI,
+  procurementAPI,
   downloadBlob,
   useAppStore,
 } from "../../globals";
 import { Button, Menu, ScreenHeader } from "../ui";
+
+const RANGE_TO_API = {
+  "1 mo": "1mo",
+  "3 mo": "3mo",
+  "6 mo": "6mo",
+  "1 yr": "1yr",
+  "All time": "1yr",
+};
+
+const COUNTRY_NAMES = {
+  US: "United States",
+  CN: "China",
+  JP: "Japan",
+  TW: "Taiwan",
+  FR: "France",
+  AT: "Austria",
+  DE: "Germany",
+};
+
+const CATEGORY_COLORS = [
+  "oklch(0.55 0.13 240)",
+  "oklch(0.55 0.13 320)",
+  "oklch(0.55 0.08 60)",
+  "oklch(0.55 0.10 280)",
+  "oklch(0.55 0.10 145)",
+  "oklch(0.55 0.10 20)",
+  "oklch(0.55 0.10 200)",
+  "var(--fg-3)",
+];
+
+function riskBucket(rating) {
+  const r = typeof rating === "number" ? rating : 0;
+  if (r <= 0) return null;
+  if (r < 2.5) return "High";
+  if (r < 4) return "Med";
+  return "Low";
+}
+
 // ============ ANALYTICS ============
 export default function AnalyticsScreen({ data }) {
   const ctx = useAppStore();
   const [range, setRange] = React.useState("6 mo");
   const [apiData, setApiData] = React.useState(null);
+  const [vendorScorecards, setVendorScorecards] = React.useState(null);
+  const [vendorList, setVendorList] = React.useState(null);
+  const [procurementItems, setProcurementItems] = React.useState(null);
+  const [trend, setTrend] = React.useState(null);
   const [, setLoading] = React.useState(false);
+  const [, setTrendLoading] = React.useState(false);
 
   // Load analytics from API on mount
   React.useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([analyticsAPI?.dashboard(), analyticsAPI?.categories()])
-      .then(([dash, cats]) => {
+    Promise.all([
+      analyticsAPI?.dashboard(),
+      analyticsAPI?.categories(),
+      analyticsAPI?.vendorScorecards?.(),
+      vendorsAPI?.list?.({ per_page: 500 }),
+      procurementAPI?.list?.({ per_page: 500 }),
+    ])
+      .then(([dash, cats, scorecards, vendorsRes, procRes]) => {
         if (!cancelled) {
           setApiData({ dashboard: dash, categories: cats });
+          setVendorScorecards(Array.isArray(scorecards) ? scorecards : []);
+          setVendorList(Array.isArray(vendorsRes?.items) ? vendorsRes.items : []);
+          setProcurementItems(Array.isArray(procRes?.items) ? procRes.items : []);
           setLoading(false);
         }
       })
@@ -37,100 +91,161 @@ export default function AnalyticsScreen({ data }) {
     };
   }, []);
 
-  // Range-dependent data
-  const rangeData = {
-    "1 mo": {
-      months: ["W1", "W2", "W3", "W4"],
-      costs: [4126, 4150, 4180, 4218],
-      delta: "+2.2%",
-    },
-    "3 mo": {
-      months: ["Mar", "Apr", "May"],
-      costs: [4040, 4126, 4218],
-      delta: "+4.4%",
-    },
-    "6 mo": {
-      months: ["Dec", "Jan", "Feb", "Mar", "Apr", "May"],
-      costs: [3820, 3905, 3960, 4040, 4126, 4218],
-      delta: "+10.4%",
-    },
-    "1 yr": {
-      months: ["Jun", "Aug", "Oct", "Dec", "Feb", "Apr"],
-      costs: [3650, 3720, 3780, 3820, 3960, 4218],
-      delta: "+15.6%",
-    },
-    "All time": {
-      months: [
-        "2024",
-        "Q3'24",
-        "Q4'24",
-        "2025",
-        "Q1'25",
-        "Q2'25",
-        "Q3'25",
-        "Q4'25",
-        "Q1'26",
-        "2026",
-      ],
-      costs: [3200, 3340, 3480, 3520, 3650, 3780, 3820, 3960, 4126, 4218],
-      delta: "+31.8%",
-    },
-  };
-  const { months, costs, delta } = rangeData[range] || rangeData["6 mo"];
+  // Range-dependent BOM cost trend from API
+  React.useEffect(() => {
+    let cancelled = false;
+    setTrendLoading(true);
+    Promise.resolve(analyticsAPI?.trends?.(RANGE_TO_API[range] || "6mo"))
+      .then((res) => {
+        if (!cancelled) {
+          setTrend(Array.isArray(res?.data) ? res.data : []);
+          setTrendLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTrend([]);
+          setTrendLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
+  // Range-dependent data — sourced from analyticsAPI.trends(); empty when the
+  // API has no cost history yet (no fabricated series).
+  const hasTrend = Array.isArray(trend) && trend.length > 0;
+  const months = hasTrend ? trend.map((t) => t.month) : [];
+  const costs = hasTrend ? trend.map((t) => t.avgCost) : [];
+  const delta =
+    hasTrend && trend.length > 1 && trend[0].avgCost
+      ? (((costs[costs.length - 1] - costs[0]) / trend[0].avgCost) * 100 >= 0
+          ? "+"
+          : "") +
+        (((costs[costs.length - 1] - costs[0]) / trend[0].avgCost) * 100).toFixed(1) +
+        "%"
+      : "—";
+
+  // Derived KPI inputs \u2014 all sourced from apiData/vendorList/vendorScorecards
+  // (real API responses) or the live BOM store; "\u2014" when there isn't enough
+  // data yet rather than a fabricated number.
+  const bomParts = (ctx?.rows || BOM_DATA.rows)[0].children.flatMap(
+    (s) => s.children || [],
+  );
+  const duplicatesCount = bomParts.filter((p) => p.dupOf).length;
+
+  const vendorsWithLead = (vendorList || []).filter(
+    (v) => typeof v.leadTime === "number" && v.leadTime > 0,
+  );
+  const avgLeadDays = vendorsWithLead.length
+    ? Math.round(
+        vendorsWithLead.reduce((s, v) => s + v.leadTime, 0) /
+          vendorsWithLead.length,
+      )
+    : null;
+
+  const activeVendors = (vendorList || []).filter((v) => v.active !== false);
+  const preferredCount = activeVendors.filter(
+    (v) => (v.reliabilityRating || 0) >= 4,
+  ).length;
+  const totalVendorCount =
+    apiData?.dashboard?.totalVendors ??
+    (vendorList ? vendorList.length : null);
+
+  const vendorCountryRisk = {};
+  const riskOrder = { High: 0, Med: 1, Low: 2 };
+  (vendorList || []).forEach((v) => {
+    const bucket = riskBucket(v.reliabilityRating);
+    if (!v.country || !bucket) return;
+    if (
+      !vendorCountryRisk[v.country] ||
+      riskOrder[bucket] < riskOrder[vendorCountryRisk[v.country]]
+    ) {
+      vendorCountryRisk[v.country] = bucket;
+    }
+  });
+  const countryRiskValues = Object.values(vendorCountryRisk);
+  const highRiskCountries = countryRiskValues.filter(
+    (r) => r === "High",
+  ).length;
+  const overallCountryRisk = countryRiskValues.length
+    ? countryRiskValues.includes("High")
+      ? "High"
+      : countryRiskValues.includes("Med")
+        ? "Med"
+        : "Low"
+    : null;
+
+  const onTimeRates = (vendorScorecards || [])
+    .map((v) => v.onTimeRate)
+    .filter((v) => typeof v === "number");
+  const avgOnTimeRate = onTimeRates.length
+    ? onTimeRates.reduce((s, v) => s + v, 0) / onTimeRates.length
+    : null;
 
   const baseKpis = [
     {
       l: __t("analytics.totalParts") || "Total Parts",
-      v: apiData?.dashboard?.totalParts?.toLocaleString() || "1,284",
-      d: "+12",
+      v:
+        apiData?.dashboard?.totalParts != null
+          ? apiData.dashboard.totalParts.toLocaleString()
+          : "\u2014",
+      d: "\u2014",
       up: false,
     },
     {
       l: __t("analytics.activeBoms") || "Active BOMs",
-      v: apiData?.dashboard?.totalPOs?.toString() || "23",
-      d: "+2",
+      v:
+        apiData?.dashboard?.totalPOs != null
+          ? apiData.dashboard.totalPOs.toString()
+          : "\u2014",
+      d: "\u2014",
       up: false,
     },
     {
       l: __t("analytics.currentBomCost") || "Current BOM Cost",
-      v: INR(costs[costs.length - 1], 0),
+      v: hasTrend ? INR(costs[costs.length - 1], 0) : "\u2014",
       d: delta,
-      up: true,
+      up: delta.startsWith("+"),
     },
     {
       l: __t("analytics.avgLead") || "Avg Lead",
-      v: "21d",
-      d: range === "1 mo" ? "+1d" : "+3d",
-      up: true,
+      v: avgLeadDays != null ? avgLeadDays + "d" : "\u2014",
+      d: "\u2014",
+      up: false,
     },
     {
       l: __t("analytics.preferredVendors") || "Preferred Vendors",
-      v: "8 / " + (apiData?.dashboard?.totalVendors || 14),
+      v:
+        totalVendorCount != null
+          ? preferredCount + " / " + totalVendorCount
+          : "\u2014",
       d: "\u2014",
       up: false,
     },
     {
       l: __t("analytics.countryRisk") || "Country Risk",
-      v: "Med",
-      d: "3 high",
-      up: true,
+      v: overallCountryRisk || "\u2014",
+      d: highRiskCountries ? highRiskCountries + " high" : "\u2014",
+      up: overallCountryRisk === "High",
     },
     {
       l: __t("analytics.duplicatesFlagged") || "Duplicates Flagged",
-      v: "5",
-      d: "\u22122",
+      v: String(duplicatesCount),
+      d: "\u2014",
       up: false,
     },
     {
       l: __t("analytics.onTimePoRate") || "On-time PO Rate",
-      v: range === "All time" ? "89%" : "94%",
-      d: range === "All time" ? "\u22123.4%" : "+1.2%",
-      up: range === "All time",
+      v: avgOnTimeRate != null ? avgOnTimeRate.toFixed(1) + "%" : "\u2014",
+      d: "\u2014",
+      up: false,
     },
   ];
 
-  const max = Math.max(...costs),
-    min = Math.min(...costs);
+  const max = hasTrend ? Math.max(...costs) : 0;
+  const min = hasTrend ? Math.min(...costs) : 0;
 
   return (
     <div className="screen-wrap">
@@ -194,6 +309,14 @@ export default function AnalyticsScreen({ data }) {
                   icon: <Icon.Doc size={11} />,
                   label: __t("analytics.pdfReport") || "PDF report",
                   onSelect: () => {
+                  if (!hasTrend) {
+                    toast(
+                      __t("analytics.noTrendData") ||
+                        "No BOM cost history available for this range",
+                      { kind: "warn" },
+                    );
+                    return;
+                  }
                   toast(
                     __t("analytics.generatingPdf") || "Generating PDF\u2026",
                   );
@@ -227,6 +350,14 @@ export default function AnalyticsScreen({ data }) {
                   icon: <Icon.Doc size={11} />,
                   label: __t("analytics.pngCharts") || "PNG charts",
                   onSelect: () => {
+                  if (!hasTrend) {
+                    toast(
+                      __t("analytics.noTrendData") ||
+                        "No BOM cost history available for this range",
+                      { kind: "warn" },
+                    );
+                    return;
+                  }
                   toast(
                     __t("analytics.generatingChart") ||
                       "Generating chart image\u2026",
@@ -331,6 +462,14 @@ export default function AnalyticsScreen({ data }) {
                   icon: <Icon.Doc size={11} />,
                   label: __t("analytics.csvData") || "CSV data",
                   onSelect: () => {
+                  if (!hasTrend) {
+                    toast(
+                      __t("analytics.noTrendData") ||
+                        "No BOM cost history available for this range",
+                      { kind: "warn" },
+                    );
+                    return;
+                  }
                   downloadBlob &&
                     downloadBlob(
                       "month,cost_usd\n" +
@@ -386,11 +525,22 @@ export default function AnalyticsScreen({ data }) {
               {__t("analytics.bomCost") || "BOM cost"} ·{" "}
               {__t("analytics.last") || "last"} {range}
             </h3>
-            <span className="hint">
-              {delta} vs {months[0]}
-            </span>
+            {hasTrend && (
+              <span className="hint">
+                {delta} vs {months[0]}
+              </span>
+            )}
           </div>
           <div className="trend">
+            {!hasTrend ? (
+              <div
+                style={{ padding: 24 }}
+                className="text-center fg-3 font-mono fs-11"
+              >
+                {__t("analytics.noTrendData") ||
+                  "No BOM cost history available for this range"}
+              </div>
+            ) : (
             <svg viewBox="0 0 600 180" className="w-100p h-180">
               {[0, 1, 2, 3].map((i) => (
                 <line
@@ -423,7 +573,8 @@ export default function AnalyticsScreen({ data }) {
                 const x0 = 40;
                 const range = max - min || 1;
                 const pts = costs.map((v, i) => {
-                  const x = x0 + (i / (costs.length - 1)) * w;
+                  const frac = costs.length > 1 ? i / (costs.length - 1) : 0;
+                  const x = x0 + frac * w;
                   const y = pad + (1 - (v - min) / range) * (h - pad);
                   return [x, y];
                 });
@@ -470,6 +621,7 @@ export default function AnalyticsScreen({ data }) {
                 );
               })()}
             </svg>
+            )}
           </div>
         </div>
 
@@ -477,97 +629,113 @@ export default function AnalyticsScreen({ data }) {
           <div className="card-h">
             <h3>{__t("analytics.costByCategory") || "Cost by category"}</h3>
           </div>
-          <div
-            style={{ gridTemplateColumns: "1fr 1fr", padding: 12 }}
-            className="gap-12 d-grid"
-          >
-            <div>
-              <svg
-                viewBox="0 0 100 100"
-                className="w-100p d-block"
-                style={{ maxWidth: 160, margin: "0 auto" }}
-              >
-                {(() => {
-                  const cats = [
-                    { l: "Electrical", v: 38, c: "oklch(0.55 0.13 240)" },
-                    { l: "Optical", v: 24, c: "oklch(0.55 0.13 320)" },
-                    { l: "Mechanical", v: 19, c: "oklch(0.55 0.08 60)" },
-                    { l: "Cable", v: 11, c: "oklch(0.55 0.10 280)" },
-                    { l: "Hardware", v: 5, c: "oklch(0.55 0.10 145)" },
-                    { l: "Other", v: 3, c: "var(--fg-3)" },
-                  ];
-                  const total = cats.reduce((s, c) => s + c.v, 0);
-                  const r = 38,
-                    cx = 50,
-                    cy = 50;
-                  let cum = 0;
-                  return cats.map((c, i) => {
-                    const a1 = (cum / total) * 360;
-                    cum += c.v;
-                    const a2 = (cum / total) * 360;
-                    const toRad = (d) => ((d - 90) * Math.PI) / 180;
-                    const x1 = cx + r * Math.cos(toRad(a1));
-                    const y1 = cy + r * Math.sin(toRad(a1));
-                    const x2 = cx + r * Math.cos(toRad(a2));
-                    const y2 = cy + r * Math.sin(toRad(a2));
-                    const large = a2 - a1 > 180 ? 1 : 0;
-                    const d = `M${cx} ${cy} L${x1.toFixed(1)} ${y1.toFixed(1)} A${r} ${r} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`;
-                    return (
-                      <path
-                        key={"slice-" + i}
-                        d={d}
-                        fill={c.c}
-                        stroke="var(--bg)"
-                        strokeWidth="0.5"
-                      />
-                    );
-                  });
-                })()}
-                <circle cx="50" cy="50" r="18" fill="var(--bg)" />
-                <text
-                  x="50"
-                  y="47"
-                  textAnchor="middle"
-                  fontSize="10"
-                  fontWeight="700"
-                  fill="var(--fg)"
-                >
-                  ₹{((4218.4 * (window.INR_RATE || 83)) / 100000).toFixed(1)}L
-                </text>
-                <text
-                  x="50"
-                  y="58"
-                  textAnchor="middle"
-                  fontSize="5"
-                  fill="var(--fg-3)"
-                >
-                  {__t("analytics.totalBom") || "Total BOM"}
-                </text>
-              </svg>
-            </div>
-            <div className="flex gap-6 flex-col justify-center">
-              {[
-                { l: "Electrical", v: 38, c: "oklch(0.55 0.13 240)" },
-                { l: "Optical", v: 24, c: "oklch(0.55 0.13 320)" },
-                { l: "Mechanical", v: 19, c: "oklch(0.55 0.08 60)" },
-                { l: "Cable", v: 11, c: "oklch(0.55 0.10 280)" },
-                { l: "Hardware", v: 5, c: "oklch(0.55 0.10 145)" },
-                { l: "Other", v: 3, c: "var(--fg-3)" },
-              ].map((c) => (
+          {(() => {
+            const rawCats = Array.isArray(apiData?.categories)
+              ? apiData.categories
+              : [];
+            const cats = rawCats
+              .filter((c) => (c.totalCost || 0) > 0)
+              .map((c, i) => ({
+                l: c.category || "Other",
+                cost: c.totalCost || 0,
+                c: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
+              }));
+            const totalCost = cats.reduce((s, c) => s + c.cost, 0);
+            if (!cats.length || totalCost <= 0) {
+              return (
                 <div
-                  key={c.l}
-                  className="flex items-center gap-6 font-mono fs-10"
+                  style={{ padding: 24 }}
+                  className="text-center fg-3 font-mono fs-11"
                 >
-                  <span
-                    style={{ background: c.c }}
-                    className="flex-shrink-0 w-8 h-8 br-2"
-                  />
-                  <span className="flex-1">{c.l}</span>
-                  <span className="fw-600">{c.v}%</span>
+                  {__t("analytics.noCategoryData") ||
+                    "No category cost data available"}
                 </div>
-              ))}
-            </div>
-          </div>
+              );
+            }
+            return (
+              <div
+                style={{ gridTemplateColumns: "1fr 1fr", padding: 12 }}
+                className="gap-12 d-grid"
+              >
+                <div>
+                  <svg
+                    viewBox="0 0 100 100"
+                    className="w-100p d-block"
+                    style={{ maxWidth: 160, margin: "0 auto" }}
+                  >
+                    {(() => {
+                      const r = 38,
+                        cx = 50,
+                        cy = 50;
+                      let cum = 0;
+                      return cats.map((c, i) => {
+                        const a1 = (cum / totalCost) * 360;
+                        cum += c.cost;
+                        const a2 = (cum / totalCost) * 360;
+                        const toRad = (d) => ((d - 90) * Math.PI) / 180;
+                        const x1 = cx + r * Math.cos(toRad(a1));
+                        const y1 = cy + r * Math.sin(toRad(a1));
+                        const x2 = cx + r * Math.cos(toRad(a2));
+                        const y2 = cy + r * Math.sin(toRad(a2));
+                        const large = a2 - a1 > 180 ? 1 : 0;
+                        const d = `M${cx} ${cy} L${x1.toFixed(1)} ${y1.toFixed(1)} A${r} ${r} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`;
+                        return (
+                          <path
+                            key={"slice-" + i}
+                            d={d}
+                            fill={c.c}
+                            stroke="var(--bg)"
+                            strokeWidth="0.5"
+                          />
+                        );
+                      });
+                    })()}
+                    <circle cx="50" cy="50" r="18" fill="var(--bg)" />
+                    <text
+                      x="50"
+                      y="47"
+                      textAnchor="middle"
+                      fontSize="10"
+                      fontWeight="700"
+                      fill="var(--fg)"
+                    >
+                      ₹
+                      {((totalCost * (window.INR_RATE || 83)) / 100000).toFixed(
+                        1,
+                      )}
+                      L
+                    </text>
+                    <text
+                      x="50"
+                      y="58"
+                      textAnchor="middle"
+                      fontSize="5"
+                      fill="var(--fg-3)"
+                    >
+                      {__t("analytics.totalBom") || "Total BOM"}
+                    </text>
+                  </svg>
+                </div>
+                <div className="flex gap-6 flex-col justify-center">
+                  {cats.map((c) => (
+                    <div
+                      key={c.l}
+                      className="flex items-center gap-6 font-mono fs-10"
+                    >
+                      <span
+                        style={{ background: c.c }}
+                        className="flex-shrink-0 w-8 h-8 br-2"
+                      />
+                      <span className="flex-1">{c.l}</span>
+                      <span className="fw-600">
+                        {Math.round((c.cost / totalCost) * 100)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
 
@@ -579,91 +747,184 @@ export default function AnalyticsScreen({ data }) {
             </h3>
           </div>
           <div data-density="dense" style={{ padding: 4 }}>
-            <table className="bom-table table-auto">
-              <thead>
-                <tr>
-                  <th className="pl-12" scope="col">
-                    {__t("analytics.vendor") || "Vendor"}
-                  </th>
-                  <th className="num" scope="col">
-                    {__t("analytics.onTime") || "On-time"}
-                  </th>
-                  <th className="num" scope="col">
-                    {__t("analytics.quality") || "Quality"}
-                  </th>
-                  <th className="num" scope="col">{__t("analytics.cost") || "Cost"}</th>
-                  <th className="num" scope="col">{__t("analytics.lead") || "Lead"}</th>
-                  <th scope="col">{__t("analytics.score") || "Score"}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  ["McMaster", 99, 99, 92, 95, "A+"],
-                  ["Noctua", 96, 98, 88, 87, "A"],
-                  ["Panasonic", 94, 96, 85, 78, "A"],
-                  ["Mean Well", 92, 95, 90, 75, "A"],
-                  ["Protolabs", 89, 94, 82, 92, "B+"],
-                  ["Daly", 71, 82, 95, 60, "C"],
-                ].map((r, i) => (
-                  <tr
-                    key={r[0]}
-                    onClick={() => window.__nav?.("vendors")}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        window.__nav?.("vendors");
-                      }
-                    }}
-                    tabIndex={0}
-                    role="button"
-                    aria-label={
-                      (__t("analytics.viewVendor") || "View vendor") +
-                      " " +
-                      r[0]
-                    }
-                    className="cursor-pointer"
+            {(() => {
+              const scorecards = Array.isArray(vendorScorecards)
+                ? vendorScorecards
+                : [];
+              if (!scorecards.length) {
+                return (
+                  <div
+                    style={{ padding: 24 }}
+                    className="text-center fg-3 font-mono fs-11"
                   >
-                    <td className="pl-12 fw-600">{r[0]}</td>
-                    {[1, 2, 3, 4].map((j) => (
-                      <td key={j} className="num">
-                        <span className="items-center gap-6 inline-flex">
-                          <span className="bg-sunk relative overflow-h d-iblock w-28 h-4 br-2">
-                            <span
-                              style={{
-                                inset: 0,
-                                width: r[j] + "%",
-                                background:
-                                  r[j] >= 90
-                                    ? "var(--ok)"
-                                    : r[j] >= 75
-                                      ? "var(--warn)"
-                                      : "var(--danger)",
-                              }}
-                              className="absolute"
-                            />
-                          </span>
-                          {r[j]}
-                        </span>
-                      </td>
-                    ))}
-                    <td>
-                      <span
-                        style={{
-                          color: r[5].startsWith("A")
-                            ? "var(--ok)"
-                            : r[5].startsWith("B")
-                              ? "var(--warn)"
-                              : "var(--danger)",
+                    {__t("analytics.noVendorData") ||
+                      "No vendor scorecard data available"}
+                  </div>
+                );
+              }
+              const top6 = scorecards.slice(0, 6);
+              const vendorsByName = {};
+              (vendorList || []).forEach((v) => {
+                vendorsByName[v.name] = v;
+              });
+              const avgValues = top6.map((v) => v.avgPOValue || 0);
+              const minAvg = Math.min(...avgValues);
+              const maxAvg = Math.max(...avgValues);
+              const leadValues = top6.map(
+                (v) => vendorsByName[v.vendor]?.leadTime,
+              );
+              const knownLeads = leadValues.filter(
+                (l) => typeof l === "number",
+              );
+              const minLead = knownLeads.length ? Math.min(...knownLeads) : 0;
+              const maxLead = knownLeads.length ? Math.max(...knownLeads) : 0;
+              const rows = top6.map((v, i) => {
+                const onTime = Math.round(v.onTimeRate ?? 0);
+                const quality = Math.round(((v.qualityScore ?? 0) / 5) * 100);
+                const costScore =
+                  maxAvg > minAvg
+                    ? Math.round(
+                        100 -
+                          ((v.avgPOValue - minAvg) / (maxAvg - minAvg)) * 100,
+                      )
+                    : 100;
+                const leadDays = leadValues[i];
+                const leadScore =
+                  typeof leadDays === "number" && maxLead > minLead
+                    ? Math.round(
+                        100 -
+                          ((leadDays - minLead) / (maxLead - minLead)) * 100,
+                      )
+                    : typeof leadDays === "number"
+                      ? 100
+                      : null;
+                const scoreParts = [onTime, quality, costScore, leadScore].filter(
+                  (n) => typeof n === "number",
+                );
+                const avgScore = scoreParts.length
+                  ? scoreParts.reduce((s, n) => s + n, 0) / scoreParts.length
+                  : 0;
+                const grade =
+                  avgScore >= 95
+                    ? "A+"
+                    : avgScore >= 85
+                      ? "A"
+                      : avgScore >= 75
+                        ? "B+"
+                        : avgScore >= 65
+                          ? "B"
+                          : "C";
+                return { vendor: v.vendor, onTime, quality, costScore, leadDays, leadScore, grade };
+              });
+              return (
+                <table className="bom-table table-auto">
+                  <thead>
+                    <tr>
+                      <th className="pl-12" scope="col">
+                        {__t("analytics.vendor") || "Vendor"}
+                      </th>
+                      <th className="num" scope="col">
+                        {__t("analytics.onTime") || "On-time"}
+                      </th>
+                      <th className="num" scope="col">
+                        {__t("analytics.quality") || "Quality"}
+                      </th>
+                      <th className="num" scope="col">
+                        {__t("analytics.cost") || "Cost"}
+                      </th>
+                      <th className="num" scope="col">
+                        {__t("analytics.lead") || "Lead"}
+                      </th>
+                      <th scope="col">{__t("analytics.score") || "Score"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr
+                        key={r.vendor}
+                        onClick={() => window.__nav?.("vendors")}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            window.__nav?.("vendors");
+                          }
                         }}
-                        className="font-mono fw-700"
+                        tabIndex={0}
+                        role="button"
+                        aria-label={
+                          (__t("analytics.viewVendor") || "View vendor") +
+                          " " +
+                          r.vendor
+                        }
+                        className="cursor-pointer"
                       >
-                        {r[5]}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        <td className="pl-12 fw-600">{r.vendor}</td>
+                        {[r.onTime, r.quality, r.costScore].map((val, j) => (
+                          <td key={j} className="num">
+                            <span className="items-center gap-6 inline-flex">
+                              <span className="bg-sunk relative overflow-h d-iblock w-28 h-4 br-2">
+                                <span
+                                  style={{
+                                    inset: 0,
+                                    width: val + "%",
+                                    background:
+                                      val >= 90
+                                        ? "var(--ok)"
+                                        : val >= 75
+                                          ? "var(--warn)"
+                                          : "var(--danger)",
+                                  }}
+                                  className="absolute"
+                                />
+                              </span>
+                              {val}
+                            </span>
+                          </td>
+                        ))}
+                        <td className="num">
+                          {r.leadScore != null ? (
+                            <span className="items-center gap-6 inline-flex">
+                              <span className="bg-sunk relative overflow-h d-iblock w-28 h-4 br-2">
+                                <span
+                                  style={{
+                                    inset: 0,
+                                    width: r.leadScore + "%",
+                                    background:
+                                      r.leadScore >= 90
+                                        ? "var(--ok)"
+                                        : r.leadScore >= 75
+                                          ? "var(--warn)"
+                                          : "var(--danger)",
+                                  }}
+                                  className="absolute"
+                                />
+                              </span>
+                              {r.leadDays}d
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td>
+                          <span
+                            style={{
+                              color: r.grade.startsWith("A")
+                                ? "var(--ok)"
+                                : r.grade.startsWith("B")
+                                  ? "var(--warn)"
+                                  : "var(--danger)",
+                            }}
+                            className="font-mono fw-700"
+                          >
+                            {r.grade}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              );
+            })()}
           </div>
         </div>
 
@@ -674,36 +935,54 @@ export default function AnalyticsScreen({ data }) {
             </h3>
           </div>
           <div style={{ padding: 16 }}>
-            {[
-              { c: "US", n: "United States", pct: 42 },
-              { c: "CN", n: "China", pct: 24 },
-              { c: "JP", n: "Japan", pct: 12 },
-              { c: "TW", n: "Taiwan", pct: 10 },
-              { c: "FR", n: "France", pct: 8 },
-              { c: "AT", n: "Austria", pct: 4 },
-            ].map((c) => (
-              <div
-                key={c.c}
-                style={{ gridTemplateColumns: "36px 1fr 50px" }}
-                className="gap-8 items-center mb-6 fs-11 font-mono d-grid"
-              >
-                <span className="bg-sunk items-center fs-9 fw-600 fg w-28 h-18 br-2 border-line inline-flex justify-center">
-                  {c.c}
-                </span>
-                <span className="fg-2">{c.n}</span>
-                <span className="text-right fg">{c.pct}%</span>
-                <span />
-                <div
-                  style={{ gridColumn: "2 / 4" }}
-                  className="bg-sunk overflow-h h-4 br-2"
-                >
+            {(() => {
+              const counts = {};
+              (vendorList || []).forEach((v) => {
+                const c = v.country || "Unknown";
+                counts[c] = (counts[c] || 0) + 1;
+              });
+              const total = Object.values(counts).reduce((s, n) => s + n, 0);
+              if (!total) {
+                return (
                   <div
-                    className="h-100p bg-accent"
-                    style={{ width: c.pct + "%" }}
-                  />
-                </div>
-              </div>
-            ))}
+                    style={{ padding: 24 }}
+                    className="text-center fg-3 font-mono fs-11"
+                  >
+                    {__t("analytics.noVendorCountryData") ||
+                      "No vendor country data available"}
+                  </div>
+                );
+              }
+              const sorted = Object.entries(counts).sort(
+                (a, b) => b[1] - a[1],
+              );
+              return sorted.map(([code, cnt]) => {
+                const pct = Math.round((cnt / total) * 100);
+                return (
+                  <div
+                    key={code}
+                    style={{ gridTemplateColumns: "36px 1fr 50px" }}
+                    className="gap-8 items-center mb-6 fs-11 font-mono d-grid"
+                  >
+                    <span className="bg-sunk items-center fs-9 fw-600 fg w-28 h-18 br-2 border-line inline-flex justify-center">
+                      {code}
+                    </span>
+                    <span className="fg-2">{COUNTRY_NAMES[code] || code}</span>
+                    <span className="text-right fg">{pct}%</span>
+                    <span />
+                    <div
+                      style={{ gridColumn: "2 / 4" }}
+                      className="bg-sunk overflow-h h-4 br-2"
+                    >
+                      <div
+                        className="h-100p bg-accent"
+                        style={{ width: pct + "%" }}
+                      />
+                    </div>
+                  </div>
+                );
+              });
+            })()}
           </div>
         </div>
       </div>
@@ -718,107 +997,46 @@ export default function AnalyticsScreen({ data }) {
           </div>
           <div className="ox-auto" style={{ padding: 12 }}>
             {(() => {
-              const rows = [
-                {
-                  v: "McMaster",
-                  cats: {
-                    Electrical: 2,
-                    Mechanical: 3,
-                    Hardware: 22,
-                    Cable: 0,
-                    Optical: 0,
-                  },
-                },
-                {
-                  v: "Protolabs",
-                  cats: {
-                    Electrical: 0,
-                    Mechanical: 14,
-                    Hardware: 0,
-                    Cable: 0,
-                    Optical: 0,
-                  },
-                },
-                {
-                  v: "STMicro",
-                  cats: {
-                    Electrical: 4,
-                    Mechanical: 0,
-                    Hardware: 0,
-                    Cable: 0,
-                    Optical: 0,
-                  },
-                },
-                {
-                  v: "JLCPCB",
-                  cats: {
-                    Electrical: 6,
-                    Mechanical: 0,
-                    Hardware: 0,
-                    Cable: 0,
-                    Optical: 0,
-                  },
-                },
-                {
-                  v: "Mean Well",
-                  cats: {
-                    Electrical: 8,
-                    Mechanical: 0,
-                    Hardware: 0,
-                    Cable: 0,
-                    Optical: 0,
-                  },
-                },
-                {
-                  v: "Panasonic",
-                  cats: {
-                    Electrical: 5,
-                    Mechanical: 0,
-                    Hardware: 0,
-                    Cable: 0,
-                    Optical: 0,
-                  },
-                },
-                {
-                  v: "Edmund",
-                  cats: {
-                    Electrical: 0,
-                    Mechanical: 0,
-                    Hardware: 0,
-                    Cable: 0,
-                    Optical: 3,
-                  },
-                },
-                {
-                  v: "Arducam",
-                  cats: {
-                    Electrical: 0,
-                    Mechanical: 0,
-                    Hardware: 0,
-                    Cable: 0,
-                    Optical: 2,
-                  },
-                },
-                {
-                  v: "Noctua",
-                  cats: {
-                    Electrical: 3,
-                    Mechanical: 0,
-                    Hardware: 0,
-                    Cable: 0,
-                    Optical: 0,
-                  },
-                },
-              ];
-              const catKeys = [
-                "Electrical",
-                "Mechanical",
-                "Hardware",
-                "Cable",
-                "Optical",
-              ];
+              const bomParts2 = (ctx?.rows || BOM_DATA.rows)[0].children.flatMap(
+                (s) => s.children || [],
+              );
+              const byVendor = {};
+              bomParts2.forEach((p) => {
+                if (!p.vendor) return;
+                const cat = p.category || "Other";
+                byVendor[p.vendor] = byVendor[p.vendor] || {};
+                byVendor[p.vendor][cat] = (byVendor[p.vendor][cat] || 0) + 1;
+              });
+              const catCounts = {};
+              bomParts2.forEach((p) => {
+                const cat = p.category || "Other";
+                catCounts[cat] = (catCounts[cat] || 0) + 1;
+              });
+              const catKeys = Object.keys(catCounts)
+                .sort((a, b) => catCounts[b] - catCounts[a])
+                .slice(0, 6);
+              const rows = Object.entries(byVendor)
+                .map(([v, cats]) => ({ v, cats }))
+                .sort(
+                  (a, b) =>
+                    Object.values(b.cats).reduce((s, n) => s + n, 0) -
+                    Object.values(a.cats).reduce((s, n) => s + n, 0),
+                )
+                .slice(0, 9);
+              if (!rows.length || !catKeys.length) {
+                return (
+                  <div
+                    style={{ padding: 24 }}
+                    className="text-center fg-3 font-mono fs-11"
+                  >
+                    {__t("analytics.noVendorPartsData") ||
+                      "No vendor/part data available"}
+                  </div>
+                );
+              }
               const maxVal = Math.max(
-                ...rows.flatMap((r) => catKeys.map((k) => r.cats[k])),
+                ...rows.flatMap((r) => catKeys.map((k) => r.cats[k] || 0)),
+                1,
               );
               return (
                 <div style={{ minWidth: 520 }}>
@@ -892,7 +1110,7 @@ export default function AnalyticsScreen({ data }) {
                     <span>{__t("analytics.high") || "High"}</span>
                     <span className="ml-12">
                       {__t("analytics.partsPerVendor") ||
-                        "Parts per vendor \u00D7 category"}
+                        "Parts per vendor × category"}
                     </span>
                   </div>
                 </div>
@@ -907,24 +1125,41 @@ export default function AnalyticsScreen({ data }) {
           </div>
           <div style={{ padding: 12 }}>
             {(() => {
-              const data = BOM_DATA.procurement;
+              const rawProcurement = Array.isArray(procurementItems)
+                ? procurementItems
+                : [];
+              if (!rawProcurement.length) {
+                return (
+                  <div
+                    style={{ padding: 24 }}
+                    className="text-center fg-3 font-mono fs-11"
+                  >
+                    {__t("analytics.noProcurementData") ||
+                      "No procurement orders available"}
+                  </div>
+                );
+              }
               const now = new Date();
               const parseETA = (eta) => {
-                if (eta === "✓" || eta === "—" || !eta) return null;
-                const [m, d] = eta.split("-").map(Number);
-                return new Date(2026, m - 1, d);
+                if (!eta || eta === "✓" || eta === "—") return null;
+                const iso = new Date(eta);
+                if (!Number.isNaN(iso.getTime())) return iso;
+                const parts = String(eta).split("-").map(Number);
+                if (parts.length === 2 && parts.every((n) => !Number.isNaN(n))) {
+                  return new Date(now.getFullYear(), parts[0] - 1, parts[1]);
+                }
+                return null;
               };
-              const items = [];
-              Object.entries(data).forEach(([col, list]) => {
-                list.forEach((it) => {
+              const items = rawProcurement
+                .map((it) => {
                   const etaDate = parseETA(it.eta);
-                  if (!etaDate) return;
+                  if (!etaDate) return null;
                   const daysDiff = Math.round(
                     (etaDate - now) / (1000 * 60 * 60 * 24),
                   );
-                  items.push({ ...it, status: col, daysLeft: daysDiff });
-                });
-              });
+                  return { ...it, daysLeft: daysDiff };
+                })
+                .filter(Boolean);
               const bands = [
                 {
                   label: __t("analytics.overdue") || "Overdue",
@@ -1087,22 +1322,42 @@ export default function AnalyticsScreen({ data }) {
             <h3>{__t("analytics.riskByOrigin") || "Risk by origin"}</h3>
           </div>
           <div style={{ padding: 16 }}>
-            <svg viewBox="0 0 300 160" className="w-100p h-160">
-              {(() => {
-                const hmData = [
-                  { c: "CN", r: "High", v: 1 },
-                  { c: "FR", r: "Med", v: 1 },
-                  { c: "TW", r: "Low", v: 2 },
-                  { c: "US", r: "Low", v: 9 },
-                  { c: "JP", r: "Low", v: 2 },
-                  { c: "AT", r: "Low", v: 1 },
-                ];
-                const risks = ["High", "Med", "Low"];
-                const countries = ["CN", "FR", "TW", "US", "JP", "AT"];
-                const cellW = 300 / (countries.length + 1);
-                const cellH = 160 / (risks.length + 2);
-                const maxV = Math.max(...hmData.map((d) => d.v), 1);
+            {(() => {
+              const hmMap = {};
+              (vendorList || []).forEach((v) => {
+                const bucket = riskBucket(v.reliabilityRating);
+                if (!v.country || !bucket) return;
+                const key = v.country + "|" + bucket;
+                hmMap[key] = (hmMap[key] || 0) + 1;
+              });
+              const hmData = Object.entries(hmMap).map(([key, v]) => {
+                const [c, r] = key.split("|");
+                return { c, r, v };
+              });
+              if (!hmData.length) {
                 return (
+                  <div
+                    style={{ padding: 24 }}
+                    className="text-center fg-3 font-mono fs-11"
+                  >
+                    {__t("analytics.noRiskData") ||
+                      "No vendor risk data available"}
+                  </div>
+                );
+              }
+              const risks = ["High", "Med", "Low"];
+              const countryTotals = {};
+              hmData.forEach((d) => {
+                countryTotals[d.c] = (countryTotals[d.c] || 0) + d.v;
+              });
+              const countries = Object.keys(countryTotals)
+                .sort((a, b) => countryTotals[b] - countryTotals[a])
+                .slice(0, 8);
+              const cellW = 300 / (countries.length + 1);
+              const cellH = 160 / (risks.length + 2);
+              const maxV = Math.max(...hmData.map((d) => d.v), 1);
+              return (
+                <svg viewBox="0 0 300 160" className="w-100p h-160">
                   <>
                     {countries.map((c, i) => (
                       <text
@@ -1130,7 +1385,9 @@ export default function AnalyticsScreen({ data }) {
                         {r}
                       </text>
                     ))}
-                    {hmData.map((d, i) => {
+                    {hmData
+                      .filter((d) => countries.includes(d.c))
+                      .map((d, i) => {
                       const col = countries.indexOf(d.c);
                       const row = risks.indexOf(d.r);
                       const intensity = d.v / maxV;
@@ -1160,9 +1417,9 @@ export default function AnalyticsScreen({ data }) {
                       );
                     })}
                   </>
-                );
-              })()}
-            </svg>
+                </svg>
+              );
+            })()}
             <div className="mt-4 flex items-center gap-6 font-mono fs-9 fg-3 justify-center">
               <span
                 className="br-2"

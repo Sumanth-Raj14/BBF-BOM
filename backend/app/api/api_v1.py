@@ -64,6 +64,15 @@ api_router.include_router(
     prefix="/cad",
     tags=["cad"],
 )
+# Where-used knowledge graph (nodes+edges) for a part — powers the PDM/CAD
+# vault's "where used" view. Was implemented (app/api/endpoints/graph.py)
+# but never mounted; wiring it here so /graph/where-used/{part_id} and
+# /graph/analytics are actually reachable.
+api_router.include_router(
+    endpoints.graph.router,
+    prefix="/graph",
+    tags=["graph"],
+)
 api_router.include_router(
     endpoints.scraping.router,
     prefix="/scraping",

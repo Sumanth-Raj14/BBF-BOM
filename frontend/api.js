@@ -517,14 +517,20 @@ export const revisionsAPI = {
     const query = new URLSearchParams(params).toString();
     return apiRequest(`/revisions${query ? '?' + query : ''}`);
   },
-  
+
   get: (id) => apiRequest(`/revisions/${id}`),
-  
-  create: (revision) => 
+
+  create: (revision) =>
     apiRequest('/revisions', {
       method: 'POST',
       body: JSON.stringify(revision),
     }),
+
+  // Restores the entity a revision belongs to from its stored snapshot.
+  // Backend only knows how to roll back entityType 'part' revisions today
+  // (see app/api/endpoints/revisions.py) — calling it for other entity
+  // types will fail with a clear error rather than silently no-op.
+  rollback: (id) => apiRequest(`/revisions/${id}/rollback`, { method: 'POST' }),
 };
 
 // BOM Templates API
@@ -663,6 +669,7 @@ export const analyticsAPI = {
   categories: () => apiRequest('/analytics/categories'),
   atRiskParts: (limit) => apiRequest(`/analytics/at-risk-parts${limit ? '?limit=' + limit : ''}`),
   mostUsedParts: (limit) => apiRequest(`/analytics/most-used-parts${limit ? '?limit=' + limit : ''}`),
+  vendorScorecards: () => apiRequest('/analytics/vendor-scorecards'),
 };
 
 // CAD API
@@ -672,6 +679,14 @@ export const cadAPI = {
   extractAttrs: (data) => apiRequest('/cad/extract-attrs', { method: 'POST', body: JSON.stringify(data) }),
   vaultStats: () => apiRequest('/cad/vault/stats'),
   vaultTree: () => apiRequest('/cad/vault/tree'),
+};
+
+// Where-Used Knowledge Graph API — nodes+edges graph of every BOM/assembly
+// a part occurs in (see backend app/api/endpoints/graph.py, mounted at
+// /graph). Backs the PDM/CAD vault's "Where used in CAD" view.
+export const graphAPI = {
+  whereUsed: (partId) => apiRequest(`/graph/where-used/${partId}`),
+  analytics: () => apiRequest('/graph/analytics'),
 };
 
 // Scraping API
@@ -1404,6 +1419,7 @@ export const api = {
   barcodes: barcodesAPI,
   analytics: analyticsAPI,
   cad: cadAPI,
+  graph: graphAPI,
   scraping: scrapingAPI,
   poOrders: poOrdersAPI,
   budgets: budgetsAPI,
@@ -1440,6 +1456,7 @@ window.api = api;
 window.poOrdersAPI = poOrdersAPI;
 window.analyticsAPI = analyticsAPI;
 window.cadAPI = cadAPI;
+window.graphAPI = graphAPI;
 window.scrapingAPI = scrapingAPI;
 window.webhooksAPI = webhooksAPI;
 window.bulkImportAPI = bulkImportAPI;
@@ -1458,3 +1475,10 @@ window.qualityAPI = qualityAPI;
 window.userDataSyncAPI = userDataSyncAPI;
 window.catalogsAPI = catalogsAPI;
 window.calendarEventsAPI = calendarEventsAPI;
+
+// Appended for integration-screens.jsx (Bulk Import history): tenant-scoped
+// job list backing GET /import/jobs (see backend/app/api/endpoints/bulk_import.py).
+bulkImportAPI.list = (params = {}) => {
+  const q = new URLSearchParams(params).toString();
+  return apiRequest(`/import/jobs${q ? '?' + q : ''}`);
+};

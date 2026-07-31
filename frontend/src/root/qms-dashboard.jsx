@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { __t } from "../i18n";
+import { api } from "../globals";
+import { toast } from "../utils/toast";
 import {
   ScreenHeader,
   Tabs,
@@ -46,29 +48,88 @@ const FAI_COLUMNS = [
   { key: "inspector", header: __t("enterprise.qms.col.inspector") || "Inspector" },
 ];
 
+// Real API rows are camelCase (capas/fai) or snake_case (NCR, older quality
+// module) depending on backend route. Map both shapes defensively onto the
+// same row shape the columns above expect — never fabricate a value, fall
+// back to an em dash placeholder instead.
+function fmtDate(value) {
+  if (!value) return "—";
+  const s = String(value);
+  return s.length >= 10 ? s.slice(0, 10) : s;
+}
+
+function mapNcrRow(n) {
+  const partId = n.part_id ?? n.partId;
+  return {
+    id: n.ncr_number || n.ncrNumber || (n.id != null ? `NCR-${n.id}` : "—"),
+    part: n.part_number || n.partNumber || (partId != null ? `Part #${partId}` : "—"),
+    issue: n.defect_description || n.description || n.issue || "—",
+    status: n.status || "—",
+    date: fmtDate(n.detected_at || n.created_at || n.date),
+  };
+}
+
+function mapCapaRow(c) {
+  return {
+    id: c.capaNumber || c.capa_number || (c.id != null ? `CAPA-${c.id}` : "—"),
+    title: c.title || "—",
+    status: c.status || "—",
+    dueDate: fmtDate(c.targetDate || c.due_date || c.dueDate),
+  };
+}
+
+function mapFaiRow(f) {
+  return {
+    id: f.faiNumber || f.fai_number || (f.id != null ? `FAI-${f.id}` : "—"),
+    part: f.partNumber || f.partName || f.part_number || "—",
+    result: f.result || "—",
+    inspector: f.inspectorName || f.inspector_name || "—",
+  };
+}
+
+function rowsOf(settledResult) {
+  if (settledResult.status !== "fulfilled") return [];
+  const value = settledResult.value;
+  return Array.isArray(value) ? value : value?.items || [];
+}
+
 export function QMSDashboard() {
   const [activeTab, setActiveTab] = useState("NCR");
   const [data, setData] = useState({ ncrs: [], capas: [], fais: [] });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Mock fetch
-    const timer = setTimeout(() => {
+    let cancelled = false;
+    setLoading(true);
+
+    Promise.allSettled([
+      api?.quality?.ncr?.list ? api.quality.ncr.list({ per_page: 100 }) : Promise.resolve([]),
+      api?.capa?.list ? api.capa.list({ per_page: 100 }) : Promise.resolve([]),
+      api?.fai?.list ? api.fai.list({ per_page: 100 }) : Promise.resolve([]),
+    ]).then(([ncrRes, capaRes, faiRes]) => {
+      if (cancelled) return;
+
+      if (ncrRes.status === "rejected") {
+        toast(ncrRes.reason?.message || (__t("enterprise.qms.ncrLoadError") || "Could not load NCRs"), { kind: "error" });
+      }
+      if (capaRes.status === "rejected") {
+        toast(capaRes.reason?.message || (__t("enterprise.qms.capaLoadError") || "Could not load CAPAs"), { kind: "error" });
+      }
+      if (faiRes.status === "rejected") {
+        toast(faiRes.reason?.message || (__t("enterprise.qms.faiLoadError") || "Could not load first article inspections"), { kind: "error" });
+      }
+
       setData({
-        ncrs: [
-          { id: "NCR-001", part: "PT-998", issue: "Dimension out of spec", status: "Open", date: "2024-03-01" },
-          { id: "NCR-002", part: "PT-112", issue: "Surface scratch", status: "Closed", date: "2024-02-15" }
-        ],
-        capas: [
-          { id: "CAPA-40", title: "Update calibration process", status: "In Progress", dueDate: "2024-04-10" }
-        ],
-        fais: [
-          { id: "FAI-901", part: "PT-998-A", result: "Pass", inspector: "J. Doe" }
-        ]
+        ncrs: rowsOf(ncrRes).map(mapNcrRow),
+        capas: rowsOf(capaRes).map(mapCapaRow),
+        fais: rowsOf(faiRes).map(mapFaiRow),
       });
       setLoading(false);
-    }, 400);
-    return () => clearTimeout(timer);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const tabs = [

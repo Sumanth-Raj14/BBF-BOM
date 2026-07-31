@@ -144,6 +144,39 @@ async def get_all_import_status(db: AsyncSession = Depends(get_db)):
     }
 
 
+@router.get("/jobs", response_model=list[BulkImportJobResponse])
+async def list_import_jobs(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Tenant-scoped import job history (used by the Bulk Import screen).
+
+    Distinct from /all/status above, which is not tenant-scoped and returns
+    every tenant's jobs — kept as-is for backward compatibility, but not
+    safe for a tenant-facing UI to call.
+    """
+    result = await db.execute(
+        select(BulkImportJob)
+        .where(BulkImportJob.tenantId == current_user.tenantId)
+        .order_by(BulkImportJob.createdAt.desc())
+    )
+    jobs = result.scalars().all()
+    return [
+        BulkImportJobResponse(
+            id=j.id,
+            filename=j.filename,
+            status=j.status,
+            totalRows=j.totalRows,
+            processedRows=j.processedRows,
+            errorRows=j.errorRows,
+            mappingConfig=j.mappingConfig,
+            createdAt=str(j.createdAt) if j.createdAt else None,
+            completedAt=str(j.completedAt) if j.completedAt else None,
+        )
+        for j in jobs
+    ]
+
+
 @router.get("/{job_id}/status", response_model=BulkImportStatusResponse)
 async def get_import_status(job_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(BulkImportJob).where(BulkImportJob.id == job_id))

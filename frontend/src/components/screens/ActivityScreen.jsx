@@ -2,9 +2,27 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Icon } from "../../globals";
+import { Icon, api, useAppStore } from "../../globals";
 import { Button, Menu, EmptyState, ScreenHeader } from "../ui";
 // ============ ACTIVITY ============
+//
+// Wired to the real backend (api.auditLogs.list — GET /audit-logs, already
+// tenant-scoped server-side in app/api/endpoints/audit_logs.py). There is no
+// mutate path here — the feed is read-only — so "persist on mutate" doesn't
+// apply; "load on mount" + a real polling refresh replace the old
+// setInterval() that fabricated random events.
+//
+// Fields with no backing column are derived honestly from what the audit log
+// actually stores, never invented:
+//   - `init`/`color` — computed client-side from userEmail (initials +
+//                       deterministic hash-to-palette), same idea as the
+//                       vendor-initials avatar elsewhere; not stored server-side.
+//   - `action` text  — humanized from the raw action string (e.g.
+//                       "ECO_APPROVE" -> "approved"); unrecognized actions
+//                       fall back to a de-slugged version of the raw value
+//                       instead of a made-up phrase.
+//   - `note`/`quote` — summarized from the log's real `changes` JSON, blank
+//                       when there's nothing there (no placeholder text).
 
 // Maps the semantic color tag on each activity item to the avatar's CSS
 // modifier class (kept separate so the underlying palette can live in
@@ -16,87 +34,185 @@ const AVA_COLOR_CLASS = {
   gray: "sys",
 };
 
+// entityType (AuditLog.ALLOWED_ENTITY_TYPES, backend/app/models/audit_log.py)
+// -> the route that screen lives on, so clicking an activity row jumps to
+// the right place instead of guessing from label text.
+const ENTITY_ROUTE = {
+  po: "procurement",
+  bom: "bom",
+  part: "parts",
+  document: "docs",
+  vendor: "vendors",
+  eco: "ecr",
+  ncr: "ncr",
+  work_order: "work-orders",
+};
+
+const ACTION_PHRASES = {
+  create: "created",
+  created: "created",
+  update: "updated",
+  updated: "updated",
+  delete: "deleted",
+  deleted: "deleted",
+  login: "logged in",
+  logout: "logged out",
+  approve: "approved",
+  approved: "approved",
+  reject: "rejected",
+  rejected: "rejected",
+  implement: "implemented",
+  implemented: "implemented",
+  submit: "submitted",
+  submitted: "submitted",
+  close: "closed",
+  closed: "closed",
+  assigned: "assigned",
+};
+
+function humanizeAction(action) {
+  if (!action) return __t("activity.updated") || "updated";
+  const norm = String(action).toLowerCase();
+  const parts = norm.split(/[._]+/).filter(Boolean);
+  const last = parts[parts.length - 1];
+  return (
+    ACTION_PHRASES[norm] || ACTION_PHRASES[last] || norm.replace(/[._]+/g, " ")
+  );
+}
+
+function entityLabel(r) {
+  if (r.entityType === "auth") return __t("activity.theirAccount") || "their account";
+  if (r.entityName) return r.entityName;
+  if (r.entityType) return r.entityType + (r.entityId != null ? " #" + r.entityId : "");
+  return "activity #" + r.id;
+}
+
+function initialsFromEmail(email) {
+  if (!email) return null;
+  const namePart = email.split("@")[0];
+  const segs = namePart.split(/[._-]+/).filter(Boolean);
+  if (segs.length >= 2) return (segs[0][0] + segs[1][0]).toUpperCase();
+  return namePart.slice(0, 2).toUpperCase();
+}
+
+function colorForKey(key) {
+  const palette = ["blue", "green", "purple"];
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return palette[hash % palette.length];
+}
+
+function summarizeChanges(changes) {
+  if (!changes || typeof changes !== "object") return "";
+  const entries = Object.entries(changes).filter(([, v]) => v != null && v !== "");
+  if (entries.length === 0) return "";
+  return entries
+    .slice(0, 3)
+    .map(([k, v]) => k + ": " + (typeof v === "object" ? JSON.stringify(v) : String(v)))
+    .join(" · ")
+    .slice(0, 140);
+}
+
+function timeAgo(iso) {
+  if (!iso) return "—";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(ms)) return "—";
+  if (ms < 60000) return __t("activity.justNow") || "just now";
+  const min = Math.floor(ms / 60000);
+  if (min < 60) return min + " " + (__t("activity.min") || "min");
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return hr + " " + (__t("activity.hr") || "hr");
+  return Math.floor(hr / 24) + " " + (__t("activity.days") || "d");
+}
+
+// Maps one raw AuditLog row (see backend/app/schemas/audit_log.py) to the
+// shape this screen renders.
+function mapAuditLog(r) {
+  const email = r.userEmail || null;
+  const isSystem = !email && r.userId == null;
+  const who = email || (r.userId != null ? "user #" + r.userId : "System");
+  const colorKey = email || (r.userId != null ? "u" + r.userId : "system");
+  const changes = r.changes && typeof r.changes === "object" ? r.changes : null;
+  return {
+    id: r.id,
+    who,
+    email,
+    isSystem,
+    init: isSystem ? "SY" : initialsFromEmail(email) || "U",
+    color: isSystem ? "gray" : colorForKey(colorKey),
+    action: humanizeAction(r.action),
+    rawAction: r.action || "",
+    entityType: r.entityType || "",
+    obj: entityLabel(r),
+    note: summarizeChanges(changes),
+    quote: changes ? changes.reason || changes.message || changes.comment || "" : "",
+    time: timeAgo(r.createdAt),
+  };
+}
+
 export default function ActivityScreen({ data }) {
+  const ctx = useAppStore();
+  const currentEmail = ctx?.user?.email || null;
   const [filter, setFilter] = React.useState("All");
-  const [activityItems, setActivityItems] = React.useState(data.activity || []);
+  const [activityItems, setActivityItems] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
   const [autoRefresh, setAutoRefresh] = React.useState(true);
+
+  const load = React.useCallback(async (opts) => {
+    const background = !!(opts && opts.background);
+    if (!background) {
+      setLoading(true);
+      setError(null);
+    }
+    try {
+      const result = await api.auditLogs.list({ page: 1, per_page: 50 });
+      const rows = Array.isArray(result) ? result : result?.items || [];
+      setActivityItems(rows.map(mapAuditLog));
+      if (background) setError(null);
+    } catch (e) {
+      // Honest failure — do not fall back to fabricated/sample rows.
+      if (background) {
+        // A transient poll failure shouldn't nuke a screen full of good
+        // data the user is already looking at.
+        console.warn("[ActivityScreen] background refresh failed:", e?.message);
+      } else {
+        setError(e?.message || "Failed to load activity.");
+        setActivityItems([]);
+      }
+    } finally {
+      if (!background) setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(
+    function () {
+      load();
+    },
+    [load],
+  );
 
   React.useEffect(
     function () {
       if (!autoRefresh) return;
       const timer = setInterval(function () {
-        const actions = [
-          {
-            who: "E. Chen",
-            action: "updated cost for",
-            obj: "EL-MCU-STM32H7",
-            init: "EC",
-            color: "blue",
-            time: "just now",
-            note: "",
-          },
-          {
-            who: "System",
-            action: "auto-approved",
-            obj: "PO-2026-0312",
-            init: "SY",
-            color: "gray",
-            time: "just now",
-            note: "under threshold",
-          },
-          {
-            who: "M. Park",
-            action: "commented on",
-            obj: "EL-PCB-MAIN-R3",
-            init: "MP",
-            color: "green",
-            time: "just now",
-            quote: "Capacitor spacing looks correct for reflow.",
-          },
-          {
-            who: "A. Kumar",
-            action: "uploaded",
-            obj: "datasheet_MEC-PL-040A.pdf",
-            init: "AK",
-            color: "purple",
-            time: "just now",
-          },
-          {
-            who: "System",
-            action: "detected price change for",
-            obj: "HW-FAS-M3-08",
-            init: "SY",
-            color: "gray",
-            time: "just now",
-            note: "+3.2% from Digi-Key",
-          },
-        ];
-        const pick = actions[Math.floor(Math.random() * actions.length)];
-        const newItem = Object.assign({}, pick, { time: "just now" });
-        setActivityItems(function (prev) {
-          const updated = [newItem].concat(prev);
-          return updated.slice(0, 50);
-        });
+        load({ background: true });
       }, 15000);
       return function () {
         clearInterval(timer);
       };
     },
-    [autoRefresh],
+    [autoRefresh, load],
   );
 
   const matches = function (a) {
     if (filter === "All") return true;
-    if (filter === "Mine only") return a.who === "E. Chen";
-    if (filter === "System") return a.who === "System";
-    if (filter === "Comments") return /comment/i.test(a.action);
-    if (filter === "Approvals")
-      return (
-        /approv/i.test(a.action) ||
-        /requested approval/i.test(a.action) ||
-        /released/i.test(a.action)
-      );
-    if (filter === "Edits") return /chang|updat|edit|uploaded/i.test(a.action);
+    if (filter === "Mine only")
+      return !!currentEmail && !!a.email && a.email.toLowerCase() === currentEmail.toLowerCase();
+    if (filter === "System") return a.isSystem;
+    if (filter === "Comments") return a.entityType === "comment";
+    if (filter === "Approvals") return /approv|reject|releas/i.test(a.rawAction);
+    if (filter === "Edits") return /creat|updat|edit|delet|upload/i.test(a.rawAction);
     return true;
   };
   const filtered = activityItems.filter(matches);
@@ -117,9 +233,8 @@ export default function ActivityScreen({ data }) {
         description={
           <>
             {filtered.length} {__t("activity.of") || "of"}{" "}
-            {activityItems.length} {__t("activity.events") || "events"} ·{" "}
-            {filter === "All" ? "" : filter + " · "}
-            {__t("activity.thisWeek") || "this week"}
+            {activityItems.length} {__t("activity.events") || "events"}
+            {filter === "All" ? "" : " · " + filter}
             {autoRefresh
               ? " · " + (__t("activity.autoRefreshing") || "auto-refreshing")
               : ""}
@@ -163,7 +278,26 @@ export default function ActivityScreen({ data }) {
         }
       />
       <div className="feed">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <EmptyState
+            title={__t("common.loading") || "Loading activity…"}
+          />
+        ) : error ? (
+          <EmptyState
+            icon="!"
+            title={error}
+            actions={
+              <Button variant="secondary" size="sm" onClick={() => load()}>
+                {__t("common.retry") || "Retry"}
+              </Button>
+            }
+          />
+        ) : activityItems.length === 0 ? (
+          <EmptyState
+            icon="∅"
+            title={__t("activity.noActivityYet") || "No activity yet"}
+          />
+        ) : filtered.length === 0 ? (
           <EmptyState
             icon="∅"
             title={
@@ -176,8 +310,8 @@ export default function ActivityScreen({ data }) {
             }
           />
         ) : (
-          filtered.map((a, i) => (
-            <div key={a.who + "-" + a.time + "-" + i} className="feed-item">
+          filtered.map((a) => (
+            <div key={a.id} className="feed-item">
               <span
                 className={
                   "ava " + (AVA_COLOR_CLASS[a.color] || "")
@@ -193,16 +327,22 @@ export default function ActivityScreen({ data }) {
                   type="button"
                   className="obj cursor-pointer"
                   onClick={() => {
-                    // Route to appropriate view based on obj content
-                    const obj = a.obj.toLowerCase();
+                    const route = ENTITY_ROUTE[a.entityType];
+                    if (route) {
+                      window.__nav?.(route);
+                      return;
+                    }
+                    // Fall back to guessing from the label text when the
+                    // entityType isn't one we have a route mapping for.
+                    const obj = (a.obj || "").toLowerCase();
                     if (/po-/.test(obj)) window.__nav?.("procurement");
                     else if (/v\d/.test(obj)) window.__nav?.("diff");
-                    else if (/^[A-Z]+-/.test(a.obj)) window.__nav?.("bom");
+                    else if (/^[A-Z]+-/.test(a.obj || "")) window.__nav?.("bom");
                     else if (/duplicate|part/.test(obj))
                       window.__nav?.("parts");
                     else if (/\.pdf|\.dwg|\.xlsx/.test(obj))
                       window.__nav?.("docs");
-                    else toast("Opening " + a.obj);
+                    else toast((__t("activity.opening") || "Opening ") + a.obj);
                   }}
                 >
                   {a.obj}

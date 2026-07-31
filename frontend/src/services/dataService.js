@@ -67,9 +67,31 @@ async function processQueue() {
   notify();
 }
 
+// BUG FIX: the backend's /parts list endpoint paginates on `per_page` (max
+// 500, default 50 — see app.core.pagination.PageParams), not `limit`. Any
+// unrecognized query param is silently ignored, so the old `{ limit: 1000 }`
+// call fell back to the default 50-per-page and only ~50 parts ever loaded.
+// Page through the real per_page/has_next contract so ALL parts load.
+async function fetchAllParts() {
+  if (!api || !api.parts || !api.parts.list) return null;
+  const PER_PAGE = 500; // backend max: PageParams.per_page (le=500)
+  let page = 1;
+  let items = [];
+  // Guard against a runaway loop if the backend contract ever changes.
+  for (let guard = 0; guard < 100; guard++) {
+    const res = await api.parts.list({ page, per_page: PER_PAGE });
+    if (!res) break;
+    const pageItems = res.items || [];
+    items = items.concat(pageItems);
+    if (!res.has_next || pageItems.length === 0) break;
+    page += 1;
+  }
+  return { items };
+}
+
 const apiReaders = {
   parts: {
-    list: () => screenData.parts.list({ limit: 1000 }),
+    list: () => fetchAllParts(),
   },
   comments: {
     list: (params) => screenData.comments.list(params),
@@ -350,7 +372,7 @@ export const dataService = {
     const bomRows = null;
     if (bomRows && Array.isArray(bomRows) && bomRows.length > 0) {
       try {
-        const existing = await api.parts.list({ limit: 1 });
+        const existing = await api.parts.list({ per_page: 1 });
         if (!existing || !existing.items || existing.items.length === 0) {
           for (const row of bomRows) {
             try {
