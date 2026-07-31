@@ -1,6 +1,7 @@
 import PropTypes from "prop-types";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import { api } from "../globals";
 import {
   Button,
   Menu,
@@ -211,33 +212,153 @@ SkeletonRows.propTypes = {
   cols: PropTypes.any,
 };
 // ============ INVENTORY MODULE ============
+// Real stock positions come from api.inventory.list() (`/inventory/stock`,
+// one row per part+warehouse). That table has no part name/number or reorder
+// threshold of its own, so we join it client-side against api.parts.list()
+// (pn/name/cost) and api.kanban.list() (minStock = the real reorder point,
+// server-computed Low/Critical/Normal status) — both real backend records,
+// never fabricated. Bin labels come from api.inventory.binLocations.list().
 function InventoryScreen() {
   const ctx = useAppStore();
-  const baseRows = ctx?.rows || BOM_DATA.rows;
-  const inventory = React.useMemo(() => {
-    const leaves = [];
-    const walk = (rs) =>
-      rs.forEach((r) => {
-        if (r.children) walk(r.children);
-        else leaves.push(r);
-      });
-    walk(baseRows);
-    return leaves.map((r, i) => {
-      const seed = r.pn.charCodeAt(0) + r.pn.charCodeAt(r.pn.length - 1);
-      const stock = Math.max(0, ((seed * 7) % 500) - (i % 5 === 0 ? 480 : 0));
-      const reorder = Math.max(10, Math.round((r.qty || 1) * 20));
-      const bin = `${String.fromCharCode(65 + (seed % 6))}-${String((seed % 20) + 1).padStart(2, "0")}-${String(((seed * 3) % 30) + 1).padStart(2, "0")}`;
-      return {
-        ...r,
-        stock,
-        reorder,
-        bin,
-        status: stock === 0 ? "out" : stock < reorder ? "low" : "ok",
-      };
-    });
-  }, [baseRows]);
+  const [loading, setLoading] = React.useState(true);
+  const [inventory, setInventory] = React.useState([]);
+  const [warehouseCount, setWarehouseCount] = React.useState(null);
   const [statusFilter, setStatusFilter] = React.useState("All");
   const [iSearch, setISearch] = React.useState("");
+
+  const loadInventory = React.useCallback(() => {
+    setLoading(true);
+    Promise.all([
+      Promise.resolve(api?.inventory?.list?.({ per_page: 500 })).catch(
+        () => null,
+      ),
+      Promise.resolve(api?.parts?.list?.({ per_page: 500 })).catch(
+        () => null,
+      ),
+      Promise.resolve(api?.kanban?.list?.({ per_page: 500 })).catch(
+        () => null,
+      ),
+      Promise.resolve(api?.inventory?.binLocations?.list?.()).catch(
+        () => null,
+      ),
+      Promise.resolve(api?.inventory?.warehouses?.list?.()).catch(
+        () => null,
+      ),
+    ])
+      .then(([invRes, partsRes, kanbanRes, binsRes, whRes]) => {
+        const asList = (res) =>
+          Array.isArray(res) ? res : res && Array.isArray(res.items) ? res.items : [];
+        const invItems = asList(invRes);
+        const partItems = asList(partsRes);
+        const kanbanItems = asList(kanbanRes);
+        const bins = asList(binsRes);
+        const warehouses = asList(whRes);
+
+        const partById = new Map(partItems.map((p) => [p.id, p]));
+        const kanbanByPart = new Map(
+          kanbanItems.map((k) => [k.partId ?? k.part_id, k]),
+        );
+        const binById = new Map(bins.map((b) => [b.id, b]));
+
+        const rows = invItems.map((inv) => {
+          const part = partById.get(inv.part_id) || {};
+          const trigger = kanbanByPart.get(inv.part_id);
+          const bin = binById.get(inv.bin_location_id);
+          const stock = Number(inv.quantity_on_hand) || 0;
+          const reorder =
+            trigger && trigger.minStock != null ? Number(trigger.minStock) : null;
+          const cost =
+            inv.unit_cost != null ? Number(inv.unit_cost) : Number(part.cost) || 0;
+          let status = "ok";
+          if (stock <= 0) status = "out";
+          else if (reorder != null && stock <= reorder) status = "low";
+          else if (trigger && (trigger.status === "Low" || trigger.status === "Critical"))
+            status = "low";
+          return {
+            id: inv.id,
+            partId: inv.part_id,
+            warehouseId: inv.warehouse_id,
+            pn: part.pn || `#${inv.part_id}`,
+            name: part.name || "—",
+            bin: bin ? bin.bin_code : "—",
+            stock,
+            reorder,
+            cost,
+            status,
+          };
+        });
+        setInventory(rows);
+        setWarehouseCount(warehouses.length || null);
+      })
+      .catch(() => {
+        setInventory([]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  React.useEffect(() => {
+    loadInventory();
+  }, [loadInventory]);
+
+  const handleAdjustStock = React.useCallback(
+    (row) => {
+      const input = window.prompt(
+        __t("inventory.adjustPrompt", { pn: row.pn }) ||
+          `Set on-hand quantity for ${row.pn}`,
+        String(row.stock),
+      );
+      if (input == null) return;
+      const qty = Number(input);
+      if (!Number.isFinite(qty) || qty < 0) {
+        toast(__t("inventory.invalidQty") || "Enter a valid quantity", {
+          kind: "error",
+        });
+        return;
+      }
+      Promise.resolve(
+        api?.inventory?.adjust?.({
+          part_id: row.partId,
+          warehouse_id: row.warehouseId,
+          quantity: qty,
+          adjustment_type: "adjust",
+          reason: "Manual adjustment via Inventory screen",
+        }),
+      )
+        .then((res) => {
+          if (!res) throw new Error("empty response");
+          toast(__t("inventory.adjusted") || "Adjusted", { kind: "success" });
+          loadInventory();
+        })
+        .catch((e) => {
+          toast(
+            __t("common.failedWithMessage", { message: e.message }) ||
+              "Failed: " + e.message,
+            { kind: "error" },
+          );
+        });
+    },
+    [loadInventory],
+  );
+
+  const handleManualAdjust = React.useCallback(() => {
+    const pn = window.prompt(
+      __t("inventory.enterPn") || "Enter the part number to adjust",
+    );
+    if (!pn) return;
+    const row = inventory.find(
+      (r) => r.pn.toLowerCase() === pn.trim().toLowerCase(),
+    );
+    if (!row) {
+      toast(
+        __t("inventory.pnNotFound", { pn }) ||
+          `No inventory record found for ${pn}`,
+        { kind: "error" },
+      );
+      return;
+    }
+    handleAdjustStock(row);
+  }, [inventory, handleAdjustStock]);
+
   const filtered = inventory.filter(
     (r) =>
       (statusFilter === "All" || r.status === statusFilter.toLowerCase()) &&
@@ -250,6 +371,15 @@ function InventoryScreen() {
     out: inventory.filter((r) => r.status === "out").length,
     value: inventory.reduce((s, r) => s + r.stock * (r.cost || 0), 0),
   };
+  const warehousesLabel =
+    warehouseCount != null
+      ? `${warehouseCount} warehouse${warehouseCount === 1 ? "" : "s"}`
+      : (() => {
+          const distinct = new Set(inventory.map((r) => r.warehouseId)).size;
+          return distinct
+            ? `${distinct} warehouse${distinct === 1 ? "" : "s"}`
+            : null;
+        })();
   return (
     <div className="screen-wrap">
       <ScreenHeader
@@ -261,7 +391,7 @@ function InventoryScreen() {
               1,
             ),
           }) ||
-          `${inventory.length} SKUs \u00B7 \u20B9${(totals.value * (window.INR_RATE || 83)).toLocaleString("en-IN", { maximumFractionDigits: 0 })} on hand \u00B7 6 warehouses`
+          `${inventory.length} SKUs \u00B7 \u20B9${(totals.value * (window.INR_RATE || 83)).toLocaleString("en-IN", { maximumFractionDigits: 0 })} on hand${warehousesLabel ? " \u00B7 " + warehousesLabel : ""}`
         }
         actions={
           <>
@@ -301,17 +431,25 @@ function InventoryScreen() {
                 {
                   icon: <Icon.Plus size={11} />,
                   label: __t("inventory.manualAdjust") || "Manual adjust",
-                  onSelect: () =>
-                    toast(__t("inventory.adjustStock") || "Adjust stock"),
+                  onSelect: handleManualAdjust,
                 },
               ]}
             />
             <Button
               variant="primary"
-              onClick={() =>
+              onClick={() => {
+                const flagged = totals.low + totals.out;
+                if (!flagged) {
+                  toast(
+                    __t("inventory.noReorderNeeded") ||
+                      "No SKUs need reordering right now",
+                    { kind: "success" },
+                  );
+                  return;
+                }
                 toast(
-                  __t("inventory.reorderReport") ||
-                    "Reorder report drafted \u00B7 4 SKUs flagged",
+                  __t("inventory.reorderReport", { count: flagged }) ||
+                    `Reorder report drafted \u00B7 ${flagged} SKU${flagged === 1 ? "" : "s"} flagged`,
                   {
                     kind: "success",
                     action: {
@@ -319,8 +457,8 @@ function InventoryScreen() {
                       onClick: () => ctx?.openModal("new-po"),
                     },
                   },
-                )
-              }
+                );
+              }}
             >
               <Icon.Cart size={12} />{" "}
               {__t("inventory.reorderLow") || "Reorder low"}
@@ -394,6 +532,9 @@ function InventoryScreen() {
           </button>
         ))}
       </div>
+      {loading ? (
+        <SkeletonRows count={6} cols={[90, 160, 90, 70, 70, 80, 90, 70, 32]} />
+      ) : (
       <DataTable
         ariaLabel={__t("inventory.title") || "Inventory"}
         columns={[
@@ -439,7 +580,11 @@ function InventoryScreen() {
             key: "reorder",
             header: __t("inventory.table.reorderPt") || "Reorder pt",
             align: "num",
-            render: (r) => <span className="mono fg-3">{r.reorder}</span>,
+            render: (r) => (
+              <span className="mono fg-3">
+                {r.reorder != null ? r.reorder : "—"}
+              </span>
+            ),
           },
           {
             key: "cost",
@@ -500,17 +645,12 @@ function InventoryScreen() {
                   {
                     icon: <Icon.Cart size={11} />,
                     label: __t("inventory.reorder") || "Reorder",
-                    onSelect: () =>
-                      toast(
-                        __t("inventory.draftedPo", { pn: r.pn }) ||
-                          "Drafted PO for " + r.pn,
-                      ),
+                    onSelect: () => ctx?.openModal("new-po", { pn: r.pn }),
                   },
                   {
                     icon: <Icon.Edit size={11} />,
                     label: __t("inventory.adjustStock") || "Adjust stock",
-                    onSelect: () =>
-                      toast(__t("inventory.adjusted") || "Adjusted"),
+                    onSelect: () => handleAdjustStock(r),
                   },
                   {
                     icon: <Icon.Scan size={11} />,
@@ -540,6 +680,7 @@ function InventoryScreen() {
           />
         }
       />
+      )}
     </div>
   );
 }

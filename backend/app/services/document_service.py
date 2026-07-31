@@ -84,6 +84,8 @@ async def list_documents(
     category: Optional[str] = None,
     folder: Optional[str] = None,
     search: Optional[str] = None,
+    part_id: Optional[int] = None,
+    project_id: Optional[int] = None,
 ):
     query = select(Document).where(Document.isLatest)
     tid = get_tenant_id()
@@ -100,6 +102,10 @@ async def list_documents(
             query = query.where(Document.category.in_(folder_cats))
     if search:
         query = query.where(Document.originalName.ilike(f"%{search}%"))
+    if part_id is not None:
+        query = query.where(Document.partId == part_id)
+    if project_id is not None:
+        query = query.where(Document.projectId == project_id)
 
     query = query.order_by(Document.id)
     return await paginate(db, query, page)

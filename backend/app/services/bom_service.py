@@ -160,6 +160,7 @@ async def _invalidate_bom_caches(bom_id: int) -> None:
     await cache_invalidate(f"bom:explosion:{bom_id}:*")
     await cache_invalidate(f"bom:explosion_closure:{bom_id}:*")
     await cache_invalidate(f"bom:cost_rollup:{bom_id}")
+    await cache_invalidate(f"bom:mass_rollup:{bom_id}")
 
 
 def _serialize_bom_item(item: BOMItem, part: Optional[Part] = None) -> dict:
@@ -1094,6 +1095,111 @@ def _drop_excluded_subtrees(items: list[BOMItem]) -> list[BOMItem]:
     return [item for item in items if not is_dropped(item.id, set())]
 
 
+# ============ Planning / Purchased-Leaf Required-Quantity Aggregation ============
+#
+# Track B (#8 PO-from-BOM, #15 purchased-leaf): a per-part_id counterpart to
+# get_quantity_rollup's per-part-NUMBER-STRING rollup below, used by
+# app/services/planning_service.py for the planning summary view and PO
+# generation. Reuses _drop_excluded_subtrees + _compute_levels_and_effective_qty
+# (identical cascade-drop / effective-qty semantics as get_quantity_rollup)
+# rather than duplicating traversal logic, and adds ONE more cascade-drop pass:
+# when purchased_as_leaf is True, a part flagged part_kind == 'PURCHASED'
+# (Part.part_kind — see app/models/part.py) is treated as a NON-exploded leaf.
+# Its own BOM line is kept, but every line beneath it in this BOM's tree
+# (children, grandchildren, ...) is dropped from the aggregate — mirroring how
+# exclude_from_bom drops a line's entire subtree above. This matters for
+# planning/procurement: a purchased sub-assembly (e.g. an off-the-shelf motor)
+# must be ordered as ONE line, not have its internal components separately
+# aggregated/ordered.
+
+
+def _drop_children_of_purchased(
+    items: list[BOMItem], parts_map: dict[int, Part]
+) -> list[BOMItem]:
+    """Drop every line that has a part_kind == 'PURCHASED' part ANYWHERE in
+    its ancestor chain (the purchased line itself is always kept — only its
+    descendants are removed)."""
+    id_map = {item.id: item for item in items}
+    dropped: dict[int, bool] = {}
+
+    def has_purchased_ancestor(item_id: int, visiting: set[int]) -> bool:
+        if item_id in dropped:
+            return dropped[item_id]
+        item = id_map[item_id]
+        parent_id = item.parent_item_id
+        if parent_id is None or parent_id not in id_map or item_id in visiting:
+            dropped[item_id] = False
+            return False
+        parent = id_map[parent_id]
+        parent_part = parts_map.get(parent.part_id) if parent.part_id else None
+        if parent_part is not None and (parent_part.part_kind or "").upper() == "PURCHASED":
+            dropped[item_id] = True
+            return True
+        visiting.add(item_id)
+        result = has_purchased_ancestor(parent_id, visiting)
+        visiting.discard(item_id)
+        dropped[item_id] = result
+        return result
+
+    return [item for item in items if not has_purchased_ancestor(item.id, set())]
+
+
+async def get_required_quantities(
+    db: AsyncSession, bom_id: int, purchased_as_leaf: bool = True
+) -> list[dict]:
+    """Planning/PO-generation view: aggregated required quantity per part_id
+    across a BOM's full exploded tree (effective qty = own line qty * every
+    ancestor's line qty down from the root), honoring the same
+    exclude_from_bom cascade-drop as get_quantity_rollup.
+
+    purchased_as_leaf (default True — the sensible default for planning and
+    PO generation, unlike the explosion views above which default this
+    behavior off to stay backward compatible): see _drop_children_of_purchased.
+    """
+    await get_bom_or_404(db, bom_id)
+    tid = get_tenant_id()
+    items_stmt = select(BOMItem).where(BOMItem.bom_id == bom_id)
+    if tid is not None:
+        items_stmt = items_stmt.where(BOMItem.tenantId == tid)
+    items = _drop_excluded_subtrees((await db.execute(items_stmt)).scalars().all())
+
+    part_ids = {i.part_id for i in items if i.part_id}
+    parts_map: dict[int, Part] = {}
+    if part_ids:
+        pr_stmt = select(Part).where(Part.id.in_(part_ids))
+        if tid is not None:
+            pr_stmt = pr_stmt.where(Part.tenantId == tid)
+        for p in (await db.execute(pr_stmt)).scalars().all():
+            parts_map[p.id] = p
+
+    if purchased_as_leaf:
+        items = _drop_children_of_purchased(items, parts_map)
+
+    _, effective_qty = _compute_levels_and_effective_qty(items)
+
+    agg: dict[int, dict] = {}
+    for item in items:
+        if not item.part_id:
+            continue
+        part = parts_map.get(item.part_id)
+        entry = agg.get(item.part_id)
+        if entry is None:
+            entry = {
+                "part_id": item.part_id,
+                "part_number": part.pn if part else None,
+                "part_name": part.name if part else None,
+                "part_kind": part.part_kind if part else None,
+                "unit": item.unit,
+                "unit_cost": float(part.cost) if part and part.cost is not None else 0.0,
+                "primary_vendor_id": part.primary_vendor_id if part else None,
+                "required_qty": 0.0,
+            }
+            agg[item.part_id] = entry
+        entry["required_qty"] += effective_qty[item.id]
+
+    return sorted(agg.values(), key=lambda r: (r["part_number"] or ""))
+
+
 async def get_quantity_rollup(db: AsyncSession, bom_id: int) -> dict:
     await get_bom_or_404(db, bom_id)
     tid = get_tenant_id()
@@ -1192,6 +1298,105 @@ async def get_cost_rollup(db: AsyncSession, bom_id: int) -> dict:
         "total_cost": round(total_cost, 2),
         "cost_by_level": {k: round(v, 2) for k, v in cost_by_level.items()},
         "cost_by_category": {k: round(v, 2) for k, v in cost_by_category.items()},
+    }
+    await cache_set(cache_key, result, ttl=300)
+    return result
+
+
+# ============ Mass Rollup (and generic numeric-property rollup) ============
+#
+# Same sub-assembly -> top multiplication as get_cost_rollup/get_quantity_rollup
+# above (effective_qty from _compute_levels_and_effective_qty, exclude_from_bom
+# cascade-drop from _drop_excluded_subtrees) but generalized to ANY numeric Part
+# column instead of hardcoding cost. get_mass_rollup is the concrete case for
+# Part.weight (grams — see app/models/part.py), reached via get_property_rollup
+# so a future numeric roll-up (e.g. a custom numeric spec) can reuse the same
+# engine without duplicating the level/exclude bookkeeping.
+
+
+def _rollup_numeric_part_property(
+    items: list[BOMItem],
+    parts_map: dict[int, Any],
+    levels: dict[int, int],
+    effective_qty: dict[int, float],
+    attribute: str,
+) -> tuple[float, dict[int, float]]:
+    """Sum getattr(part, attribute) * EFFECTIVE quantity per item, grouped by
+    level. Items with no linked part, or whose part has no value for
+    `attribute` (None), contribute nothing — mirroring get_cost_rollup's
+    `item.part_id in parts_map` guard so an unset property doesn't silently
+    count as 0 alongside parts that are genuinely zero.
+    """
+    total = 0.0
+    by_level: dict[int, float] = {}
+    for item in items:
+        if not item.part_id or item.part_id not in parts_map:
+            continue
+        part = parts_map[item.part_id]
+        raw_value = getattr(part, attribute, None)
+        if raw_value is None:
+            continue
+        extended = float(raw_value) * effective_qty[item.id]
+        total += extended
+        level = levels[item.id]
+        by_level[level] = by_level.get(level, 0) + extended
+    return total, by_level
+
+
+async def get_property_rollup(db: AsyncSession, bom_id: int, part_attribute: str) -> dict:
+    """Generic sub-assembly -> top rollup of any numeric Part attribute
+    (e.g. "weight" for mass), respecting exclude_from_bom the same way
+    get_cost_rollup/get_quantity_rollup do. Not cached itself — callers with a
+    stable, named property (like get_mass_rollup below) cache their own
+    wrapped result.
+    """
+    await get_bom_or_404(db, bom_id)
+    tid = get_tenant_id()
+    # Same exclude_from_bom cascade-drop semantics as get_cost_rollup/get_quantity_rollup.
+    items_stmt = select(BOMItem).where(BOMItem.bom_id == bom_id)
+    if tid is not None:
+        items_stmt = items_stmt.where(BOMItem.tenantId == tid)
+    items = _drop_excluded_subtrees((await db.execute(items_stmt)).scalars().all())
+
+    part_ids = [item.part_id for item in items if item.part_id]
+    parts_map: dict[int, Any] = {}
+    if part_ids:
+        pr_stmt = select(Part).where(Part.id.in_(set(part_ids)))
+        if tid is not None:
+            pr_stmt = pr_stmt.where(Part.tenantId == tid)
+        pr = await db.execute(pr_stmt)
+        for p in pr.scalars().all():
+            parts_map[p.id] = p
+
+    levels, effective_qty = _compute_levels_and_effective_qty(items)
+    total, by_level = _rollup_numeric_part_property(
+        items, parts_map, levels, effective_qty, part_attribute
+    )
+
+    return {
+        "bom_id": bom_id,
+        "property": part_attribute,
+        "total": total,
+        "by_level": by_level,
+    }
+
+
+async def get_mass_rollup(db: AsyncSession, bom_id: int) -> dict:
+    """Sub-assembly -> top mass rollup: effective_qty * Part.weight (grams)
+    per line, grouped by level, excluding exclude_from_bom lines (and their
+    entire subtree) exactly like get_cost_rollup/get_quantity_rollup.
+    """
+    cache_key = f"bom:mass_rollup:{bom_id}"
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    generic = await get_property_rollup(db, bom_id, "weight")
+    result = {
+        "bom_id": bom_id,
+        "total_mass": round(generic["total"], 4),
+        "mass_by_level": {k: round(v, 4) for k, v in generic["by_level"].items()},
+        "unit": "g",
     }
     await cache_set(cache_key, result, ttl=300)
     return result

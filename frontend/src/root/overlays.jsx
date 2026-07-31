@@ -1,5 +1,4 @@
 import PropTypes from "prop-types";
-import { storage } from "../utils/storage.js";
 import { useAutosave } from "../hooks/useAutosave.js";
 import { __t } from "../i18n";
 import { toast, subscribe } from "../utils/toast";
@@ -283,29 +282,89 @@ window.Popover = Popover;
 window.DropdownButton = DropdownButton;
 function NewPOModal({ open, onClose }) {
   const ctx = useAppStore();
-  const [vendor, setVendor] = React.useState("Mean Well");
-  const [vendorId, setVendorId] = React.useState(1);
-  const [eta, setEta] = React.useState("2026-06-12");
-  const [items, setItems] = React.useState([
-    { pn: "EL-PSU-240W", partId: 2, qty: 25, cost: 84.0 },
-  ]);
+  const [vendor, setVendor] = React.useState("");
+  const [vendorId, setVendorId] = React.useState(null);
+  const [eta, setEta] = React.useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    return d.toISOString().slice(0, 10);
+  });
+  const [items, setItems] = React.useState([]);
   const [submitting, setSubmitting] = React.useState(false);
+  const [vendors, setVendors] = React.useState(ctx?.vendors || []);
+  const [parts, setParts] = React.useState(ctx?.parts || []);
   const total = items.reduce((s, i) => s + i.qty * i.cost, 0);
-  const vendors = ctx?.vendors || BOM_DATA?.vendors || [];
+  // Load real vendor/part reference data on open \u2014 the ctx store (owned by
+  // the app shell) already carries these when populated; fall back to a
+  // direct fetch so the modal still works standalone. Never fabricate rows.
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      if (!ctx?.vendors) {
+        try {
+          const res = await api.vendors.list();
+          const list = res?.items || res || [];
+          if (!cancelled) setVendors(list);
+        } catch (e) {
+          /* leave vendors empty \u2014 graceful, no fabricated fallback */
+        }
+      }
+      if (!ctx?.parts) {
+        try {
+          const res = await api.parts.list();
+          const list = res?.items || res || [];
+          if (!cancelled) setParts(list);
+        } catch (e) {
+          /* leave parts empty \u2014 graceful, no fabricated fallback */
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, ctx]);
+  React.useEffect(() => {
+    if (ctx?.vendors) setVendors(ctx.vendors);
+  }, [ctx?.vendors]);
+  React.useEffect(() => {
+    if (ctx?.parts) setParts(ctx.parts);
+  }, [ctx?.parts]);
+  // Default to the first real vendor once the list loads instead of a
+  // hardcoded name/id.
+  React.useEffect(() => {
+    if (open && !vendorId && vendors.length) {
+      setVendorId(vendors[0].id);
+      setVendor(vendors[0].name);
+    }
+  }, [open, vendors, vendorId]);
   const submit = async () => {
+    if (!vendorId) {
+      toast(__t("overlays.newPo.vendorRequired") || "Select a vendor first", {
+        kind: "warn",
+      });
+      return;
+    }
+    const validItems = items.filter((it) => it.partId && it.qty > 0);
+    if (!validItems.length) {
+      toast(
+        __t("overlays.newPo.lineItemRequired") ||
+          "Add at least one line item with a part selected",
+        { kind: "warn" },
+      );
+      return;
+    }
     setSubmitting(true);
     try {
-      for (const item of items) {
-        if (api?.procurement?.create) {
-          await api.procurement.create({
-            partId: item.partId || 1,
-            vendorId: vendorId,
-            qty: item.qty,
-            unitCost: item.cost,
-            totalCost: item.qty * item.cost,
-            eta: eta,
-          });
-        }
+      for (const item of validItems) {
+        await api.procurement.create({
+          partId: item.partId,
+          vendorId: vendorId,
+          qty: item.qty,
+          unitCost: item.cost,
+          totalCost: item.qty * item.cost,
+          eta: eta,
+        });
       }
       onClose();
       toast(`PO created \u00B7 ${vendor} \u00B7 ${INR(total, 2)}`, {
@@ -362,13 +421,18 @@ function NewPOModal({ open, onClose }) {
             id="po-vendor"
             name="poVendor"
             className="select"
-            value={vendorId}
+            value={vendorId ?? ""}
             onChange={(e) => {
               const v = vendors.find((v) => v.id === Number(e.target.value));
               setVendorId(Number(e.target.value));
               if (v) setVendor(v.name);
             }}
           >
+            {!vendors.length && (
+              <option value="">
+                {__t("overlays.newPo.noVendors") || "No vendors found"}
+              </option>
+            )}
             {vendors.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.name}
@@ -420,11 +484,19 @@ function NewPOModal({ open, onClose }) {
         </span>
         <button
           className="btn small"
-          onClick={() => setItems([...items, { pn: "", qty: 1, cost: 0 }])}
+          onClick={() =>
+            setItems([...items, { pn: "", partId: null, qty: 1, cost: 0 }])
+          }
         >
           <Icon.Plus size={11} /> {__t("overlays.newPo.addLine") || "Add line"}
         </button>
       </div>
+      {!parts.length && (
+        <div className="fs-11 fg-3 mb-8">
+          {__t("overlays.newPo.noParts") ||
+            "No parts found in the catalog — add a part first."}
+        </div>
+      )}
       <div className="border-line rounded-r2 overflow-h">
         <table className="bom-table table-auto">
           <thead>
@@ -438,19 +510,35 @@ function NewPOModal({ open, onClose }) {
           </thead>
           <tbody>
             {items.map((it, i) => (
-              <tr key={it.pn + "-" + i}>
+              <tr key={"po-item-" + i}>
                 <td className="pl-12">
-                  <input
+                  <select
                     id={"po-item-pn-" + i}
                     name="poItemPn"
-                    className="input mono h-26 fs-11"
-                    value={it.pn}
+                    className="select h-26 fs-11 mono"
+                    value={it.partId ?? ""}
                     onChange={(e) => {
+                      const pid = Number(e.target.value) || null;
+                      const p = parts.find((p) => p.id === pid);
                       const n = [...items];
-                      n[i].pn = e.target.value;
+                      n[i] = {
+                        ...n[i],
+                        partId: pid,
+                        pn: p ? p.pn : "",
+                        cost: p && !n[i].cost ? p.cost || 0 : n[i].cost,
+                      };
                       setItems(n);
                     }}
-                  />
+                  >
+                    <option value="">
+                      {__t("overlays.newPo.selectPart") || "Select part…"}
+                    </option>
+                    {parts.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.pn} — {p.name}
+                      </option>
+                    ))}
+                  </select>
                 </td>
                 <td className="num">
                   <input
@@ -694,6 +782,19 @@ function UploadModal({ open, onClose, title, files: externalFiles }) {
     title || __t("overlays.upload.title") || "Upload document";
   React.useEffect(() => {
     if (open && externalFiles?.length) {
+      // Real File objects (e.g. dropped elsewhere and handed to this modal)
+      // must flow into fileObjects too, or upload would silently have
+      // nothing to send to the server.
+      const realFiles = externalFiles.filter((f) => f instanceof File);
+      if (realFiles.length) {
+        setFileObjects((prev) => {
+          const merged = [...prev];
+          realFiles.forEach((f) => {
+            if (!merged.some((m) => m.name === f.name)) merged.push(f);
+          });
+          return merged;
+        });
+      }
       setFiles((prev) => {
         const names = externalFiles.map((f) => f.name || f);
         const merged = [...prev];
@@ -712,7 +813,11 @@ function UploadModal({ open, onClose, title, files: externalFiles }) {
       setFiles([...files, ...droppedFiles.map((f) => f.name)]);
       setFileObjects([...fileObjects, ...droppedFiles]);
     } else {
-      setFiles([...files, "Datasheet_STM32H743.pdf"]);
+      toast(
+        __t("overlays.upload.noValidFiles") ||
+          "No files detected in that drop \u2014 try dragging files directly",
+        { kind: "warn" },
+      );
     }
   };
   const handleFileSelect = (e) => {
@@ -724,42 +829,25 @@ function UploadModal({ open, onClose, title, files: externalFiles }) {
     e.target.value = "";
   };
   const submit = async () => {
+    if (!fileObjects.length) {
+      toast(
+        files.length
+          ? __t("overlays.upload.noFileData") ||
+              "Selected files have no data to upload \u2014 pick them again from disk"
+          : __t("overlays.upload.noFiles") || "Add at least one file first",
+        { kind: "warn" },
+      );
+      return;
+    }
     setUploading(true);
     try {
-      if (fileObjects.length > 0 && api?.documents?.upload) {
-        for (const file of fileObjects) {
-          await api.documents.upload(file, { category });
-        }
-        toast(
-          `${files.length} ${__t("overlays.upload.fileCount") || "file(s) uploaded"}`,
-          { kind: "success" },
-        );
-      } else {
-        const existing = storage.docs.get();
-        const now = new Date().toISOString().slice(0, 10);
-        files.forEach((f) => {
-          existing.push({
-            id: Date.now() + Math.random(),
-            name: f,
-            ext: f.split(".").pop().toUpperCase(),
-            category,
-            size: (Math.random() * 5000 + 100).toFixed(1) + " KB",
-            updated: now,
-            who: "You",
-          });
-        });
-        storage.docs.set(existing);
-        toast(
-          `${files.length || 1} ${__t("overlays.upload.fileCountUploaded") || "file(s) uploaded"} \u00B7 OCR queued`,
-          {
-            kind: "success",
-            action: {
-              label: __t("overlays.upload.openOcr") || "Open OCR",
-              onClick: () => window.__nav?.("ocr"),
-            },
-          },
-        );
+      for (const file of fileObjects) {
+        await api.documents.upload(file, { category });
       }
+      toast(
+        `${fileObjects.length} ${__t("overlays.upload.fileCount") || "file(s) uploaded"}`,
+        { kind: "success" },
+      );
       window.dispatchEvent(new CustomEvent("documents-changed"));
       onClose();
       setFiles([]);
@@ -1326,60 +1414,85 @@ Object.assign(window, {
 });
 function FindAlternatesModal({ open, onClose, row }) {
   const [selected, setSelected] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [alts, setAlts] = React.useState([]);
+  const [applying, setApplying] = React.useState(false);
+  const resolvedPartId =
+    row && typeof row.partId === "number"
+      ? row.partId
+      : row && typeof row.id === "number"
+        ? row.id
+        : null;
+  // Real interchangeability suggestions (app.services AI feature) \u2014 no
+  // fabricated alternates. Read-only GET; never triggers the expensive
+  // /analyze side-effecting endpoint just from opening this modal.
   React.useEffect(() => {
-    if (open) setSelected(null);
-  }, [open]);
+    if (!open) return;
+    setSelected(null);
+    if (!resolvedPartId) {
+      setAlts([]);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    api.ai.interchangeability
+      .list({ partId: resolvedPartId })
+      .then(async (res) => {
+        const suggestions = res?.items || res || [];
+        const withParts = await Promise.all(
+          suggestions.map(async (s) => {
+            const altPartId =
+              s.partId === resolvedPartId ? s.suggestedPartId : s.partId;
+            try {
+              const part = await api.parts.get(altPartId);
+              return { suggestion: s, altPartId, part };
+            } catch (e) {
+              return { suggestion: s, altPartId, part: null };
+            }
+          }),
+        );
+        if (!cancelled) setAlts(withParts.filter((a) => a.part));
+      })
+      .catch(() => {
+        if (!cancelled) setAlts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, resolvedPartId]);
   if (!open || !row || !row.pn) return null;
-  const baseCost = row.cost || 10;
-  const alts = [
-    {
-      pn: row.pn.replace(/-([A-Z])$/, "-B") + "-A",
-      name: row.name + " (alt)",
-      vendor: "Mouser",
-      cost: baseCost * 1.04,
-      lead: Math.max(2, (row.lead || 14) - 4),
-      origin: "US",
-      stock: "1,240 in stock",
-      rating: 4.7,
-    },
-    {
-      pn: row.pn + "-CN",
-      name: row.name + " (compatible)",
-      vendor: "LCSC",
-      cost: baseCost * 0.74,
-      lead: (row.lead || 14) + 7,
-      origin: "CN",
-      stock: "8,500 in stock",
-      rating: 4.1,
-    },
-    {
-      pn: row.pn.slice(0, -1) + "X",
-      name: row.name + " (premium)",
-      vendor: "Digi-Key",
-      cost: baseCost * 1.18,
-      lead: Math.max(2, (row.lead || 14) - 7),
-      origin: "US",
-      stock: "320 in stock",
-      rating: 4.8,
-    },
-  ];
-  const apply = () => {
-    const alt = alts.find((a) => a.pn === selected);
-    onClose();
-    toast(
-      `${row.pn} \u2192 ${alt.pn} ${__t("overlays.findAlternates.swapped") || "swapped"}`,
-      {
-        kind: "success",
-        action: {
-          label: __t("common.undo") || "Undo",
-          onClick: () =>
-            toast(
-              __t("overlays.findAlternates.revertedTo") ||
-                "Reverted to " + row.pn,
-            ),
-        },
-      },
-    );
+  const cheaperCount = alts.filter(
+    (a) => (a.part.cost || 0) < (row.cost || 0),
+  ).length;
+  const fasterCount = alts.filter(
+    (a) => a.part.lead != null && a.part.lead < (row.lead || 999),
+  ).length;
+  const apply = async () => {
+    const chosen = alts.find((a) => a.altPartId === selected);
+    if (!chosen) return;
+    setApplying(true);
+    try {
+      await api.ai.interchangeability.updateStatus(
+        chosen.suggestion.id,
+        "approved",
+      );
+      onClose();
+      toast(
+        `${row.pn} \u2192 ${chosen.part.pn} ${__t("overlays.findAlternates.swapped") || "marked as the approved alternate"}`,
+        { kind: "success" },
+      );
+    } catch (err) {
+      toast(
+        __t("overlays.findAlternates.applyFailed") ||
+          "Failed to record alternate: " + err.message,
+        { kind: "error" },
+      );
+    } finally {
+      setApplying(false);
+    }
   };
   return (
     <Modal
@@ -1393,23 +1506,31 @@ function FindAlternatesModal({ open, onClose, row }) {
         <>
           <span className="left">
             {alts.length}{" "}
-            {__t("overlays.findAlternates.alternates") || "alternates"} \u00B7 1{" "}
-            {__t("overlays.findAlternates.cheaper") || "cheaper"} \u00B7 1{" "}
-            {__t("overlays.findAlternates.faster") || "faster"} \u00B7 1{" "}
-            {__t("overlays.findAlternates.higherQuality") || "higher quality"}
+            {__t("overlays.findAlternates.alternates") || "alternates"}
+            {alts.length > 0 && (
+              <>
+                {" "}
+                \u00B7 {cheaperCount}{" "}
+                {__t("overlays.findAlternates.cheaper") || "cheaper"} \u00B7{" "}
+                {fasterCount}{" "}
+                {__t("overlays.findAlternates.faster") || "faster"}
+              </>
+            )}
           </span>
           <button className="btn" onClick={onClose}>
             {__t("common.cancel") || "Cancel"}
           </button>
           <button
             className="btn primary"
-            disabled={!selected}
+            disabled={!selected || applying}
             onClick={apply}
             style={{ opacity: selected ? 1 : 0.5 }}
           >
             <Icon.Check size={12} />{" "}
-            {__t("overlays.findAlternates.swapToSelected") ||
-              "Swap to selected"}
+            {applying
+              ? __t("overlays.findAlternates.applying") || "Applying..."
+              : __t("overlays.findAlternates.swapToSelected") ||
+                "Swap to selected"}
           </button>
         </>
       }
@@ -1450,15 +1571,39 @@ function FindAlternatesModal({ open, onClose, row }) {
           </div>
         </div>
       </div>
+      {loading && (
+        <div className="fs-12 fg-3 text-center" style={{ padding: 32 }}>
+          {__t("overlays.findAlternates.loading") ||
+            "Looking for alternates\u2026"}
+        </div>
+      )}
+      {!loading && !resolvedPartId && (
+        <div
+          className="bg-sunk border-line rounded-r2 fs-12 fg-3 text-center"
+          style={{ padding: 32 }}
+        >
+          {__t("overlays.findAlternates.noPartId") ||
+            "This row isn't linked to a catalog part, so no alternates can be looked up."}
+        </div>
+      )}
+      {!loading && resolvedPartId && alts.length === 0 && (
+        <div
+          className="bg-sunk border-line rounded-r2 fs-12 fg-3 text-center"
+          style={{ padding: 32 }}
+        >
+          {__t("overlays.findAlternates.none") ||
+            "No interchangeability suggestions on file for this part yet."}
+        </div>
+      )}
       <div className="flex flex-col gap-8">
-        {alts.map((a, i) => {
-          const cheaper = a.cost < row.cost;
-          const faster = a.lead < (row.lead || 999);
-          const isSelected = selected === a.pn;
+        {alts.map(({ suggestion, altPartId, part: a }) => {
+          const cheaper = (a.cost || 0) < (row.cost || 0);
+          const faster = a.lead != null && a.lead < (row.lead || 999);
+          const isSelected = selected === altPartId;
           return (
             <div
-              key={a.pn}
-              onClick={() => setSelected(a.pn)}
+              key={altPartId}
+              onClick={() => setSelected(altPartId)}
               style={{
                 padding: 14,
                 border:
@@ -1483,7 +1628,10 @@ function FindAlternatesModal({ open, onClose, row }) {
                           borderColor: "var(--ok)",
                         }}
                       >
-                        {(((row.cost - a.cost) / row.cost) * 100).toFixed(0)}%{" "}
+                        {row.cost
+                          ? (((row.cost - a.cost) / row.cost) * 100).toFixed(0)
+                          : 0}
+                        %{" "}
                         {__t("overlays.findAlternates.cheaper") || "CHEAPER"}
                       </span>
                     )}
@@ -1501,7 +1649,7 @@ function FindAlternatesModal({ open, onClose, row }) {
                         {__t("overlays.findAlternates.faster") || "FASTER"}
                       </span>
                     )}
-                    {a.rating >= 4.7 && (
+                    {suggestion.score >= 0.7 && (
                       <span
                         className="tag-pill border-color-accent fg-accent"
                         style={{
@@ -1509,11 +1657,17 @@ function FindAlternatesModal({ open, onClose, row }) {
                             "color-mix(in oklch, var(--accent) 12%, var(--bg))",
                         }}
                       >
-                        \u2605 {a.rating}
+                        {(suggestion.score * 100).toFixed(0)}%{" "}
+                        {__t("overlays.findAlternates.match") || "MATCH"}
                       </span>
                     )}
                   </div>
                   <div className="fw-600 fs-13">{a.name}</div>
+                  {suggestion.reason && (
+                    <div className="fs-10 fg-4 font-mono mt-2">
+                      {suggestion.reason.split(", ").join(" \u00B7 ")}
+                    </div>
+                  )}
                 </div>
                 <div
                   style={{
@@ -1535,14 +1689,14 @@ function FindAlternatesModal({ open, onClose, row }) {
               </div>
               <div
                 className="d-grid gap-12 font-mono fs-11"
-                style={{ gridTemplateColumns: "repeat(5, 1fr)" }}
+                style={{ gridTemplateColumns: "repeat(4, 1fr)" }}
               >
                 <div>
                   <span className="fg-3 fw-600">
                     {__t("part.unitCost") || "Cost"}{" "}
                   </span>
                   <span style={{ color: cheaper ? "var(--ok)" : "var(--fg)" }}>
-                    {INR(a.cost, 2)}
+                    {INR(a.cost || 0, 2)}
                   </span>
                 </div>
                 <div>
@@ -1550,22 +1704,21 @@ function FindAlternatesModal({ open, onClose, row }) {
                     {__t("part.leadDays") || "Lead"}{" "}
                   </span>
                   <span style={{ color: faster ? "var(--info)" : "var(--fg)" }}>
-                    {a.lead}d
+                    {a.lead != null ? a.lead + "d" : "\u2014"}
                   </span>
                 </div>
                 <div>
                   <span className="fg-3">
                     {__t("part.origin") || "Origin"}{" "}
                   </span>
-                  {a.origin}
+                  {a.origin || "\u2014"}
                 </div>
                 <div>
                   <span className="fg-3">
                     {__t("vendor.title") || "Vendor"}{" "}
                   </span>
-                  {a.vendor}
+                  {a.vendor || "\u2014"}
                 </div>
-                <div className="fg-3">{a.stock}</div>
               </div>
             </div>
           );
@@ -1588,26 +1741,63 @@ function SendRFQModal({ open, onClose, row }) {
   ]);
   const [qty, setQty] = React.useState(100);
   const [deadline, setDeadline] = React.useState("2026-06-05");
-  const submit = () => {
-    onClose();
-    toast(
-      (__t("overlays.sendRfq.sent") || "RFQ sent to") +
-        " " +
-        vendors.length +
-        " " +
-        (__t("overlays.sendRfq.vendors") || "vendors") +
-        " \u00B7 " +
-        (__t("overlays.sendRfq.responsesBy") || "responses by") +
-        " " +
-        deadline,
-      {
-        kind: "success",
-        action: {
-          label: __t("overlays.sendRfq.viewRfq") || "View RFQ",
-          onClick: () => window.__nav?.("procurement"),
+  const [sending, setSending] = React.useState(false);
+  const specsTemplate = row
+    ? `Part: ${row.pn} ${row.name}\nQuantity: ${qty}\nTarget unit cost: ${INR((row.cost || 0) * 0.95, 2)}\nDelivery: by ${deadline}\nPackaging: bulk, anti-static where applicable.`
+    : "";
+  const [specs, setSpecs] = React.useState(specsTemplate);
+  React.useEffect(() => {
+    if (open) setSpecs(specsTemplate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, row?.pn]);
+  const partId = row && typeof row.partId === "number" ? row.partId : null;
+  const submit = async (asDraft) => {
+    setSending(true);
+    try {
+      await api.supplierPortal.createRfq({
+        title: `RFQ \u00B7 ${row.pn} \u00B7 ${row.name}`,
+        description: `${specs}\n\nInvited vendors: ${vendors.join(", ") || "\u2014"}`,
+        response_deadline: deadline,
+        line_items: partId
+          ? [
+              {
+                part_id: partId,
+                quantity: qty,
+                target_price: row.cost ? row.cost * 0.95 : undefined,
+                notes: specs,
+              },
+            ]
+          : [],
+      });
+      onClose();
+      toast(
+        asDraft
+          ? __t("overlays.sendRfq.savedDraft") || "RFQ saved as draft"
+          : (__t("overlays.sendRfq.sent") || "RFQ sent to") +
+              " " +
+              vendors.length +
+              " " +
+              (__t("overlays.sendRfq.vendors") || "vendors") +
+              " \u00B7 " +
+              (__t("overlays.sendRfq.responsesBy") || "responses by") +
+              " " +
+              deadline,
+        {
+          kind: "success",
+          action: {
+            label: __t("overlays.sendRfq.viewRfq") || "View RFQ",
+            onClick: () => window.__nav?.("procurement"),
+          },
         },
-      },
-    );
+      );
+    } catch (err) {
+      toast(
+        __t("overlays.sendRfq.failed") || "Failed to send RFQ: " + err.message,
+        { kind: "error" },
+      );
+    } finally {
+      setSending(false);
+    }
   };
   if (!open || !row || !row.pn) return null;
   return (
@@ -1624,20 +1814,20 @@ function SendRFQModal({ open, onClose, row }) {
           </button>
           <button
             className="btn"
-            onClick={() => {
-              onClose();
-              toast(
-                __t("overlays.sendRfq.savedDraft") || "RFQ saved as draft",
-                { kind: "success" },
-              );
-            }}
+            onClick={() => submit(true)}
+            disabled={sending}
           >
             {__t("overlays.sendRfq.saveDraft") || "Save draft"}
           </button>
-          <button className="btn primary" onClick={submit}>
+          <button
+            className="btn primary"
+            onClick={() => submit(false)}
+            disabled={sending}
+          >
             <Icon.Cart size={12} />{" "}
-            {__t("overlays.sendRfq.sendTo") || "Send to"} {vendors.length}{" "}
-            {__t("overlays.sendRfq.vendors") || "vendors"}
+            {sending
+              ? __t("overlays.sendRfq.sending") || "Sending..."
+              : `${__t("overlays.sendRfq.sendTo") || "Send to"} ${vendors.length} ${__t("overlays.sendRfq.vendors") || "vendors"}`}
           </button>
         </>
       }
@@ -1720,7 +1910,8 @@ function SendRFQModal({ open, onClose, row }) {
           id="rfq-specs"
           name="rfqSpecs"
           className="input"
-          defaultValue={`Part: ${row.pn} ${row.name}\nQuantity: ${qty}\nTarget unit cost: ${INR(row.cost * 0.95, 2)}\nDelivery: by ${deadline}\nPackaging: bulk, anti-static where applicable.`}
+          value={specs}
+          onChange={(e) => setSpecs(e.target.value)}
         />
       </div>
       <div className="field-row">
@@ -1791,7 +1982,33 @@ function DocPreviewModal({ open, onClose, doc }) {
           </button>
           <button
             className="btn"
-            onClick={() => toast(__t("common.copied") || "Link copied")}
+            onClick={() => {
+              const url = doc.id
+                ? `${window.location.origin}${window.location.pathname}?doc=${doc.id}`
+                : window.location.href;
+              if (navigator.clipboard?.writeText) {
+                navigator.clipboard
+                  .writeText(url)
+                  .then(() =>
+                    toast(__t("common.copied") || "Link copied", {
+                      kind: "success",
+                    }),
+                  )
+                  .catch(() =>
+                    toast(
+                      __t("overlays.docPreview.copyFailed") ||
+                        "Couldn't copy link",
+                      { kind: "error" },
+                    ),
+                  );
+              } else {
+                toast(
+                  __t("overlays.docPreview.copyFailed") ||
+                    "Clipboard not available",
+                  { kind: "warn" },
+                );
+              }
+            }}
           >
             <Icon.Link size={12} />{" "}
             {__t("overlays.docPreview.copyLink") || "Copy link"}
@@ -1800,9 +2017,9 @@ function DocPreviewModal({ open, onClose, doc }) {
             className="btn primary"
             onClick={() =>
               toast(
-                __t("overlays.docPreview.downloading") ||
-                  "Downloading " + doc.name,
-                { kind: "success" },
+                __t("overlays.docPreview.downloadUnavailable") ||
+                  "Direct download isn't available in this preview yet",
+                { kind: "warn" },
               )
             }
           >
@@ -2186,7 +2403,7 @@ function DocPreviewBody({ kind, doc }) {
             </tr>
           </thead>
           <tbody>
-            {(ctx?.rows || BOM_DATA.rows)[0].children
+            {((ctx?.rows || BOM_DATA.rows)[0]?.children || [])
               .flatMap((s) => s.children || [])
               .slice(0, 14)
               .map((r, i) => (
@@ -2541,31 +2758,83 @@ function ChangeOwnerModal({ open, onClose, row }) {
   const ctx = useAppStore();
   const [owner, setOwner] = React.useState("");
   const [note, setNote] = React.useState("");
-  const TEAM = [
-    { name: "Elena Chen", handle: "elena", role: "ENG LEAD" },
-    { name: "Marie Park", handle: "marie", role: "ENG" },
-    { name: "Karan Singh", handle: "karan", role: "PROC" },
-    { name: "Ryo Sato", handle: "ryo", role: "ENG" },
-    { name: "Tom Reyes", handle: "tom", role: "FIN" },
-  ];
+  const [team, setTeam] = React.useState(ctx?.users || []);
+  const [loadingTeam, setLoadingTeam] = React.useState(false);
+  const [submitting, setSubmitting] = React.useState(false);
   React.useEffect(() => {
     if (open) {
       setOwner("");
       setNote("");
     }
   }, [open]);
+  // Real team roster \u2014 no fabricated names. Falls back to whatever the app
+  // store already has (usually already loaded elsewhere) before fetching.
+  React.useEffect(() => {
+    if (!open || ctx?.users) return;
+    let cancelled = false;
+    setLoadingTeam(true);
+    api.users
+      .list()
+      .then((res) => {
+        const list = res?.items || res || [];
+        if (!cancelled) setTeam(list);
+      })
+      .catch(() => {
+        if (!cancelled) setTeam([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingTeam(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, ctx]);
   if (!open || !row) return null;
-  const submit = () => {
+  const partId =
+    typeof row.partId === "number"
+      ? row.partId
+      : typeof row.id === "number"
+        ? row.id
+        : null;
+  const submit = async () => {
     if (!owner) return;
-    onClose();
-    toast(
-      (__t("overlays.changeOwner.changedTo") || "Owner changed to") +
-        " " +
-        owner +
-        " \u00B7 " +
-        row.pn,
-      { kind: "success" },
-    );
+    if (!partId) {
+      // No linked catalog part to persist the change against \u2014 don't
+      // pretend it saved.
+      toast(
+        __t("overlays.changeOwner.noPartId") ||
+          "This row isn't linked to a catalog part, so the owner change can't be saved",
+        { kind: "warn" },
+      );
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await api.parts.update(partId, {
+        customFields: {
+          ...(row.customFields || {}),
+          owner,
+          ownerNote: note || undefined,
+        },
+      });
+      onClose();
+      toast(
+        (__t("overlays.changeOwner.changedTo") || "Owner changed to") +
+          " " +
+          owner +
+          " \u00B7 " +
+          row.pn,
+        { kind: "success" },
+      );
+    } catch (err) {
+      toast(
+        __t("overlays.changeOwner.failed") ||
+          "Failed to change owner: " + err.message,
+        { kind: "error" },
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
   return (
     <Modal
@@ -2579,15 +2848,26 @@ function ChangeOwnerModal({ open, onClose, row }) {
           <button className="btn" onClick={onClose}>
             {__t("common.cancel") || "Cancel"}
           </button>
-          <button className="btn primary" onClick={submit} disabled={!owner}>
-            {__t("overlays.changeOwner.transfer") || "Transfer ownership"}
+          <button
+            className="btn primary"
+            onClick={submit}
+            disabled={!owner || submitting}
+          >
+            {submitting
+              ? __t("overlays.changeOwner.transferring") || "Transferring..."
+              : __t("overlays.changeOwner.transfer") || "Transfer ownership"}
           </button>
         </>
       }
     >
       <div className="fs-12 fg-3 mb-14">
         {__t("overlays.changeOwner.current") || "Current"}:{" "}
-        <strong>{ctx?.project?.owner || BOM_DATA.project.owner}</strong>
+        <strong>
+          {row.customFields?.owner ||
+            ctx?.project?.owner ||
+            __t("overlays.changeOwner.unassigned") ||
+            "Unassigned"}
+        </strong>
       </div>
       <div className="field">
         <label htmlFor="change-owner">
@@ -2602,14 +2882,25 @@ function ChangeOwnerModal({ open, onClose, row }) {
           onChange={(e) => setOwner(e.target.value)}
         >
           <option value="">
-            {__t("overlays.changeOwner.selectMember") ||
-              "\u2014 Select team member \u2014"}
+            {loadingTeam
+              ? __t("common.loading") || "Loading\u2026"
+              : __t("overlays.changeOwner.selectMember") ||
+                "\u2014 Select team member \u2014"}
           </option>
-          {TEAM.map((t) => (
-            <option key={t.handle} value={t.name}>
-              {t.name} \u00B7 {t.role}
+          {!loadingTeam && !team.length && (
+            <option value="" disabled>
+              {__t("overlays.changeOwner.noTeam") || "No team members found"}
             </option>
-          ))}
+          )}
+          {team.map((t) => {
+            const label = t.fullName || t.username || t.name || t.email;
+            return (
+              <option key={t.id || t.handle || label} value={label}>
+                {label}
+                {t.jobTitle || t.role ? " \u00B7 " + (t.jobTitle || t.role) : ""}
+              </option>
+            );
+          })}
         </select>
       </div>
       <div className="field">

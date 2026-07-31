@@ -23,6 +23,7 @@ from app.models.bom_template import BomTemplate
 from app.models.document import Document
 from app.models.part import Part
 from app.models.user import User
+from app.services import solidworks_contract_service
 
 router = APIRouter(
     tags=["solidworks-integration"],
@@ -588,10 +589,27 @@ async def clear_updates(
 @router.get("/changes")
 async def get_pending_changes(
     model: str,
+    part: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return []
+    """Fetch queued write-back changes for a model (optionally scoped to a
+    part number) from the sw_pending_changes outbox. Returned rows are
+    marked applied so a polling SolidWorks plugin never re-delivers them."""
+    part_id = None
+    if part:
+        presult = await db.execute(
+            select(Part).where(Part.tenantId == current_user.tenantId, Part.pn == part)
+        )
+        found = presult.scalar_one_or_none()
+        if found is None:
+            return []  # unknown part -> nothing could be queued against it
+        part_id = found.id
+
+    rows = await solidworks_contract_service.get_pending_changes(
+        db, current_user.tenantId, model_name=model, part_id=part_id
+    )
+    return [row.payload for row in rows]
 
 
 @router.post("/changes")
@@ -601,7 +619,13 @@ async def add_pending_changes(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return {"success": True, "count": len(changes)}
+    """Queue changes (edited in the BOM tool) to be written back into
+    SolidWorks — persisted to the sw_pending_changes outbox."""
+    payloads = [c.model_dump(mode="json") for c in changes]
+    created = await solidworks_contract_service.add_pending_changes(
+        db, current_user.tenantId, model, payloads
+    )
+    return {"success": True, "count": len(created)}
 
 
 @router.post("/apply-changes")

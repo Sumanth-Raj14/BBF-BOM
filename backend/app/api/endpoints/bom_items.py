@@ -18,6 +18,7 @@ from app.schemas.bom_item import (
     BomItemResponse,
     BomItemUpdate,
 )
+from app.services import derivative_service
 
 router = APIRouter()
 
@@ -92,6 +93,10 @@ async def get_bom_item(
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail=f"BOM item {item_id} not found")
+    derivatives = await derivative_service.list_derivatives(
+        db, current_user.tenantId, item.partId
+    )
+    item.derivatives = [derivative_service.to_response(d) for d in derivatives]
     return item
 
 

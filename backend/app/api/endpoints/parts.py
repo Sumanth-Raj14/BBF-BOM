@@ -13,7 +13,7 @@ from app.integrations.zoho_inbound import cascade_clean
 from app.integrations.zoho_snapshots import part_snapshot
 from app.models.user import User
 from app.schemas.part import PartCreate, PartListResponse, PartResponse, PartUpdate
-from app.services import part_service
+from app.services import derivative_service, part_service
 
 router = APIRouter()
 
@@ -70,7 +70,10 @@ async def get_part(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await part_service.get_part(db, part_id)
+    part = await part_service.get_part(db, part_id)
+    derivatives = await derivative_service.list_derivatives(db, current_user.tenantId, part_id)
+    part.derivatives = [derivative_service.to_response(d) for d in derivatives]
+    return part
 
 
 @router.put("/{part_id}", response_model=PartResponse)

@@ -71,8 +71,17 @@ async def list_tracking(
     query = query.order_by(OrderTracking.id)
     result = await paginate(db, query, page)
 
-    result["items"] = [
-        OrderTrackingResponse(
+    tracking_rows = result["items"]
+    po_ids = {t.poHeaderId for t in tracking_rows if t.poHeaderId}
+    po_by_id = {}
+    if po_ids:
+        po_result = await db.execute(select(POHeader).where(POHeader.id.in_(po_ids)))
+        po_by_id = {po.id: po for po in po_result.scalars().all()}
+
+    items = []
+    for t in tracking_rows:
+        po = po_by_id.get(t.poHeaderId)
+        item = OrderTrackingResponse(
             id=t.id,
             poHeaderId=t.poHeaderId,
             currentStage=t.currentStage,
@@ -112,9 +121,23 @@ async def list_tracking(
                 )
                 for s in t.shipmentUpdates
             ],
+        ).model_dump()
+        # Attach lightweight PO info (poNumber/vendorName) so list consumers
+        # (e.g. dashboard tiles) don't need a second round-trip per row.
+        item["po"] = (
+            {
+                "poNumber": po.poNumber,
+                "vendorName": po.vendorName,
+                "poTotal": po.poTotal,
+                "project": po.project,
+                "status": po.status,
+            }
+            if po
+            else None
         )
-        for t in result["items"]
-    ]
+        items.append(item)
+
+    result["items"] = items
 
     return result
 

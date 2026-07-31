@@ -70,6 +70,33 @@ def _render_barcode_image(code: str, fmt: str) -> bytes:
     return buf.getvalue()
 
 
+@router.get("/lookup/{barcode}", response_model=BarcodeLookupResponse)
+async def lookup_barcode(
+    barcode: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Resolve a scanned barcode to its part, scoped to the caller's tenant.
+    Used by the mobile scanner when a scanned code doesn't match a part's
+    name/PN/MPN via the regular parts search (barcodes aren't indexed there)."""
+    result = await db.execute(
+        select(Part).where(Part.barcode == barcode, Part.tenantId == current_user.tenantId)
+    )
+    part = result.scalar_one_or_none()
+    if not part:
+        raise HTTPException(status_code=404, detail="No part found for this barcode")
+
+    return BarcodeLookupResponse(
+        partId=part.id,
+        pn=part.pn,
+        name=part.name,
+        barcode=part.barcode or barcode,
+        status=part.status or "Active",
+        vendor=part.vendor,
+        cost=part.cost,
+    )
+
+
 @router.get("/generate/{part_id}")
 async def generate_part_barcode(
     part_id: int,

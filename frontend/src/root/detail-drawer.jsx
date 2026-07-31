@@ -15,6 +15,23 @@ import {
 } from "../components/ui/index.js";
 // Component Detail Drawer — opens when a row is selected.
 const DRAWER_TABS_ID = "detail-drawer-tabs";
+// `row` here is a tree-node (see utils/bom.js convertApiPartsToTree /
+// PartComplianceTab.jsx, bom-editor.jsx): `row.id` is a synthetic node key
+// ("api-123" for API-backed rows, or a fixture id like "r1.4.1" for demo
+// rows) — never the real backend part id on its own. The real numeric id is
+// threaded separately as `row.partId` when available, else recoverable from
+// an "api-" prefixed `row.id`. Demo/fixture rows have neither and correctly
+// resolve to null so callers fall back to an honest empty state instead of
+// hitting the API with a bogus id.
+function getRealPartId(row) {
+  if (row && typeof row.partId === "number") return row.partId;
+  if (row && typeof row.id === "string" && row.id.startsWith("api-")) {
+    const n = parseInt(row.id.replace("api-", ""), 10);
+    if (!isNaN(n)) return n;
+  }
+  if (row && typeof row.id === "number") return row.id;
+  return null;
+}
 function Drawer({ row, onClose, data, openModal, overlay }) {
   const ctx = useAppStore();
   const [tab, setTab] = React.useState("specs");
@@ -157,7 +174,7 @@ function Drawer({ row, onClose, data, openModal, overlay }) {
             />
           </TabPanel>
           <TabPanel id={DRAWER_TABS_ID} value="vendors" active={tab === "vendors"}>
-            <VendorsTab row={row} data={data} openModal={openModal} />
+            <VendorsTab row={row} openModal={openModal} />
           </TabPanel>
           <TabPanel id={DRAWER_TABS_ID} value="where-used" active={tab === "where-used"}>
             <WhereUsedTab row={row} />
@@ -619,23 +636,54 @@ SpecsTab.propTypes = {
   approval: PropTypes.any,
   approvalKey: PropTypes.any,
 };
-function VendorsTab({ row, data, openModal }) {
-  const vp = row.vendorPrices || [];
-  const matched = vp.length > 0 ? vp.slice(0, 5) : data.vendors.slice(0, 3);
+function VendorsTab({ row, openModal }) {
+  const partId = getRealPartId(row);
+  const [state, setState] = React.useState({ loading: true, vendors: [], error: null });
+
+  const load = React.useCallback(() => {
+    if (partId == null || !api?.partVendors?.list) {
+      setState({ loading: false, vendors: [], error: null });
+      return;
+    }
+    setState((s) => ({ ...s, loading: true, error: null }));
+    api.partVendors
+      .list({ partId, per_page: 50 })
+      .then((res) => {
+        const items = (res && res.items) || [];
+        setState({ loading: false, vendors: items, error: null });
+      })
+      .catch((e) => {
+        setState({ loading: false, vendors: [], error: e?.message || "Failed to load vendors" });
+      });
+  }, [partId]);
+
+  React.useEffect(() => {
+    load();
+  }, [load]);
+
+  const { loading, vendors, error } = state;
+  const sorted = React.useMemo(
+    () =>
+      [...vendors].sort((a, b) => {
+        const pa = a.isPreferred ? 0 : 1;
+        const pb = b.isPreferred ? 0 : 1;
+        if (pa !== pb) return pa - pb;
+        return (a.vendorCost ?? Infinity) - (b.vendorCost ?? Infinity);
+      }),
+    [vendors],
+  );
+
   return (
     <>
       <div className="flex justify-between items-center mb-10">
         <div className="hint">
-          {matched.length}{" "}
-          {matched.length !== 1
-            ? __t("detailDrawer.vendors") || "vendors"
-            : __t("detailDrawer.vendor") || "vendor"}{" "}
-          ·{" "}
-          {vp.length > 0 && (
-            <span>
-              {__t("detailDrawer.pricesFromCatalog") || "prices from catalog"}
-            </span>
-          )}
+          {loading
+            ? __t("common.loading") || "Loading…"
+            : `${sorted.length} ${
+                sorted.length !== 1
+                  ? __t("detailDrawer.vendors") || "vendors"
+                  : __t("detailDrawer.vendor") || "vendor"
+              }`}
         </div>
         <Button
           variant="secondary"
@@ -646,116 +694,143 @@ function VendorsTab({ row, data, openModal }) {
           {__t("detailDrawer.addVendor") || "Add vendor"}
         </Button>
       </div>
-      <table className="bom-table dense fs-11" style={{ width: "100%" }}>
-        <thead>
-          <tr>
-            <th>Vendor</th>
-            <th className="num">Unit</th>
-            <th className="num">Lead</th>
-            <th className="num">MOQ</th>
-          </tr>
-        </thead>
-        <tbody>
-          {matched.map((it, i) => {
-            const isPricing = vp.length > 0;
-            const v = isPricing
-              ? data.vendors.find((dv) => dv.name === it.vendor) || {
-                  name: it.vendor,
-                  terms: "—",
-                  country: "—",
-                  rating: 0,
-                  lead: it.lead,
-                  moq: it.moq || 1,
-                }
-              : it;
-            return (
-              <tr key={it.vendor} className={i === 0 ? "preferred" : ""}>
+      {!loading && sorted.length === 0 ? (
+        <EmptyState
+          description={
+            error
+              ? __t("detailDrawer.vendorsLoadError") || "Couldn't load vendors for this part."
+              : __t("detailDrawer.noVendorsLinked") || "No vendors linked to this part yet."
+          }
+        />
+      ) : (
+        <table className="bom-table dense fs-11" style={{ width: "100%" }}>
+          <thead>
+            <tr>
+              <th>Vendor</th>
+              <th className="num">Unit</th>
+              <th className="num">Lead</th>
+              <th className="num">MOQ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((v) => (
+              <tr key={v.id} className={v.isPreferred ? "preferred" : ""}>
                 <td>
-                  <div className="font-bold">{v.name}</div>
-                  <div className="fg-3 fs-9 font-mono">{v.terms || "—"} · {v.country}</div>
+                  <div className="font-bold">{v.vendorName || "—"}</div>
+                  <div className="fg-3 fs-9 font-mono">
+                    {v.vendorPn ? v.vendorPn + " · " : ""}
+                    {v.vendorCountry || "—"}
+                  </div>
                 </td>
                 <td className="num">
-                  {fmt.money(isPricing ? it.cost : row.cost * (1 + (i * 0.08 - 0.04)), 2)}
+                  {v.vendorCost != null ? fmt.money(v.vendorCost, 2) : "—"}
                 </td>
-                <td className="num">{v.lead || "—"}d</td>
-                <td className="num">{v.moq || "—"}</td>
+                <td className="num">{v.vendorLead != null ? v.vendorLead + "d" : "—"}</td>
+                <td className="num">{v.vendorMoq != null ? v.vendorMoq : "—"}</td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            ))}
+          </tbody>
+        </table>
+      )}
     </>
   );
 }
 VendorsTab.propTypes = {
   row: PropTypes.object,
-  data: PropTypes.object,
   openModal: PropTypes.func,
 };
 function WhereUsedTab({ row }) {
-  const go = (project) => {
-    toast((__t("detailDrawer.navigatedTo") || "Navigated to ") + project, {
+  const partId = getRealPartId(row);
+  const [state, setState] = React.useState({ loading: true, usages: [], error: null });
+
+  React.useEffect(() => {
+    if (partId == null || !api?.bomEnterprise?.whereUsedTree) {
+      setState({ loading: false, usages: [], error: null });
+      return;
+    }
+    let alive = true;
+    setState({ loading: true, usages: [], error: null });
+    api.bomEnterprise
+      .whereUsedTree(partId)
+      .then((res) => {
+        if (!alive) return;
+        setState({ loading: false, usages: (res && res.usages) || [], error: null });
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setState({ loading: false, usages: [], error: e?.message || "Failed to load usage" });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [partId]);
+
+  const go = (bomName) => {
+    toast((__t("detailDrawer.navigatedTo") || "Navigated to ") + bomName, {
       kind: "info",
     });
     window.__nav?.("bom");
   };
+
+  const { loading, usages, error } = state;
+
+  if (loading) {
+    return <div className="hint">{__t("common.loading") || "Loading…"}</div>;
+  }
+
+  if (usages.length === 0) {
+    return (
+      <EmptyState
+        description={
+          error
+            ? __t("detailDrawer.whereUsedError") || "Couldn't load where-used data for this part."
+            : __t("detailDrawer.notUsedAnywhere") || "This part isn't used in any BOM yet."
+        }
+      />
+    );
+  }
+
+  // Each usage's `parents` walk upward from the item's immediate parent
+  // assembly to the root; reverse to render root-first, matching the
+  // original top-down assembly tree.
+  const topLevelCount = new Set(
+    usages.map((u) => (u.parents && u.parents.length ? u.parents[u.parents.length - 1].bom_id : u.bom_id)),
+  ).size;
+
+  const renderChain = (chain, idx, qty) => {
+    if (idx >= chain.length) {
+      return (
+        <div className="node self">
+          {row.pn}
+          {qty != null && qty !== 1 ? ` (qty ${qty})` : ""}
+        </div>
+      );
+    }
+    return (
+      <>
+        <button type="button" className="node parent" onClick={() => go(chain[idx].bom_name)}>
+          {chain[idx].bom_name}
+        </button>
+        <div className="branch">{renderChain(chain, idx + 1, qty)}</div>
+      </>
+    );
+  };
+
   return (
     <>
       <div className="hint mb-10">
-        {__t("detailDrawer.usedInAssemblies") ||
-          "Used in 3 assemblies across 2 projects."}
+        {(__t("detailDrawer.usedInAssembliesCount") ||
+          `Used in ${usages.length} assembly location${usages.length !== 1 ? "s" : ""} across ${topLevelCount} top-level BOM${topLevelCount !== 1 ? "s" : ""}.`)}
       </div>
       <div className="deptree">
-        <button
-          type="button"
-          className="node parent"
-          onClick={() => go("ATLAS / Mainframe")}
-        >
-          ATLAS / Mainframe / Rev C
-        </button>
-        <div className="branch">
-          <button
-            type="button"
-            className="node parent"
-            onClick={() => go("ATL-MFR-CTL")}
-          >
-            ATL-MFR-CTL / Control Subsystem · Rev D
-          </button>
-          <div className="branch">
-            <div className="node self">{row.pn}</div>
-          </div>
-        </div>
-        <div className="h-8" />
-        <button
-          type="button"
-          className="node parent"
-          onClick={() => go("HORIZON / Sensor Pod")}
-        >
-          HORIZON / Sensor Pod / Rev B
-        </button>
-        <div className="branch">
-          <button
-            type="button"
-            className="node parent"
-            onClick={() => go("HZN-POD-CTL")}
-          >
-            HZN-POD-CTL · Rev A
-          </button>
-          <div className="branch">
-            <div className="node self">{row.pn} (qty 2)</div>
-          </div>
-        </div>
-        <div className="h-8" />
-        <button
-          type="button"
-          className="node parent"
-          onClick={() => go("ATLAS-LITE")}
-        >
-          ATLAS-LITE / Eval Board · Rev A
-        </button>
-        <div className="branch">
-          <div className="node self">{row.pn}</div>
-        </div>
+        {usages.map((u, i) => {
+          const chain = [...(u.parents || [])].reverse().concat([{ bom_id: u.bom_id, bom_name: u.bom_name }]);
+          return (
+            <div key={(u.bom_id || "u") + "-" + i} className="mb-8">
+              {renderChain(chain, 0, u.quantity)}
+            </div>
+          );
+        })}
       </div>
     </>
   );
@@ -763,52 +838,101 @@ function WhereUsedTab({ row }) {
 WhereUsedTab.propTypes = {
   row: PropTypes.object,
 };
+function formatFileSize(bytes) {
+  if (bytes == null || isNaN(bytes)) return "—";
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
 function FilesTab({ row, openModal }) {
   const ctx = useAppStore();
-  const files = [
-    {
-      name: `${row.pn}_datasheet.pdf`,
-      ext: "PDF",
-      size: "1.2 MB",
-      date: "05-12",
-      tag: "Datasheet",
-      updated: "05-12",
-      icon: "DS",
-    },
-    {
-      name: `${row.pn}_drawing_v2.dwg`,
-      ext: "DWG",
-      size: "324 KB",
-      date: "05-09",
-      tag: "Drawing",
-      updated: "05-09",
-      icon: "⌗",
-    },
-    {
-      name: `${row.pn}_specs_extracted.json`,
-      ext: "JSON",
-      size: "4 KB",
-      date: "05-09",
-      tag: "Extracted",
-      updated: "05-09",
-      icon: "{}",
-    },
-    {
-      name: `Quote_${row.pn}_2026Q2.pdf`,
-      ext: "PDF",
-      size: "88 KB",
-      date: "04-22",
-      tag: "Quote",
-      updated: "04-22",
-      icon: "$",
-    },
-  ];
-  const open = (f) => (ctx || { openModal })?.openModal?.("doc-preview", f);
+  const partId = getRealPartId(row);
+  const [state, setState] = React.useState({ loading: true, files: [], error: null });
+
+  const load = React.useCallback(() => {
+    if (partId == null || !api?.documents?.list) {
+      setState({ loading: false, files: [], error: null });
+      return;
+    }
+    setState((s) => ({ ...s, loading: true, error: null }));
+    api.documents
+      .list({ partId, per_page: 100 })
+      .then((res) => {
+        const items = (res && res.items) || [];
+        setState({ loading: false, files: items, error: null });
+      })
+      .catch((e) => {
+        setState({ loading: false, files: [], error: e?.message || "Failed to load files" });
+      });
+  }, [partId]);
+
+  React.useEffect(() => {
+    load();
+  }, [load]);
+
+  // The shared Upload modal (owned elsewhere) broadcasts this event after a
+  // successful upload — refresh so newly attached files show up here too.
+  React.useEffect(() => {
+    window.addEventListener("documents-changed", load);
+    return () => window.removeEventListener("documents-changed", load);
+  }, [load]);
+
+  const open = (f) =>
+    (ctx || { openModal })?.openModal?.("doc-preview", {
+      name: f.originalName || f.filename,
+      url: f.url,
+    });
+
+  const remove = async (f) => {
+    if (!api?.documents?.delete) return;
+    try {
+      await api.documents.delete(f.id);
+      toast(
+        (f.originalName || f.filename) +
+          " " +
+          (__t("detailDrawer.deleted") || "deleted"),
+        { kind: "warn" },
+      );
+      load();
+    } catch (e) {
+      toast(
+        e?.message || __t("detailDrawer.deleteFailed") || "Failed to delete file",
+        { kind: "error" },
+      );
+    }
+  };
+
+  const download = (f) => {
+    if (f.url) {
+      const a = document.createElement("a");
+      a.href = f.url;
+      a.download = f.originalName || f.filename || "";
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.click();
+    } else {
+      toast(
+        (__t("detailDrawer.downloadNotAvailable") || "Download ") +
+          (f.originalName || f.filename) +
+          (__t("detailDrawer.notAvailable") || " not available"),
+        { kind: "info" },
+      );
+    }
+  };
+
+  const { loading, files, error } = state;
+
   return (
     <>
       <div className="flex justify-between items-center mb-10">
         <div className="hint">
-          {__t("detailDrawer.filesVersioned") || "4 files · versioned"}
+          {loading
+            ? __t("common.loading") || "Loading…"
+            : `${files.length} ${
+                files.length === 1
+                  ? __t("detailDrawer.file") || "file"
+                  : __t("detailDrawer.files") || "files"
+              }`}
         </div>
         <Button
           variant="secondary"
@@ -818,90 +942,96 @@ function FilesTab({ row, openModal }) {
           <Icon.Plus size={11} /> {__t("common.upload") || "Upload"}
         </Button>
       </div>
-      {files.map((f, i) => (
-        <div
-          key={f.name}
-          style={{
-            display: "grid",
-            gridTemplateColumns: "44px 1fr auto",
-            gap: 10,
-            alignItems: "center",
-            padding: "8px 10px",
-            border: "1px solid var(--line)",
-            borderRadius: "var(--r-2)",
-            marginBottom: 6,
-            background: "var(--bg)",
-          }}
-        >
-          <Badge tone="neutral" className="font-mono fs-9 text-center">
-            {f.ext}
-          </Badge>
-          <button
-            type="button"
-            onClick={() => open(f)}
-            className="text-left"
-            style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
+      {!loading && files.length === 0 ? (
+        <EmptyState
+          description={
+            error
+              ? __t("detailDrawer.filesLoadError") || "Couldn't load files for this part."
+              : __t("detailDrawer.noFilesYet") || "No files attached to this part yet."
+          }
+        />
+      ) : (
+        files.map((f) => (
+          <div
+            key={f.id}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "44px 1fr auto",
+              gap: 10,
+              alignItems: "center",
+              padding: "8px 10px",
+              border: "1px solid var(--line)",
+              borderRadius: "var(--r-2)",
+              marginBottom: 6,
+              background: "var(--bg)",
+            }}
           >
-            <div className="fs-12 font-mono">{f.name}</div>
-            <div className="fs-10 fg-3 font-mono">
-              {f.size} · {f.date}
-            </div>
-          </button>
-          <DropdownButton
-            width={170}
-            trigger={
-              <Button
-                variant="ghost"
-                size="sm"
-                iconOnly
-                aria-label={__t("common.moreOptions") || "More options"}
-              >
-                <Icon.Dots size={12} />
-              </Button>
-            }
-            items={[
-              {
-                icon: <Icon.Chevron size={11} />,
-                label: __t("common.preview") || "Preview",
-                onClick: () => open(f),
-              },
-              {
-                icon: <Icon.Export size={11} />,
-                label: __t("common.download") || "Download",
-                onClick: () => {
-                  toast(
-                    (__t("detailDrawer.downloadNotAvailable") || "Download ") +
-                      f.name +
-                      (__t("detailDrawer.notAvailable") ||
-                        " not available — fetch from server"),
-                    { kind: "info" },
-                  );
+            <Badge tone="neutral" className="font-mono fs-9 text-center">
+              {(f.fileType || "").toUpperCase() || "FILE"}
+            </Badge>
+            <button
+              type="button"
+              onClick={() => open(f)}
+              className="text-left"
+              style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
+            >
+              <div className="fs-12 font-mono">{f.originalName || f.filename}</div>
+              <div className="fs-10 fg-3 font-mono">
+                {formatFileSize(f.fileSize)} ·{" "}
+                {f.createdAt ? String(f.createdAt).slice(0, 10) : "—"}
+                {f.category ? " · " + f.category : ""}
+              </div>
+            </button>
+            <DropdownButton
+              width={170}
+              trigger={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  iconOnly
+                  aria-label={__t("common.moreOptions") || "More options"}
+                >
+                  <Icon.Dots size={12} />
+                </Button>
+              }
+              items={[
+                {
+                  icon: <Icon.Chevron size={11} />,
+                  label: __t("common.preview") || "Preview",
+                  onClick: () => open(f),
                 },
-              },
-              {
-                icon: <Icon.Link size={11} />,
-                label: __t("common.copyLink") || "Copy link",
-                onClick: () =>
-                  navigator.clipboard
-                    ?.writeText?.(window.location.origin + "/files/" + f.name)
-                    .then(() => toast(__t("common.copied") || "Link copied"))
-                    .catch(() => toast(__t("common.copied") || "Link copied")),
-              },
-              "divider",
-              {
-                icon: <Icon.Trash size={11} />,
-                label: __t("common.delete") || "Delete",
-                danger: true,
-                onClick: () =>
-                  toast(
-                    f.name + " " + (__t("detailDrawer.deleted") || "deleted"),
-                    { kind: "warn" },
-                  ),
-              },
-            ]}
-          />
-        </div>
-      ))}
+                {
+                  icon: <Icon.Export size={11} />,
+                  label: __t("common.download") || "Download",
+                  onClick: () => download(f),
+                },
+                {
+                  icon: <Icon.Link size={11} />,
+                  label: __t("common.copyLink") || "Copy link",
+                  onClick: () => {
+                    const link = f.url
+                      ? f.url.startsWith("http")
+                        ? f.url
+                        : window.location.origin + f.url
+                      : window.location.origin + "/documents/" + f.id;
+                    navigator.clipboard
+                      ?.writeText?.(link)
+                      .then(() => toast(__t("common.copied") || "Link copied"))
+                      .catch(() => toast(__t("common.copied") || "Link copied"));
+                  },
+                },
+                "divider",
+                {
+                  icon: <Icon.Trash size={11} />,
+                  label: __t("common.delete") || "Delete",
+                  danger: true,
+                  onClick: () => remove(f),
+                },
+              ]}
+            />
+          </div>
+        ))
+      )}
     </>
   );
 }

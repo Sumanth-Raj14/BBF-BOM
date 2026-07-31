@@ -64,6 +64,10 @@ class InterchangeabilityListResponse(BaseModel):
     items: list[InterchangeabilitySuggestionResponse]
 
 
+class InterchangeabilityStatusUpdate(BaseModel):
+    status: str
+
+
 # --- Validation ---
 
 

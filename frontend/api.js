@@ -661,6 +661,8 @@ export const analyticsAPI = {
   dashboard: () => apiRequest('/analytics/dashboard'),
   trends: (range_) => apiRequest(`/analytics/trends?range_=${range_ || '6mo'}`),
   categories: () => apiRequest('/analytics/categories'),
+  atRiskParts: (limit) => apiRequest(`/analytics/at-risk-parts${limit ? '?limit=' + limit : ''}`),
+  mostUsedParts: (limit) => apiRequest(`/analytics/most-used-parts${limit ? '?limit=' + limit : ''}`),
 };
 
 // CAD API
@@ -686,6 +688,18 @@ export const poOrdersAPI = {
   },
   get: (id) => apiRequest(`/po-orders/${id}`),
   stats: () => apiRequest('/po-orders/stats'),
+};
+
+// Workspace Budget API (Dashboard widget) — annual/per-project budget
+// targets persist on the tenant; spent/committed are computed live from PO data.
+export const budgetsAPI = {
+  workspace: (period) =>
+    apiRequest(`/budgets/workspace${period ? '?period=' + encodeURIComponent(period) : ''}`),
+  updateWorkspace: (payload, period) =>
+    apiRequest(`/budgets/workspace${period ? '?period=' + encodeURIComponent(period) : ''}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
 };
 
 // Phase 3 — Supply Chain Depth APIs
@@ -990,6 +1004,7 @@ export const aiAPI = {
       const q = new URLSearchParams(params).toString();
       return apiRequest(`/ai/interchangeability${q ? '?' + q : ''}`);
     },
+    updateStatus: (id, status) => apiRequest(`/ai/interchangeability/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
   },
   validation: {
     run: (params = {}) => apiRequest('/ai/validation/run', { method: 'POST', body: JSON.stringify(params) }),
@@ -1391,6 +1406,7 @@ export const api = {
   cad: cadAPI,
   scraping: scrapingAPI,
   poOrders: poOrdersAPI,
+  budgets: budgetsAPI,
   makeVsBuy: makeVsBuyAPI,
   shouldCost: shouldCostAPI,
   supplierScorecard: supplierScorecardAPI,

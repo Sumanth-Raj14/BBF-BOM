@@ -2,6 +2,7 @@ import PropTypes from "prop-types";
 import { storage } from "../utils/storage.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import { api } from "../globals";
 import {
   Button,
   Field,
@@ -386,6 +387,7 @@ function BulkVendorImportModal({ open, onClose }) {
   const [rows, setRows] = React.useState([]);
   const [, setHeaders] = React.useState([]);
   const [mapping, setMapping] = React.useState({});
+  const [importing, setImporting] = React.useState(false);
   React.useEffect(() => {
     if (open) {
       setStep("upload");
@@ -423,28 +425,68 @@ LCSC Electronics,CN,7,1,4.2,Prepaid,Med`;
     setMapping(m);
     setStep("review");
   };
-  const apply = () => {
-    if (ctx?.setVendors) {
-      const newVendors = rows.map((r, i) => ({
-        id: "vi" + Date.now() + i,
-        name: r[mapping.name] || __t("vendor.unnamed") || "Unnamed",
-        country: r[mapping.country] || "—",
-        lead: Number(r[mapping.lead]) || 14,
-        moq: Number(r[mapping.moq]) || 1,
-        rating: Number(r[mapping.rating]) || 4.0,
-        terms: r[mapping.terms] || "Net 30",
-        risk: r[mapping.risk] || "Low",
-        parts: 0,
-        preferred: false,
-      }));
-      ctx.setVendors([...ctx.vendors, ...newVendors]);
+  const apply = async () => {
+    const parsed = rows.map((r) => ({
+      name: r[mapping.name] || __t("vendor.unnamed") || "Unnamed",
+      country: r[mapping.country] || "—",
+      lead: Number(r[mapping.lead]) || 14,
+      moq: Number(r[mapping.moq]) || 1,
+      rating: Number(r[mapping.rating]) || 4.0,
+      terms: r[mapping.terms] || "Net 30",
+      risk: r[mapping.risk] || "Low",
+    }));
+    setImporting(true);
+    const created = [];
+    let failed = 0;
+    for (const v of parsed) {
+      try {
+        if (!api?.vendors?.create) throw new Error("Vendor API unavailable");
+        // Backend Vendor schema only persists name/country/leadTime/moq/
+        // terms/reliabilityRating — risk/parts/preferred are UI-only
+        // concepts layered on top for now.
+        const saved = await api.vendors.create({
+          name: v.name,
+          country: v.country,
+          leadTime: v.lead,
+          moq: v.moq,
+          terms: v.terms,
+          reliabilityRating: v.rating,
+        });
+        created.push({
+          id: saved?.id != null ? String(saved.id) : "vi" + Date.now() + created.length,
+          name: saved?.name || v.name,
+          country: saved?.country || v.country,
+          lead: saved?.leadTime ?? v.lead,
+          moq: saved?.moq ?? v.moq,
+          rating: saved?.reliabilityRating ?? v.rating,
+          terms: saved?.terms || v.terms,
+          risk: v.risk,
+          parts: 0,
+          preferred: false,
+        });
+      } catch (_e) {
+        failed++;
+      }
+    }
+    setImporting(false);
+    if (created.length && ctx?.setVendors) {
+      ctx.setVendors([...(ctx.vendors || []), ...created]);
     }
     onClose();
-    toast(
-      __t("vendor.imported", { count: rows.length }) ||
-        `Imported ${rows.length} vendors`,
-      { kind: "success" },
-    );
+    if (created.length) {
+      toast(
+        __t("vendor.imported", { count: created.length }) ||
+          `Imported ${created.length} vendors`,
+        { kind: "success" },
+      );
+    }
+    if (failed) {
+      toast(
+        __t("vendor.importFailed", { count: failed }) ||
+          `${failed} vendor${failed === 1 ? "" : "s"} failed to import`,
+        { kind: "error" },
+      );
+    }
   };
   const reviewColumns = FIELDS.map((f) => ({
     key: f,
@@ -468,13 +510,24 @@ LCSC Electronics,CN,7,1,4.2,Prepaid,Med`;
       footer={
         step === "review" ? (
           <>
-            <Button variant="secondary" onClick={() => setStep("upload")}>
+            <Button
+              variant="secondary"
+              onClick={() => setStep("upload")}
+              disabled={importing}
+            >
               {__t("common.back") || "Back"}
             </Button>
-            <Button variant="primary" onClick={apply}>
+            <Button
+              variant="primary"
+              onClick={apply}
+              loading={importing}
+              disabled={importing}
+            >
               <Icon.Check size={12} />{" "}
-              {__t("vendor.bulkImport.import", { count: rows.length }) ||
-                `Import ${rows.length}`}
+              {importing
+                ? __t("vendor.bulkImport.importing") || "Importing…"
+                : __t("vendor.bulkImport.import", { count: rows.length }) ||
+                  `Import ${rows.length}`}
             </Button>
           </>
         ) : null
@@ -765,16 +818,32 @@ function NetworkBadge() {
   );
 }
 // ============ PO PDF (templated, professional layout) ============
-window.printPO = function (item, vendor) {
+window.printPO = async function (item, vendorHint) {
   if (!item) return;
   const lineCost = (item.qty || 0) * (item.cost || 12);
   const tax = lineCost * 0.08;
   const ship = 12.5;
   const total = lineCost + tax + ship;
-  const poNum = String(item.pn ? item.pn.charCodeAt(0) * 7 : 491).padStart(
-    4,
-    "0",
-  );
+  // Resolve the real vendor record when one exists instead of trusting only
+  // whatever hint the caller passed in (some callers only pass a country
+  // placeholder). Best-effort: any lookup failure just falls back to the
+  // hint so printing never breaks.
+  let vendor = vendorHint || null;
+  try {
+    if (item.vendor && api?.vendors?.list) {
+      const res = await api.vendors.list({ search: item.vendor, per_page: 1 });
+      const found = res?.items?.[0];
+      if (found) vendor = { ...vendorHint, ...found };
+    }
+  } catch (_e) {
+    // Vendor lookup is best-effort — keep whatever hint was passed in.
+  }
+  // Use the real PO number when the caller has one; only fabricate a
+  // placeholder as a last resort so the document still renders.
+  const poNumber =
+    item.poNumber ||
+    "PO-2026-" +
+      String(item.pn ? item.pn.charCodeAt(0) * 7 : 491).padStart(4, "0");
   const poTitle = item.pn
     ? "PO · " + item.pn
     : __t("printPo.title") || "Purchase Order";
@@ -806,8 +875,8 @@ window.printPO = function (item, vendor) {
     "<div class='meta-box'>" +
     "<div class='row'><span>" +
     h(__t("printPo.poNumber") || "PO Number") +
-    "</span><strong>PO-2026-" +
-    h(poNum) +
+    "</span><strong>" +
+    h(poNumber) +
     "</strong></div>" +
     "<div class='row'><span>" +
     h(__t("printPo.issueDate") || "Issue Date") +

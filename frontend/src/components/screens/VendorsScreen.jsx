@@ -2,15 +2,95 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
+import { api } from "../../../api.js";
 import { Icon, LeadHeat, useAppStore } from "../../globals";
 import { Button, Menu, StatusPill, EmptyState, ScreenHeader } from "../ui";
 // ============ VENDORS ============
+//
+// Wired to the real backend (api.vendors.*). A few UI-visible fields have no
+// backing column on the Vendor model yet:
+//   - `risk`      — derived client-side from real leadTime (same heuristic
+//                    SourcingView.jsx already uses), not a stored rating.
+//   - `preferred` — no vendor-level "preferred" concept exists server-side
+//                    (part_vendors.isPreferred is scoped per part+vendor
+//                    pair, not the vendor record itself), so this stays a
+//                    local, session-only mark instead of pretending to
+//                    persist.
+//   - `parts`     — the Vendor API doesn't return a sourced-parts count, so
+//                    it renders as "—" rather than a fabricated number.
+// `active` is a real column and now round-trips through the API (see
+// backend/app/api/endpoints/vendors.py).
 export default function VendorsScreen({ data, openModal }) {
   const ctx = useAppStore();
-  const vendors = ctx?.vendors || data.vendors;
-  const setVendors = ctx?.setVendors || (() => {});
+  const [vendors, setVendors] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
   const [riskFilter, setRiskFilter] = React.useState("All");
   const [vSearch, setVSearch] = React.useState("");
+
+  const deriveRisk = (lead) =>
+    lead >= 30 ? "High" : lead >= 14 ? "Med" : "Low";
+
+  // Preserve the app-wide vendor id convention ("v" + numeric id — see
+  // AppCtx.jsx's own api.vendors.list() mapping) so this object stays
+  // compatible with other already-shipped consumers (VendorDetailModal,
+  // SendRFQModal, etc.) that expect a string id. `apiId` carries the raw
+  // numeric id needed for real api.vendors.* calls.
+  const mapVendor = (v, prevById) => {
+    const prev = prevById?.get(v.id);
+    const lead = v.leadTime ?? 0;
+    return {
+      id: "v" + v.id,
+      apiId: v.id,
+      name: v.name,
+      country: v.country || "—",
+      terms: v.terms || "—",
+      rating: v.reliabilityRating ?? 0,
+      lead,
+      moq: v.moq ?? 0,
+      parts: prev?.parts ?? null,
+      risk: deriveRisk(lead),
+      preferred: prev?.preferred ?? false,
+      active: v.active !== false,
+    };
+  };
+
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await api.vendors.list();
+      const list = Array.isArray(r) ? r : r?.items || [];
+      setVendors((prevVendors) => {
+        const prevById = new Map(prevVendors.map((pv) => [pv.apiId, pv]));
+        return list.map((v) => mapVendor(v, prevById));
+      });
+    } catch (e) {
+      // Honest failure — do not fall back to fabricated/sample rows.
+      setError(e?.message || "Failed to load vendors.");
+      setVendors([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    load();
+  }, [load]);
+
+  // The "New vendor" / "Bulk import" modals already call api.vendors.create
+  // themselves (overlays.jsx / BulkImportModal) but have no way to notify
+  // this screen. Re-fetch once they close so newly created vendors show up
+  // without a manual page reload.
+  const prevModalRef = React.useRef(ctx?.modal);
+  React.useEffect(() => {
+    const prevModal = prevModalRef.current;
+    const justClosedCreateFlow =
+      (prevModal === "new-vendor" || prevModal === "bulk-vendor-import") &&
+      ctx?.modal !== prevModal;
+    prevModalRef.current = ctx?.modal;
+    if (justClosedCreateFlow) load();
+  }, [ctx?.modal, load]);
 
   const filtered = vendors.filter((v) => {
     if (riskFilter !== "All" && v.risk !== riskFilter) return false;
@@ -20,11 +100,11 @@ export default function VendorsScreen({ data, openModal }) {
   });
 
   const togglePreferred = (id) => {
-    const next = vendors.map((v) =>
-      v.id === id ? { ...v, preferred: !v.preferred } : v,
-    );
-    setVendors(next);
     const v = vendors.find((x) => x.id === id);
+    if (!v) return;
+    setVendors((prev) =>
+      prev.map((x) => (x.id === id ? { ...x, preferred: !x.preferred } : x)),
+    );
     toast(
       v.name +
         (v.preferred
@@ -34,20 +114,84 @@ export default function VendorsScreen({ data, openModal }) {
       { kind: "success" },
     );
   };
-  const toggleActive = (id) => {
-    const next = vendors.map((v) =>
-      v.id === id ? { ...v, active: v.active === false ? true : false } : v,
-    );
-    setVendors(next);
+
+  const toggleActive = async (id) => {
     const v = vendors.find((x) => x.id === id);
-    toast(
-      v.name +
-        " " +
-        (v.active === false
-          ? __t("vendor.reactivated") || "reactivated"
-          : __t("vendor.deactivated") || "deactivated"),
-      { kind: "warn" },
+    if (!v) return;
+    const nextActive = v.active === false ? true : false;
+    setVendors((prev) =>
+      prev.map((x) => (x.id === id ? { ...x, active: nextActive } : x)),
     );
+    try {
+      await api.vendors.update(v.apiId, { active: nextActive });
+      toast(
+        v.name +
+          " " +
+          (nextActive
+            ? __t("vendor.reactivated") || "reactivated"
+            : __t("vendor.deactivated") || "deactivated"),
+        { kind: "warn" },
+      );
+    } catch (e) {
+      // Roll back — don't leave the UI claiming a change that didn't persist.
+      setVendors((prev) =>
+        prev.map((x) => (x.id === id ? { ...x, active: v.active } : x)),
+      );
+      toast(
+        (__t("vendor.updateFailed") || "Could not update vendor") +
+          ": " +
+          (e?.message || ""),
+        { kind: "error" },
+      );
+    }
+  };
+
+  const exportCsv = () => {
+    if (vendors.length === 0) {
+      toast(__t("vendor.nothingToExport") || "No vendors to export", {
+        kind: "warn",
+      });
+      return;
+    }
+    const header = [
+      "Name",
+      "Country",
+      "Terms",
+      "Rating",
+      "Lead",
+      "MOQ",
+      "Parts",
+      "Risk",
+      "Status",
+    ];
+    const rows = vendors.map((v) => [
+      v.name,
+      v.country,
+      v.terms,
+      v.rating,
+      v.lead,
+      v.moq,
+      v.parts ?? "",
+      v.risk,
+      v.active === false ? "Inactive" : "Active",
+    ]);
+    const csv = [header, ...rows]
+      .map((r) =>
+        r.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","),
+      )
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "vendors.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast(__t("vendor.exported") || "Exported vendors.csv", {
+      kind: "success",
+    });
   };
 
   // Risk / lifecycle -> StatusPill semantic tone (risk labels aren't in the
@@ -133,10 +277,7 @@ export default function VendorsScreen({ data, openModal }) {
                 {
                   icon: <Icon.Export size={11} />,
                   label: __t("common.exportAll") || "Export all",
-                  onSelect: () =>
-                    toast(__t("vendor.exported") || "Exported vendors.csv", {
-                      kind: "success",
-                    }),
+                  onSelect: exportCsv,
                 },
               ]}
             />
@@ -163,7 +304,28 @@ export default function VendorsScreen({ data, openModal }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {loading ? (
+              <tr>
+                <td colSpan={10} className="p-0">
+                  <EmptyState
+                    title={__t("common.loading") || "Loading vendors…"}
+                  />
+                </td>
+              </tr>
+            ) : error ? (
+              <tr>
+                <td colSpan={10} className="p-0">
+                  <EmptyState
+                    title={error}
+                    actions={
+                      <Button variant="secondary" size="sm" onClick={load}>
+                        {__t("common.retry") || "Retry"}
+                      </Button>
+                    }
+                  />
+                </td>
+              </tr>
+            ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={10} className="p-0">
                   <EmptyState
@@ -178,12 +340,7 @@ export default function VendorsScreen({ data, openModal }) {
                         <Button
                           variant="secondary"
                           size="sm"
-                          onClick={() =>
-                            (ctx || { openModal }).openModal?.(
-                              "vendor-detail",
-                              null,
-                            )
-                          }
+                          onClick={() => openModal("new-vendor")}
                         >
                           <Icon.Plus size={11} />{" "}
                           {__t("vendor.addFirstVendor") || "Add first vendor"}
@@ -246,7 +403,7 @@ export default function VendorsScreen({ data, openModal }) {
                     <LeadHeat days={v.lead} />
                   </td>
                   <td className="num">{v.moq}</td>
-                  <td className="num">{v.parts}</td>
+                  <td className="num">{v.parts ?? "—"}</td>
                   <td>
                     <StatusPill tone={riskTone(v.risk)} label={v.risk} />
                   </td>
@@ -288,7 +445,7 @@ export default function VendorsScreen({ data, openModal }) {
                           label: __t("bom.sendRfq") || "Send RFQ",
                           onSelect: () =>
                             (ctx?.openModal || openModal)?.("send-rfq", {
-                              pn: "RFQ-" + v.id.toUpperCase(),
+                              pn: "RFQ-" + String(v.id).toUpperCase(),
                               name: "Multi-part RFQ",
                               cost: 10,
                               lead: v.lead,

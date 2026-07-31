@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
 from app.db.session import get_db
+from app.models.part import Part
+from app.models.part_vendor import PartVendor
 from app.models.user import User
 
 router = APIRouter()
@@ -93,6 +95,31 @@ async def analytics_dashboard(
             "createdAt": str(row[3]) if row[3] else None,
         }
         for row in recent_pos.fetchall()
+    ]
+
+    project_breakdown = await db.execute(
+        text(f"""
+                SELECT COALESCE(project, 'Unassigned') as project_name,
+                       COUNT(*) as po_count,
+                       COALESCE(SUM("poTotal"), 0) as total_cost,
+                       COALESCE(SUM("poTotal") FILTER (WHERE status IN ('received', 'closed')), 0) as spent,
+                       COALESCE(SUM("poTotal") FILTER (WHERE status NOT IN ('received', 'closed', 'cancelled', 'Rejected')), 0) as committed
+                FROM "po_headers"
+                WHERE {tf}
+                GROUP BY COALESCE(project, 'Unassigned')
+                ORDER BY total_cost DESC
+            """),
+        tf_params,
+    )
+    result["byProject"] = [
+        {
+            "project": row[0],
+            "poCount": row[1],
+            "totalCost": float(row[2] or 0),
+            "spent": float(row[3] or 0),
+            "committed": float(row[4] or 0),
+        }
+        for row in project_breakdown.fetchall()
     ]
 
     return result
@@ -195,3 +222,113 @@ async def vendor_scorecards(
             }
         )
     return scorecards
+
+
+@router.get("/most-used-parts")
+async def most_used_parts(
+    limit: int = 5,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Cross-BOM part reuse rollup for the dashboard's "Where Used" tile: the
+    parts referenced by the most distinct BOMs, tenant-scoped via
+    bom_items_master.tenantId (see app/models/bom.py::BOMItem).
+    """
+    tf, tf_params = _tenant_filter_params(current_user, "bi")
+    result = await db.execute(
+        text(f"""
+            SELECT p.pn, p.name, COUNT(DISTINCT bi.bom_id) as bom_count
+            FROM bom_items_master bi
+            JOIN parts p ON p.id = bi.part_id
+            WHERE {tf} AND bi.part_id IS NOT NULL
+            GROUP BY p.id, p.pn, p.name
+            ORDER BY bom_count DESC, p.pn ASC
+            LIMIT :limit
+        """),
+        {**tf_params, "limit": limit},
+    )
+    return [
+        {"partNumber": row[0], "name": row[1], "uses": row[2]}
+        for row in result.fetchall()
+    ]
+
+
+@router.get("/at-risk-parts")
+async def at_risk_parts(
+    limit: int = 10,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Supply-risk rollup for the dashboard's "Supply Risk" tile: parts whose
+    vendor links show a long lead time, single-sourcing, or weak vendor
+    quality/on-time performance. Built from part_vendors + parts; tenant
+    scoping comes from the standard ORM select filter (app/core/tenant_events.py),
+    same as vendors.py / part_vendors.py.
+    """
+    parts_result = await db.execute(select(Part))
+    parts_by_id = {p.id: p for p in parts_result.scalars().all()}
+    if not parts_by_id:
+        return {"items": [], "total": 0}
+
+    links_result = await db.execute(
+        select(PartVendor).where(PartVendor.partId.in_(parts_by_id.keys()))
+    )
+    links_by_part: dict[int, list[PartVendor]] = {}
+    for link in links_result.scalars().all():
+        links_by_part.setdefault(link.partId, []).append(link)
+
+    LEAD_HIGH, LEAD_MED = 30, 21
+    QUALITY_LOW, ON_TIME_LOW = 3.0, 80.0
+
+    items = []
+    for part_id, links in links_by_part.items():
+        part = parts_by_id.get(part_id)
+        if not part:
+            continue
+        max_lead = max((link.vendorLead or 0) for link in links)
+        min_quality = min(
+            (link.qualityScore if link.qualityScore is not None else 5.0) for link in links
+        )
+        min_on_time = min(
+            (link.onTimeRate if link.onTimeRate is not None else 100.0) for link in links
+        )
+        vendor_count = len({link.vendorId for link in links})
+
+        reasons = []
+        severity = "low"
+        if max_lead >= LEAD_HIGH:
+            reasons.append(f"Lead time {max_lead}d")
+            severity = "high"
+        elif max_lead >= LEAD_MED:
+            reasons.append(f"Lead time {max_lead}d")
+            severity = "med"
+        if vendor_count <= 1:
+            reasons.append("Single-source")
+            if severity == "low":
+                severity = "med"
+        if min_quality < QUALITY_LOW:
+            reasons.append(f"Quality score {min_quality:.1f}")
+            severity = "high"
+        if min_on_time < ON_TIME_LOW:
+            reasons.append(f"On-time rate {min_on_time:.0f}%")
+            if severity == "low":
+                severity = "med"
+
+        if not reasons:
+            continue
+
+        items.append(
+            {
+                "partId": part_id,
+                "pn": part.pn,
+                "name": part.name,
+                "reason": "; ".join(reasons),
+                "severity": severity,
+            }
+        )
+
+    order = {"high": 0, "med": 1, "low": 2}
+    items.sort(key=lambda it: order.get(it["severity"], 3))
+    return {"items": items[:limit], "total": len(items)}

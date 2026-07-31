@@ -39,10 +39,16 @@ class VendorUpdate(BaseModel):
     moq: Optional[int] = None
     terms: Optional[str] = None
     reliabilityRating: Optional[float] = None
+    # The `active` column has existed on the Vendor model/DB since day one but
+    # was never exposed here, so the Vendors screen's activate/deactivate
+    # toggle had nothing real to call. Exposing it is a pure additive/
+    # backward-compatible change (Optional, defaults preserved).
+    active: Optional[bool] = None
 
 
 class VendorResponse(VendorBase):
     id: int
+    active: bool = True
     createdAt: datetime
     updatedAt: Optional[datetime] = None
 
