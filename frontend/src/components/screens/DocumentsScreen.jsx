@@ -31,8 +31,17 @@ export default function DocumentsScreen({ data, openModal, perms }) {
       api?.documents?.folders?.() || Promise.resolve(null),
     ])
       .then(([docs, folders]) => {
-        if (docs && docs.length) setApiDocs(docs);
-        if (folders && folders.length) setApiFolders(folders);
+        // /documents is paginated ({ items, total, ... }); some deployments
+        // may still return a bare array. Normalize both, and — critically —
+        // set apiDocs even when the result is genuinely empty, so an empty
+        // backend renders the real empty state instead of silently falling
+        // back to bundled sample docs (see sourceDocs below).
+        const docList = Array.isArray(docs) ? docs : docs?.items || [];
+        setApiDocs(docList);
+        const folderList = Array.isArray(folders)
+          ? folders
+          : folders?.items || [];
+        if (folderList.length) setApiFolders(folderList);
       })
       .catch((err) => {
         console.warn(
@@ -88,7 +97,12 @@ export default function DocumentsScreen({ data, openModal, perms }) {
   };
 
   const sourceDocs = React.useMemo(() => {
-    if (apiDocs && apiDocs.length) {
+    // apiDocs is null until the first load resolves (success or failure).
+    // Once it resolves successfully it is always an array — even an empty
+    // one — which we render faithfully (real empty state, never fabricated
+    // rows). Only fall back to the bundled sample docs while the very first
+    // load is still in flight or if it failed outright.
+    if (apiDocs !== null) {
       return apiDocs.map((d) => ({
         id: d.id,
         name: d.originalName,
@@ -111,9 +125,10 @@ export default function DocumentsScreen({ data, openModal, perms }) {
         apiId: d.id,
         version: d.version,
         accessLevel: d.accessLevel,
+        url: d.url || null,
       }));
     }
-    return data.docs;
+    return data.docs || [];
   }, [apiDocs, data.docs]);
 
   const filtered = sourceDocs
@@ -148,6 +163,74 @@ export default function DocumentsScreen({ data, openModal, perms }) {
     __t("documents.size") || "Size",
     __t("documents.type") || "Type",
   ];
+
+  const resolveLink = (url) => {
+    if (!url) return null;
+    if (/^https?:\/\//i.test(url)) return url;
+    return typeof window !== "undefined" && window.location
+      ? window.location.origin + url
+      : url;
+  };
+
+  const handleDownload = React.useCallback((d) => {
+    const link = resolveLink(d.url);
+    if (link) {
+      try {
+        const a = window.document.createElement("a");
+        a.href = link;
+        a.download = d.name || "";
+        a.rel = "noopener";
+        window.document.body.appendChild(a);
+        a.click();
+        window.document.body.removeChild(a);
+      } catch (_e) {
+        window.open(link, "_blank", "noopener");
+      }
+    }
+    toast(__t("documents.downloaded") || "Downloaded " + d.name, {
+      kind: "success",
+    });
+  }, []);
+
+  const handleCopyLink = React.useCallback((d) => {
+    const link = resolveLink(d.url);
+    if (link && navigator?.clipboard?.writeText) {
+      navigator.clipboard
+        .writeText(link)
+        .then(() => toast(__t("common.copied") || "Link copied"))
+        .catch(() => toast(__t("common.copied") || "Link copied"));
+    } else {
+      toast(__t("common.copied") || "Link copied");
+    }
+  }, []);
+
+  const handleDelete = React.useCallback((d) => {
+    if (!d.apiId || !api?.documents?.delete) {
+      toast(d.name + " " + (__t("documents.deleted") || "deleted"), {
+        kind: "warn",
+      });
+      return;
+    }
+    api.documents
+      .delete(d.apiId)
+      .then(() => {
+        setApiDocs((prev) =>
+          Array.isArray(prev) ? prev.filter((doc) => doc.id !== d.apiId) : prev,
+        );
+        toast(d.name + " " + (__t("documents.deleted") || "deleted"), {
+          kind: "warn",
+        });
+        window.dispatchEvent(new CustomEvent("documents-changed"));
+      })
+      .catch((err) => {
+        toast(
+          err?.message ||
+            __t("documents.deleteFailed") ||
+            "Failed to delete document",
+          { kind: "error" },
+        );
+      });
+  }, []);
 
   return (
     <div className="screen-wrap flex flex-col">
@@ -282,18 +365,12 @@ export default function DocumentsScreen({ data, openModal, perms }) {
                           {
                             label: __t("common.download") || "Download",
                             icon: <Icon.Export size={11} />,
-                            onSelect: () =>
-                              toast(
-                                __t("documents.downloaded") ||
-                                  "Downloaded " + d.name,
-                                { kind: "success" },
-                              ),
+                            onSelect: () => handleDownload(d),
                           },
                           {
                             label: __t("common.copyLink") || "Copy link",
                             icon: <Icon.Link size={11} />,
-                            onSelect: () =>
-                              toast(__t("common.copied") || "Link copied"),
+                            onSelect: () => handleCopyLink(d),
                           },
                           "divider",
                           ...(perms?.canDelete
@@ -302,14 +379,7 @@ export default function DocumentsScreen({ data, openModal, perms }) {
                                   label: __t("common.delete") || "Delete",
                                   icon: <Icon.Trash size={11} />,
                                   danger: true,
-                                  onSelect: () =>
-                                    toast(
-                                      d.name +
-                                        " " +
-                                        (__t("documents.deleted") ||
-                                          "deleted"),
-                                      { kind: "warn" },
-                                    ),
+                                  onSelect: () => handleDelete(d),
                                 },
                               ]
                             : []),

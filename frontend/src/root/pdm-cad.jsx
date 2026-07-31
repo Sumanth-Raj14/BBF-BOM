@@ -1,7 +1,7 @@
 import PropTypes from "prop-types";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
-import { Icon, cadAPI, useAppStore } from "../globals";
+import { Icon, cadAPI, documentsAPI, revisionsAPI, api, useAppStore } from "../globals";
 import {
   ScreenHeader,
   Button,
@@ -22,12 +22,66 @@ import {
 
 const ME = "E. Chen";
 
+// Real documents/CAD files carry byte sizes; the old mock used prebaked
+// strings ("8.4 MB") — format live API values the same way instead.
+function formatFileSize(bytes) {
+  if (bytes == null || isNaN(bytes)) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+// Normalize a documents/revisions list response: some endpoints return a
+// bare array, the paginated ones return { items, total, ... }.
+function listItems(result) {
+  if (Array.isArray(result)) return result;
+  if (result && Array.isArray(result.items)) return result.items;
+  return [];
+}
+
+// Flatten the {nodes, edges} where-used knowledge graph (GET
+// /graph/where-used/{part_id}) into the flat "referenced by" rows this
+// modal displays: one row per direct parent (a BOM this part sits in
+// directly, or another part/assembly it's nested under).
+function deriveWhereUsedRows(graph, partId) {
+  const nodes = graph?.nodes || [];
+  const edges = graph?.edges || [];
+  const nodesById = new Map(nodes.map((n) => [n.id, n]));
+  const targetId = `part:${partId}`;
+
+  return edges
+    .filter((e) => e.target === targetId)
+    .map((e) => {
+      const src = nodesById.get(e.source);
+      if (!src) return null;
+      if (src.type === "bom") {
+        return {
+          key: e.id,
+          project: src.name || src.bom_number || `BOM #${src.bom_id}`,
+          path: `BOM ${src.bom_number || src.bom_id}`,
+          instances: e.quantity ?? 0,
+          status: src.status || "—",
+        };
+      }
+      return {
+        key: e.id,
+        project: src.name || src.pn || `Part #${src.part_id}`,
+        path: `Part ${src.pn || src.part_id}`,
+        instances: e.quantity ?? 0,
+        status: src.status || "—",
+      };
+    })
+    .filter(Boolean);
+}
+
 // ============ PDM VAULT SCREEN ============
 function PDMVaultScreen() {
   const ctx = useAppStore();
-  const [selectedPath, setSelectedPath] = React.useState(
-    "/ATLAS/Mainframe/CAD",
-  );
+  // Real folder taxonomy (see app/services/document_service.py FOLDERS) —
+  // default to the CAD folder to keep this screen's original CAD-first
+  // framing now that the tree is loaded from the backend.
+  const [selectedPath, setSelectedPath] = React.useState("/Mechanical/CAD");
   const [vaultStats, setVaultStats] = React.useState(null);
 
   // Load vault stats from API
@@ -44,428 +98,103 @@ function PDMVaultScreen() {
       .catch(() => console.warn("Vault stats API unavailable, using defaults"));
   }, []);
 
-  // Per-folder file sets so clicking the tree actually changes contents
-  const FILES_BY_PATH = {
-    "/": [
-      {
-        name: "Workspace_archive.zip",
-        ext: "ZIP",
-        size: "412 MB",
-        rev: "—",
-        checked_out: null,
-        modified: "2026-04-30",
-        author: "System",
-        state: "released",
-        path: "/",
-      },
-    ],
-    "/ATLAS": [
-      {
-        name: "ATLAS_master_BOM.xlsx",
-        ext: "XLSX",
-        size: "248 KB",
-        rev: "C",
-        checked_out: null,
-        modified: "2026-05-12",
-        author: "E. Chen",
-        state: "released",
-        path: "/ATLAS",
-      },
-      {
-        name: "ATLAS_project_charter.PDF",
-        ext: "PDF",
-        size: "1.1 MB",
-        rev: "A",
-        checked_out: null,
-        modified: "2026-02-10",
-        author: "E. Chen",
-        state: "released",
-        path: "/ATLAS",
-      },
-    ],
-    "/ATLAS/Mainframe": [
-      {
-        name: "Mainframe_overview.PDF",
-        ext: "PDF",
-        size: "2.4 MB",
-        rev: "C",
-        checked_out: null,
-        modified: "2026-05-12",
-        author: "E. Chen",
-        state: "released",
-        path: "/ATLAS/Mainframe",
-      },
-    ],
-    "/ATLAS/Mainframe/CAD": [
-      {
-        name: "ATL-MFR-A_v3.2.SLDASM",
-        ext: "SLDASM",
-        size: "8.4 MB",
-        rev: "C",
-        checked_out: null,
-        modified: "2026-05-12",
-        author: "E. Chen",
-        state: "released",
-      },
-      {
-        name: "ATL-MFR-CHS_v2.SLDPRT",
-        ext: "SLDPRT",
-        size: "1.2 MB",
-        rev: "B",
-        checked_out: "M. Park",
-        modified: "2026-05-24",
-        author: "M. Park",
-        state: "wip",
-      },
-      {
-        name: "ATL-MFR-PWR_v1.SLDPRT",
-        ext: "SLDPRT",
-        size: "924 KB",
-        rev: "A",
-        checked_out: null,
-        modified: "2026-05-09",
-        author: "R. Sato",
-        state: "released",
-      },
-      {
-        name: "MEC-PL-040A.STEP",
-        ext: "STEP",
-        size: "612 KB",
-        rev: "D",
-        checked_out: null,
-        modified: "2026-05-12",
-        author: "E. Chen",
-        state: "released",
-      },
-      {
-        name: "MEC-PL-040A_drawing.PDF",
-        ext: "PDF",
-        size: "184 KB",
-        rev: "D",
-        checked_out: null,
-        modified: "2026-05-12",
-        author: "E. Chen",
-        state: "released",
-      },
-      {
-        name: "EL-PCB-MAIN-R3.zip",
-        ext: "ZIP",
-        size: "3.4 MB",
-        rev: "C",
-        checked_out: null,
-        modified: "2026-05-09",
-        author: "R. Sato",
-        state: "review",
-      },
-      {
-        name: "Chassis_3D_v3.STEP",
-        ext: "STEP",
-        size: "8.7 MB",
-        rev: "B",
-        checked_out: "E. Chen",
-        modified: "2026-05-25",
-        author: "E. Chen",
-        state: "wip",
-      },
-    ],
-    "/ATLAS/Mainframe/Drawings": [
-      {
-        name: "MEC-PL-040A_drawing.PDF",
-        ext: "PDF",
-        size: "184 KB",
-        rev: "D",
-        checked_out: null,
-        modified: "2026-05-12",
-        author: "E. Chen",
-        state: "released",
-      },
-      {
-        name: "MEC-PL-041A_drawing.PDF",
-        ext: "PDF",
-        size: "210 KB",
-        rev: "B",
-        checked_out: null,
-        modified: "2026-05-09",
-        author: "M. Park",
-        state: "review",
-      },
-      {
-        name: "Chassis_assembly.PDF",
-        ext: "PDF",
-        size: "892 KB",
-        rev: "C",
-        checked_out: null,
-        modified: "2026-05-12",
-        author: "E. Chen",
-        state: "draft",
-      },
-      {
-        name: "Mainframe_exploded.PDF",
-        ext: "PDF",
-        size: "1.4 MB",
-        rev: "A",
-        checked_out: null,
-        modified: "2026-05-08",
-        author: "E. Chen",
-        state: "released",
-      },
-      {
-        name: "Schematic_main_R3.PDF",
-        ext: "PDF",
-        size: "640 KB",
-        rev: "C",
-        checked_out: null,
-        modified: "2026-05-09",
-        author: "R. Sato",
-        state: "released",
-      },
-    ],
-    "/ATLAS/Mainframe/Datasheets": [
-      {
-        name: "STM32H743_datasheet.PDF",
-        ext: "PDF",
-        size: "4.2 MB",
-        rev: "B",
-        checked_out: null,
-        modified: "2026-05-12",
-        author: "STMicro",
-        state: "released",
-      },
-      {
-        name: "MeanWell_PSU_240W.PDF",
-        ext: "PDF",
-        size: "1.8 MB",
-        rev: "A",
-        checked_out: null,
-        modified: "2026-04-22",
-        author: "Mean Well",
-        state: "released",
-      },
-      {
-        name: "IMX477_specs.PDF",
-        ext: "PDF",
-        size: "2.1 MB",
-        rev: "A",
-        checked_out: null,
-        modified: "2026-04-28",
-        author: "Sony",
-        state: "released",
-      },
-      {
-        name: "Daly_BMS_12S.PDF",
-        ext: "PDF",
-        size: "924 KB",
-        rev: "C",
-        checked_out: null,
-        modified: "2026-04-15",
-        author: "Daly",
-        state: "released",
-      },
-    ],
-    "/ATLAS/Mainframe/Tests": [
-      {
-        name: "Thermal_test_report.PDF",
-        ext: "PDF",
-        size: "892 KB",
-        rev: "A",
-        checked_out: null,
-        modified: "2026-05-07",
-        author: "M. Park",
-        state: "released",
-      },
-      {
-        name: "EMC_compliance_results.PDF",
-        ext: "PDF",
-        size: "1.2 MB",
-        rev: "A",
-        checked_out: null,
-        modified: "2026-05-02",
-        author: "Intertek",
-        state: "released",
-      },
-      {
-        name: "Burn_in_24h.xlsx",
-        ext: "XLSX",
-        size: "186 KB",
-        rev: "—",
-        checked_out: null,
-        modified: "2026-04-30",
-        author: "R. Sato",
-        state: "released",
-      },
-    ],
-    "/ATLAS/Eval": [
-      {
-        name: "ATL-EV-A_v1.SLDASM",
-        ext: "SLDASM",
-        size: "2.8 MB",
-        rev: "A",
-        checked_out: null,
-        modified: "2026-05-08",
-        author: "R. Sato",
-        state: "draft",
-      },
-      {
-        name: "Eval_board_schematic.PDF",
-        ext: "PDF",
-        size: "412 KB",
-        rev: "A",
-        checked_out: null,
-        modified: "2026-05-08",
-        author: "R. Sato",
-        state: "draft",
-      },
-    ],
-    "/HORIZON": [
-      {
-        name: "HORIZON_charter.PDF",
-        ext: "PDF",
-        size: "780 KB",
-        rev: "A",
-        checked_out: null,
-        modified: "2026-04-12",
-        author: "M. Park",
-        state: "released",
-      },
-    ],
-    "/HORIZON/Pod": [
-      {
-        name: "HZN-POD-A_v1.4.SLDASM",
-        ext: "SLDASM",
-        size: "4.2 MB",
-        rev: "B",
-        checked_out: null,
-        modified: "2026-05-21",
-        author: "M. Park",
-        state: "review",
-      },
-      {
-        name: "MEC-SHELL-A.STEP",
-        ext: "STEP",
-        size: "1.4 MB",
-        rev: "B",
-        checked_out: null,
-        modified: "2026-05-18",
-        author: "M. Park",
-        state: "released",
-      },
-      {
-        name: "Pod_drawing_pkg.zip",
-        ext: "ZIP",
-        size: "5.8 MB",
-        rev: "A",
-        checked_out: null,
-        modified: "2026-05-19",
-        author: "M. Park",
-        state: "review",
-      },
-    ],
-    "/_archive": [
-      {
-        name: "ATL-MFR-A_v2.0_LEGACY.SLDASM",
-        ext: "SLDASM",
-        size: "7.2 MB",
-        rev: "Z",
-        checked_out: null,
-        modified: "2025-09-12",
-        author: "E. Chen",
-        state: "released",
-      },
-      {
-        name: "Old_camera_module.STEP",
-        ext: "STEP",
-        size: "1.1 MB",
-        rev: "D",
-        checked_out: null,
-        modified: "2025-08-04",
-        author: "Archive",
-        state: "released",
-      },
-    ],
-  };
+  // Folder tree — real document taxonomy from the backend (documents are
+  // grouped into a fixed set of folders by category; see
+  // app/services/document_service.py FOLDERS). Falls back to a bare
+  // workspace root if the API is unavailable — never a fabricated tree.
+  const [folders, setFolders] = React.useState([
+    { path: "/", label: __t("pdm.workspace") || "Workspace", count: 0 },
+  ]);
+  React.useEffect(() => {
+    if (!documentsAPI) return;
+    documentsAPI
+      .folders()
+      .then((result) => {
+        const list = listItems(result).length
+          ? listItems(result)
+          : Array.isArray(result)
+            ? result
+            : null;
+        if (list && list.length) setFolders(list);
+      })
+      .catch(() => console.warn("Vault folders API unavailable, using default tree"));
+  }, []);
 
-  const [filesByPath, setFilesByPath] = React.useState(FILES_BY_PATH);
-  const files = filesByPath[selectedPath] || [];
+  // Files for the selected folder — real documents/CAD files persisted on
+  // the backend. No local-only mock rows: an empty/failed response renders
+  // the table's empty state, it never falls back to fabricated files.
+  const [files, setFiles] = React.useState([]);
+  const [filesLoading, setFilesLoading] = React.useState(false);
+  React.useEffect(() => {
+    if (!documentsAPI) {
+      setFiles([]);
+      return;
+    }
+    let cancelled = false;
+    setFilesLoading(true);
+    documentsAPI
+      .list({ folder: selectedPath })
+      .then((result) => {
+        if (cancelled) return;
+        setFiles(
+          listItems(result).map((doc) => ({
+            id: doc.id,
+            name: doc.originalName || doc.filename,
+            ext: (doc.fileType || "").toUpperCase() || "FILE",
+            size: formatFileSize(doc.fileSize),
+            rev: doc.version != null ? String(doc.version) : "—",
+            // No lock/checkout table exists on the backend yet — this stays
+            // a local, session-only toggle (see toggleCheckout below).
+            checked_out: null,
+            modified: (doc.updatedAt || doc.createdAt || "").slice(0, 10) || "—",
+            author: doc.uploadedBy || "—",
+            state:
+              doc.accessLevel === "public"
+                ? "released"
+                : doc.accessLevel === "restricted"
+                  ? "review"
+                  : "draft",
+            path: selectedPath,
+            partId: doc.partId,
+            filePath: doc.filePath,
+            url: doc.url,
+          })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFiles([]);
+          console.warn("Vault file list API unavailable for", selectedPath);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setFilesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPath]);
+
   const [previewFile, setPreviewFile] = React.useState(null);
 
-  const tree = [
-    { path: "/", label: "Workspace", icon: <Icon.Folder size={14} /> },
-    {
-      path: "/ATLAS",
-      label: "ATLAS",
-      icon: <Icon.Folder size={14} />,
-      indent: 1,
-    },
-    {
-      path: "/ATLAS/Mainframe",
-      label: "Mainframe",
-      icon: <Icon.Folder size={14} />,
-      indent: 2,
-    },
-    {
-      path: "/ATLAS/Mainframe/CAD",
-      label: "CAD",
-      icon: <Icon.Folder size={14} />,
-      indent: 3,
-      count: FILES_BY_PATH["/ATLAS/Mainframe/CAD"].length,
-    },
-    {
-      path: "/ATLAS/Mainframe/Drawings",
-      label: "Drawings",
-      icon: <Icon.Folder size={14} />,
-      indent: 3,
-      count: FILES_BY_PATH["/ATLAS/Mainframe/Drawings"].length,
-    },
-    {
-      path: "/ATLAS/Mainframe/Datasheets",
-      label: "Datasheets",
-      icon: <Icon.Folder size={14} />,
-      indent: 3,
-      count: FILES_BY_PATH["/ATLAS/Mainframe/Datasheets"].length,
-    },
-    {
-      path: "/ATLAS/Mainframe/Tests",
-      label: "Test Reports",
-      icon: <Icon.Folder size={14} />,
-      indent: 3,
-      count: FILES_BY_PATH["/ATLAS/Mainframe/Tests"].length,
-    },
-    {
-      path: "/ATLAS/Eval",
-      label: "Eval Board",
-      icon: <Icon.Folder size={14} />,
-      indent: 2,
-      count: FILES_BY_PATH["/ATLAS/Eval"].length,
-    },
-    {
-      path: "/HORIZON",
-      label: "HORIZON",
-      icon: <Icon.Folder size={14} />,
-      indent: 1,
-    },
-    {
-      path: "/HORIZON/Pod",
-      label: "Sensor Pod",
-      icon: <Icon.Folder size={14} />,
-      indent: 2,
-      count: FILES_BY_PATH["/HORIZON/Pod"].length,
-    },
-    {
-      path: "/_archive",
-      label: "Archive",
-      icon: <Icon.Doc size={14} />,
-      indent: 1,
-      count: FILES_BY_PATH["/_archive"].length,
-    },
-  ];
+  const tree = folders.map((f) => ({
+    path: f.path,
+    label: f.label,
+    icon: <Icon.Folder size={14} />,
+    indent: f.path === "/" ? 0 : f.path.split("/").filter(Boolean).length,
+    count: f.count,
+  }));
 
+  // File locking has no backend table yet, so check-in/out stays a local,
+  // non-persisting toggle (preserved as a working UI affordance rather than
+  // removed, since there's nothing server-side to wire it to).
   const toggleCheckout = (i) => {
     const f = files[i];
     if (f.checked_out === ME) {
       const next = files.map((x, j) =>
         j === i ? { ...x, checked_out: null } : x,
       );
-      setFilesByPath({ ...filesByPath, [selectedPath]: next });
+      setFiles(next);
       toast(
         (
           __t("pdm.checkedIn") || "Checked in {name} · others can now edit"
@@ -483,7 +212,7 @@ function PDMVaultScreen() {
       const next = files.map((x, j) =>
         j === i ? { ...x, checked_out: ME } : x,
       );
-      setFilesByPath({ ...filesByPath, [selectedPath]: next });
+      setFiles(next);
       toast(
         (
           __t("pdm.checkedOut") || "Checked out {name} · locked for your edits"
@@ -634,14 +363,19 @@ function PDMVaultScreen() {
                 {
                   icon: <Icon.Export size={11} />,
                   label: __t("pdm.download") || "Download",
-                  onSelect: () =>
-                    toast(
-                      (__t("pdm.downloadedToast") || "Downloaded {name}").replace(
-                        "{name}",
-                        f.name,
-                      ),
-                      { kind: "success" },
-                    ),
+                  onSelect: () => {
+                    if (f.url) {
+                      window.open(f.url, "_blank", "noopener");
+                    } else {
+                      toast(
+                        (
+                          __t("pdm.downloadUnavailable") ||
+                          "No download URL available for {name}"
+                        ).replace("{name}", f.name),
+                        { kind: "warn" },
+                      );
+                    }
+                  },
                 },
                 "divider",
                 {
@@ -657,31 +391,39 @@ function PDMVaultScreen() {
     },
   ];
 
+  // Derived from the currently loaded folder's real files — the backend has
+  // no vault-wide aggregate for these two, so they're honestly scoped to
+  // what's on screen rather than a fabricated tenant-wide number.
+  const checkedOutCount = files.filter((f) => f.checked_out).length;
+  const pendingReviewCount = files.filter((f) => f.state === "review").length;
+
   const statusLine =
     selectedPath +
     " · " +
     files.length +
     " " +
     (__t("pdm.files") || "files") +
-    " · 2 " +
+    " · " +
+    checkedOutCount +
+    " " +
     (__t("pdm.checkedOutLower") || "checked out");
 
   const stats = [
     {
       l: __t("pdm.totalFiles") || "Total files",
-      v: vaultStats?.totalFiles || 182,
+      v: vaultStats?.totalFiles ?? 0,
     },
     {
       l: __t("pdm.checkedOutColumn") || "Checked out",
-      v: vaultStats?.checkedOut || 2,
+      v: checkedOutCount,
     },
     {
       l: __t("pdm.pendingReview") || "Pending review",
-      v: vaultStats?.pendingReview || 1,
+      v: pendingReviewCount,
     },
     {
       l: __t("pdm.vaultSize") || "Vault size",
-      v: vaultStats?.vaultSize || "412 MB",
+      v: vaultStats?.vaultSize || "—",
     },
   ];
 
@@ -796,16 +538,23 @@ function PDMVaultScreen() {
               }
               columns={columns}
               rows={files}
-              getRowKey={(f) => f.name}
+              getRowKey={(f) => f.id ?? f.name}
               onRowClick={(f) => setPreviewFile(f)}
               isRowSelected={(f) => f.checked_out === ME}
               empty={
-                <EmptyState
-                  title={__t("pdm.noFiles") || "No files"}
-                  message={
-                    __t("pdm.noFilesMsg") || "This folder has no files yet."
-                  }
-                />
+                filesLoading ? (
+                  <div className="flex items-center gap-8 fg-3 fs-12 justify-center" style={{ padding: 24 }}>
+                    <Spinner size="sm" label={__t("common.loading") || "Loading…"} />
+                    <span aria-hidden="true">{__t("common.loading") || "Loading…"}</span>
+                  </div>
+                ) : (
+                  <EmptyState
+                    title={__t("pdm.noFiles") || "No files"}
+                    message={
+                      __t("pdm.noFilesMsg") || "This folder has no files yet."
+                    }
+                  />
+                )
               }
             />
           </Card>
@@ -892,7 +641,7 @@ function CADPreview({ file, onClose }) {
       footer={
         <div className="font-mono fs-10 fg-3">
           {__t("pdm.viewerHelp") ||
-            "Drag to rotate · Scroll to zoom · Auto-extracted: 120×80×12mm, 89g, Aluminum 6061-T6"}
+            "Drag to rotate · Scroll to zoom · Use “Extract attributes” for real CAD metadata"}
         </div>
       }
     >
@@ -1000,33 +749,70 @@ CADPreview.propTypes = {
 
 // ============ CAD REVISION HISTORY ============
 function CADRevisionsModal({ open, onClose, file }) {
+  const [revs, setRevs] = React.useState([]);
+  const [loading, setLoading] = React.useState(false);
+  const [restoringId, setRestoringId] = React.useState(null);
+
+  const loadRevisions = React.useCallback(() => {
+    if (!file?.id || !revisionsAPI) {
+      setRevs([]);
+      return;
+    }
+    setLoading(true);
+    revisionsAPI
+      .list({
+        partId: file.id,
+        entityType: "document",
+        sort_by: "createdAt",
+        sort_dir: "desc",
+      })
+      .then((result) => {
+        const items = listItems(result);
+        setRevs(
+          items.map((r, idx) => ({
+            id: r.id,
+            rev: r.revisionNumber,
+            date: (r.createdAt || "").slice(0, 10) || "—",
+            author: r.createdById ? `User #${r.createdById}` : "—",
+            note: r.description || r.revisionLabel || "—",
+            size: idx === 0 ? file.size : "—",
+            current: idx === 0,
+          })),
+        );
+      })
+      .catch(() => {
+        setRevs([]);
+        console.warn("Revisions API unavailable for document", file.id);
+      })
+      .finally(() => setLoading(false));
+  }, [file?.id]);
+
+  React.useEffect(() => {
+    if (open) loadRevisions();
+  }, [open, loadRevisions]);
+
   if (!open || !file) return null;
-  const revs = [
-    {
-      rev: "C",
-      date: "2026-05-12",
-      author: "E. Chen",
-      note: "Vented top plate cutout sized for 92mm fan",
-      size: file.size,
-      current: file.rev === "C",
-    },
-    {
-      rev: "B",
-      date: "2026-04-22",
-      author: "M. Park",
-      note: "Wall thickness 2mm → 2.5mm for stiffness",
-      size: "8.1 MB",
-      current: file.rev === "B",
-    },
-    {
-      rev: "A",
-      date: "2026-03-08",
-      author: "E. Chen",
-      note: "Initial release",
-      size: "7.8 MB",
-      current: file.rev === "A",
-    },
-  ];
+
+  const restoreRevision = async (r) => {
+    setRestoringId(r.id);
+    try {
+      const result = await revisionsAPI.rollback(r.id);
+      toast(
+        (
+          __t("pdm.restoredRev") || "Restored Rev {rev} as current. Rollback logged."
+        ).replace("{rev}", result?.revisionNumber || r.rev),
+        { kind: "success" },
+      );
+      onClose();
+    } catch (e) {
+      toast(e.message || __t("pdm.restoreFailed") || "Restore failed", {
+        kind: "error",
+      });
+    } finally {
+      setRestoringId(null);
+    }
+  };
+
   return (
     <Modal
       open={open}
@@ -1035,11 +821,28 @@ function CADRevisionsModal({ open, onClose, file }) {
       title={(
         __t("pdm.revisionHistoryTitle") || "Revision history · {name}"
       ).replace("{name}", file.name)}
-      subtitle={(
-        __t("pdm.revisionsTracked") || "{count} revisions tracked"
-      ).replace("{count}", revs.length)}
+      subtitle={
+        loading
+          ? __t("pdm.loadingRevisions") || "Loading revisions…"
+          : (
+              __t("pdm.revisionsTracked") || "{count} revisions tracked"
+            ).replace("{count}", revs.length)
+      }
       size="lg"
     >
+      {loading ? (
+        <div className="flex items-center gap-8 fg-3 fs-12" style={{ padding: 32 }}>
+          <Spinner size="sm" label={__t("pdm.loadingRevisions") || "Loading revisions…"} />
+        </div>
+      ) : revs.length === 0 ? (
+        <EmptyState
+          title={__t("pdm.noRevisions") || "No revisions recorded"}
+          message={
+            __t("pdm.noRevisionsMsg") ||
+            "No revision history has been recorded for this file yet."
+          }
+        />
+      ) : (
       <div className="relative pl-24">
         <div
           className="pos-absolute w-1"
@@ -1047,7 +850,7 @@ function CADRevisionsModal({ open, onClose, file }) {
         />
         {revs.map((r) => (
           <div
-            key={r.rev}
+            key={r.id ?? r.rev}
             className="pos-relative mb-16 rounded-r2"
             style={{
               padding: 14,
@@ -1127,24 +930,19 @@ function CADRevisionsModal({ open, onClose, file }) {
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => {
-                    onClose();
-                    toast(
-                      (
-                        __t("pdm.restoredRev") ||
-                        "Restored Rev {rev} as current. Rollback logged."
-                      ).replace("{rev}", r.rev),
-                      { kind: "warn" },
-                    );
-                  }}
+                  disabled={restoringId === r.id}
+                  onClick={() => restoreRevision(r)}
                 >
-                  {__t("pdm.restoreAsCurrent") || "Restore as current"}
+                  {restoringId === r.id
+                    ? __t("common.working") || "Working…"
+                    : __t("pdm.restoreAsCurrent") || "Restore as current"}
                 </Button>
               )}
             </div>
           </div>
         ))}
       </div>
+      )}
     </Modal>
   );
 }
@@ -1156,33 +954,31 @@ CADRevisionsModal.propTypes = {
 
 // ============ CAD WHERE-USED ============
 function CADWhereUsedModal({ open, onClose, file }) {
+  const [refs, setRefs] = React.useState([]);
+  const [loading, setLoading] = React.useState(false);
+  const [notLinked, setNotLinked] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!open || !file) return;
+    if (!file.partId) {
+      setRefs([]);
+      setNotLinked(true);
+      return;
+    }
+    setNotLinked(false);
+    setLoading(true);
+    api?.graph
+      ?.whereUsed(file.partId)
+      .then((graph) => setRefs(deriveWhereUsedRows(graph, file.partId)))
+      .catch(() => {
+        setRefs([]);
+        console.warn("Where-used graph API unavailable for part", file.partId);
+      })
+      .finally(() => setLoading(false));
+  }, [open, file]);
+
   if (!open || !file) return null;
-  const refs = [
-    {
-      project: "ATLAS / Mainframe",
-      path: "/CAD/ATL-MFR-A_v3.2.SLDASM",
-      instances: 2,
-      status: "Released",
-    },
-    {
-      project: "ATLAS / Mainframe",
-      path: "/CAD/Service spares/SVC-001.SLDASM",
-      instances: 4,
-      status: "Released",
-    },
-    {
-      project: "ATLAS-LITE / Eval",
-      path: "/CAD/ATL-EV-A_v1.SLDASM",
-      instances: 1,
-      status: "Draft",
-    },
-    {
-      project: "HORIZON / Sensor Pod",
-      path: "/CAD/HZN-POD-A_v1.4.SLDASM",
-      instances: 0,
-      status: "Archived",
-    },
-  ];
+
   return (
     <Modal
       open={open}
@@ -1192,28 +988,54 @@ function CADWhereUsedModal({ open, onClose, file }) {
         "{name}",
         file.name,
       )}
-      subtitle={(
-        __t("pdm.referencedBy") || "Referenced by {count} active assemblies"
-      ).replace("{count}", refs.filter((r) => r.instances > 0).length)}
+      subtitle={
+        loading
+          ? __t("pdm.loadingWhereUsed") || "Tracing where-used graph…"
+          : (
+              __t("pdm.referencedBy") || "Referenced by {count} active assemblies"
+            ).replace("{count}", refs.filter((r) => r.instances > 0).length)
+      }
     >
-      {refs.map((r) => (
-        <div
-          key={r.path}
-          className="border-line rounded-r2 mb-6"
-          style={{ padding: 10, opacity: r.instances === 0 ? 0.5 : 1 }}
-        >
-          <div className="flex justify-between items-baseline">
-            <div>
-              <div className="fw-600 fs-12">{r.project}</div>
-              <div className="font-mono fs-10 fg-3">{r.path}</div>
-            </div>
-            <div className="text-right">
-              <div className="font-mono fs-12 fw-700">×{r.instances}</div>
-              <div className="font-mono fs-9 fg-3">{r.status}</div>
+      {loading ? (
+        <div className="flex items-center gap-8 fg-3 fs-12" style={{ padding: 32 }}>
+          <Spinner size="sm" label={__t("pdm.loadingWhereUsed") || "Tracing where-used graph…"} />
+        </div>
+      ) : notLinked ? (
+        <EmptyState
+          title={__t("pdm.notLinkedToPart") || "Not linked to a part"}
+          message={
+            __t("pdm.notLinkedToPartMsg") ||
+            "This file isn't associated with a part record, so where-used analysis isn't available."
+          }
+        />
+      ) : refs.length === 0 ? (
+        <EmptyState
+          title={__t("pdm.noReferences") || "Not referenced anywhere"}
+          message={
+            __t("pdm.noReferencesMsg") ||
+            "This part doesn't appear in any BOM or assembly yet."
+          }
+        />
+      ) : (
+        refs.map((r) => (
+          <div
+            key={r.key}
+            className="border-line rounded-r2 mb-6"
+            style={{ padding: 10, opacity: r.instances === 0 ? 0.5 : 1 }}
+          >
+            <div className="flex justify-between items-baseline">
+              <div>
+                <div className="fw-600 fs-12">{r.project}</div>
+                <div className="font-mono fs-10 fg-3">{r.path}</div>
+              </div>
+              <div className="text-right">
+                <div className="font-mono fs-12 fw-700">×{r.instances}</div>
+                <div className="font-mono fs-9 fg-3">{r.status}</div>
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        ))
+      )}
     </Modal>
   );
 }
@@ -1538,53 +1360,54 @@ CADMarkupModal.propTypes = {
 function CADAttrsModal({ open, onClose, file }) {
   const [extracting, setExtracting] = React.useState(false);
   const [attrs, setAttrs] = React.useState(null);
+  const [extractError, setExtractError] = React.useState(null);
   React.useEffect(() => {
     if (open) {
       setExtracting(true);
       setAttrs(null);
-      // Try API first, fall back to mock
+      setExtractError(null);
       cadAPI
         ?.extractAttrs({
-          filePath: file?.name || "",
+          // Prefer the document's real server-side storage path; falling
+          // back to just the display name only ever worked by accident.
+          filePath: file?.filePath || file?.name || "",
           fileType: file?.ext || "SLDPRT",
         })
         .then((result) => {
-          if (result && result.material) {
+          if (result && !result.error) {
+            // The backend parser reads what a STEP/IGES/SLDPRT file header
+            // actually exposes (format, size, entity count, custom
+            // properties, CAD version) — it can't derive physical
+            // properties like mass/material/volume from that, so those
+            // stay honestly "—" instead of invented numbers.
             setAttrs({
-              material: result.material,
-              density: result.density,
-              mass: result.mass,
-              volume: result.volume,
-              bounding_box: result.boundingBox,
-              surface_area: result.surfaceArea,
-              center_of_mass: result.centerOfMass,
-              file_format: result.fileFormat,
-              sw_version: result.cadVersion,
+              material: result.material || "—",
+              density: result.density || "—",
+              mass: result.mass || "—",
+              volume: result.volume || "—",
+              bounding_box: result.boundingBox || "—",
+              surface_area: result.surfaceArea || "—",
+              center_of_mass: result.centerOfMass || "—",
+              file_format: result.fileFormat || file?.ext || "—",
+              sw_version: result.cadVersion || "—",
+              entity_count:
+                result.entityCount != null ? String(result.entityCount) : "—",
+              file_size:
+                result.fileSize != null ? formatFileSize(result.fileSize) : "—",
               custom: result.customProperties || {},
             });
           } else {
-            setAttrs({
-              material: "Aluminum 6061-T6",
-              density: "2.70 g/cm³",
-              mass: "89.4 g",
-              volume: "33.1 cm³",
-              bounding_box: "120 × 80 × 12 mm",
-              surface_area: "264 cm²",
-              center_of_mass: "(60.0, 40.0, 6.0) mm",
-              file_format: file?.ext + " (ASCII)",
-              sw_version: "SolidWorks 2026 SP2",
-              custom: {
-                Part_Number: "MEC-PL-040A",
-                Revision: file?.rev || "D",
-                Vendor: "Protolabs",
-                Finish: "Type II Anodized, Black",
-              },
-            });
+            setExtractError(
+              result?.error ||
+                __t("pdm.noAttrsExtracted") ||
+                "No CAD metadata could be extracted for this file.",
+            );
           }
           setExtracting(false);
         })
-        .catch(() => {
+        .catch((e) => {
           console.error("CAD attribute extraction failed");
+          setExtractError(e.message || __t("common.error") || "Extraction failed");
           toast(__t("common.error") || "Extraction failed", { kind: "error" });
           setExtracting(false);
         });
@@ -1640,6 +1463,12 @@ function CADAttrsModal({ open, onClose, file }) {
             ).replace("{ext}", file.ext)}
           </span>
         </div>
+      )}
+      {!extracting && extractError && (
+        <EmptyState
+          title={__t("pdm.extractionFailedTitle") || "Extraction unavailable"}
+          message={extractError}
+        />
       )}
       {attrs && (
         <>
@@ -1701,6 +1530,7 @@ function CADSyncModal({ open, onClose }) {
   const [diffs, setDiffs] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
   const [synced, setSynced] = React.useState(false);
+  const [applying, setApplying] = React.useState(false);
 
   React.useEffect(() => {
     if (open && !synced) {
@@ -1744,21 +1574,33 @@ function CADSyncModal({ open, onClose }) {
           </Button>
           <Button
             variant="primary"
-            disabled={loading || synced}
-            onClick={() => {
-              setSynced(true);
-              onClose();
-              toast(
-                (
-                  __t("pdm.syncComplete") ||
-                  "Sync complete · {count} changes applied · audit logged"
-                ).replace("{count}", diffs.length),
-                { kind: "success" },
-              );
+            disabled={loading || synced || applying || diffs.length === 0}
+            onClick={async () => {
+              setApplying(true);
+              try {
+                const result = await cadAPI.applySync(diffs);
+                setSynced(true);
+                onClose();
+                toast(
+                  (
+                    __t("pdm.syncComplete") ||
+                    "Sync complete · {count} changes applied · audit logged"
+                  ).replace("{count}", result?.appliedCount ?? diffs.length),
+                  { kind: "success" },
+                );
+              } catch (e) {
+                toast(e.message || __t("pdm.cadSyncFailed") || "CAD sync failed", {
+                  kind: "error",
+                });
+              } finally {
+                setApplying(false);
+              }
             }}
           >
             <Icon.Check size={12} />{" "}
-            {__t("pdm.applyAllChanges") || "Apply all changes"}
+            {applying
+              ? __t("common.working") || "Working…"
+              : __t("pdm.applyAllChanges") || "Apply all changes"}
           </Button>
         </>
       }
@@ -1829,42 +1671,92 @@ CADSyncModal.propTypes = {
 };
 
 // ============ DRAWING RELEASE WORKFLOW ============
+// There is no dedicated approval-workflow table on the backend — this maps
+// the real Document.accessLevel field (public/restricted/private) onto the
+// released/review/draft states so the action below genuinely persists
+// (documentsAPI.update), instead of just toasting.
+function drawingStateFromAccessLevel(accessLevel) {
+  if (accessLevel === "public") return "approved";
+  if (accessLevel === "restricted") return "review";
+  return "draft";
+}
+function drawingWatermarkFromState(state) {
+  if (state === "approved") return "RELEASED";
+  if (state === "review") return "FOR APPROVAL";
+  return "DRAFT — NOT FOR PRODUCTION";
+}
+
 function DrawingReleaseModal({ open, onClose }) {
+  const [drawings, setDrawings] = React.useState([]);
+  const [loading, setLoading] = React.useState(false);
+  const [releasing, setReleasing] = React.useState(false);
+
+  const loadDrawings = React.useCallback(() => {
+    if (!documentsAPI) {
+      setDrawings([]);
+      return;
+    }
+    setLoading(true);
+    documentsAPI
+      .list({ category: "Drawing" })
+      .then((result) => {
+        setDrawings(
+          listItems(result).map((d) => {
+            const state = drawingStateFromAccessLevel(d.accessLevel);
+            return {
+              id: d.id,
+              name: d.originalName || d.filename,
+              rev: d.version != null ? String(d.version) : "—",
+              state,
+              reviewer: d.uploadedBy || "—",
+              date: (d.updatedAt || d.createdAt || "").slice(0, 10) || "—",
+              watermark: drawingWatermarkFromState(state),
+              url: d.url,
+            };
+          }),
+        );
+      })
+      .catch(() => {
+        setDrawings([]);
+        console.warn("Documents API unavailable for drawing release workflow");
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  React.useEffect(() => {
+    if (open) loadDrawings();
+  }, [open, loadDrawings]);
+
   if (!open) return null;
-  const drawings = [
-    {
-      name: "MEC-PL-040A_drawing.PDF",
-      rev: "D",
-      state: "approved",
-      reviewer: "M. Park",
-      date: "2026-05-12",
-      watermark: "RELEASED",
-    },
-    {
-      name: "MEC-PL-041A_drawing.PDF",
-      rev: "B",
-      state: "review",
-      reviewer: "—",
-      date: "—",
-      watermark: "FOR APPROVAL",
-    },
-    {
-      name: "Chassis_assembly.PDF",
-      rev: "C",
-      state: "draft",
-      reviewer: "—",
-      date: "—",
-      watermark: "DRAFT — NOT FOR PRODUCTION",
-    },
-    {
-      name: "Mainframe_exploded.PDF",
-      rev: "A",
-      state: "approved",
-      reviewer: "E. Chen",
-      date: "2026-05-08",
-      watermark: "RELEASED",
-    },
-  ];
+
+  const releaseDrawings = async () => {
+    const toRelease = drawings.filter((d) => d.state === "review");
+    if (toRelease.length === 0) {
+      onClose();
+      toast(__t("pdm.noDrawingsToRelease") || "No drawings pending review to release", {
+        kind: "info",
+      });
+      return;
+    }
+    setReleasing(true);
+    try {
+      await Promise.all(
+        toRelease.map((d) => documentsAPI.update(d.id, { accessLevel: "public" })),
+      );
+      onClose();
+      toast(
+        (
+          __t("pdm.drawingsReleased") ||
+          "Released {count} drawings · marked public · audit logged"
+        ).replace("{count}", toRelease.length),
+        { kind: "success" },
+      );
+    } catch (e) {
+      toast(e.message || __t("common.error") || "Release failed", { kind: "error" });
+    } finally {
+      setReleasing(false);
+    }
+  };
 
   const columns = [
     {
@@ -1916,14 +1808,18 @@ function DrawingReleaseModal({ open, onClose }) {
         <Button
           variant="secondary"
           size="sm"
-          onClick={() =>
-            toast(
-              (__t("pdm.previewToast") || "Preview: {name} [{watermark}]")
-                .replace("{name}", d.name)
-                .replace("{watermark}", d.watermark),
-              { kind: "info" },
-            )
-          }
+          onClick={() => {
+            if (d.url) {
+              window.open(d.url, "_blank", "noopener");
+            } else {
+              toast(
+                (__t("pdm.previewToast") || "Preview: {name} [{watermark}]")
+                  .replace("{name}", d.name)
+                  .replace("{watermark}", d.watermark),
+                { kind: "info" },
+              );
+            }
+          }}
         >
           {__t("pdm.previewBtn") || "Preview"}
         </Button>
@@ -1949,17 +1845,13 @@ function DrawingReleaseModal({ open, onClose }) {
           </Button>
           <Button
             variant="primary"
-            onClick={() => {
-              onClose();
-              toast(
-                __t("pdm.drawingsReleased") ||
-                  "Approved drawings released · PDFs watermarked · audit logged",
-                { kind: "success" },
-              );
-            }}
+            disabled={loading || releasing}
+            onClick={releaseDrawings}
           >
             <Icon.Check size={12} />{" "}
-            {__t("pdm.releaseApprovedDrawings") || "Release approved drawings"}
+            {releasing
+              ? __t("common.working") || "Working…"
+              : __t("pdm.releaseApprovedDrawings") || "Release approved drawings"}
           </Button>
         </>
       }
@@ -1971,7 +1863,21 @@ function DrawingReleaseModal({ open, onClose }) {
         }
         columns={columns}
         rows={drawings}
-        getRowKey={(d) => d.name}
+        getRowKey={(d) => d.id ?? d.name}
+        empty={
+          loading ? (
+            <div className="flex items-center gap-8 fg-3 fs-12 justify-center" style={{ padding: 20 }}>
+              <Spinner size="sm" label={__t("common.loading") || "Loading…"} />
+            </div>
+          ) : (
+            <EmptyState
+              title={__t("pdm.noDrawings") || "No drawings"}
+              message={
+                __t("pdm.noDrawingsMsg") || "No drawings have been uploaded yet."
+              }
+            />
+          )
+        }
       />
       <div
         className="mt-12 bg-sunk border-line rounded-r2 fs-11 fg-3 font-mono"

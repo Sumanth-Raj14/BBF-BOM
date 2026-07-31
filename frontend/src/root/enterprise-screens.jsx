@@ -1,5 +1,4 @@
 import React from "react";
-import { storage } from "../utils/storage.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import {
@@ -985,80 +984,62 @@ function LaborScreen() {
 function CurrencyScreen() {
   const [rates, setRates] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
-  const [lastUpdated, setLastUpdated] = React.useState(null);
+  const [converting, setConverting] = React.useState(false);
   const [convertFrom, setConvertFrom] = React.useState("INR");
   const [convertTo, setConvertTo] = React.useState("USD");
   const [convertAmt, setConvertAmt] = React.useState("1000");
   const [convertResult, setConvertResult] = React.useState(null);
-  const fetchLiveRates = async () => {
+  const load = () => {
     setLoading(true);
-    try {
-      const resp = await fetch(
-        "https://v6.exchangerate-api.com/v6/69e3376010b559f3ff846fdb/latest/INR",
-      );
-      if (!resp.ok) throw new Error("API error");
-      const data = await resp.json();
-      if (data.result === "success" && data.conversion_rates) {
-        const mapped = Object.entries(data.conversion_rates).map(
-          ([to, rate], i) => ({
-            id: i + 1,
-            from_currency: "INR",
-            to_currency: to,
-            rate: rate,
-            source: "exchangerate-api.com",
-            effective_date: data.time_last_update_utc
-              ? data.time_last_update_utc.slice(0, 10)
-              : new Date().toISOString().slice(0, 10),
-          }),
-        );
-        setRates(mapped);
-        setLastUpdated(new Date().toISOString());
+    apiRequest("/enterprise/exchange-rates")
+      .then((d) => {
+        setRates(Array.isArray(d) ? d : []);
+        setLoading(false);
+      })
+      .catch((e) => {
+        console.error("Failed to load exchange rates:", e);
+        setRates([]);
+        setLoading(false);
         toast(
-          __t("enterprise.currency.ratesUpdated") || "Exchange rates updated",
-          { kind: "success" },
+          e.message ||
+            __t("enterprise.currency.fetchFailed") ||
+            "Failed to fetch exchange rates",
+          { kind: "error" },
         );
-      } else {
-        throw new Error("Invalid response");
-      }
-    } catch (e) {
-      console.error("Live rates failed:", e);
-      toast(
-        __t("enterprise.currency.fetchFailed") ||
-          "Failed to fetch exchange rates",
-        { kind: "error" },
-      );
-    } finally {
-      setLoading(false);
-    }
+      });
   };
-  const doConvert = () => {
-    const fromRate = rates.find(
-      (r) => r.from_currency === "INR" && r.to_currency === convertFrom,
-    );
-    const toRate = rates.find(
-      (r) => r.from_currency === "INR" && r.to_currency === convertTo,
-    );
-    if (!fromRate || !toRate) {
+  const doConvert = async () => {
+    const amount = parseFloat(convertAmt) || 0;
+    setConverting(true);
+    try {
+      const q = new URLSearchParams({
+        amount: String(amount),
+        from_currency: convertFrom,
+        to_currency: convertTo,
+      }).toString();
+      const r = await apiRequest(`/enterprise/exchange-rates/convert?${q}`);
+      setConvertResult({
+        converted_amount:
+          r.converted_amount != null ? r.converted_amount : r.converted,
+        rate: r.rate,
+      });
+    } catch (e) {
+      setConvertResult(null);
       toast(
-        __t("enterprise.currency.ratesNotAvailable") ||
+        e.message ||
+          __t("enterprise.currency.ratesNotAvailable") ||
           "Rates not available for selected currencies",
         { kind: "error" },
       );
-      return;
+    } finally {
+      setConverting(false);
     }
-    const amount = parseFloat(convertAmt) || 0;
-    const fromVal = convertFrom === "INR" ? 1 : fromRate.rate;
-    const toVal = convertTo === "INR" ? 1 : toRate.rate;
-    const result = (amount / fromVal) * toVal;
-    const effectiveRate = toVal / fromVal;
-    setConvertResult({
-      converted_amount: result.toFixed(4),
-      rate: effectiveRate.toFixed(6),
-    });
   };
-  React.useEffect(() => {
-    fetchLiveRates();
-  }, []);
+  React.useEffect(load, []);
+  const lastUpdated = rates.reduce((max, r) => {
+    const d = r.effective_date || r.created_at;
+    return d && (!max || d > max) ? d : max;
+  }, null);
   const fmtDate = function (d) {
     try {
       if (!d) return "-";
@@ -1092,11 +1073,7 @@ function CurrencyScreen() {
           "Multi-currency support with live INR exchange rates"
         }
         actions={
-          <Button
-            variant="secondary"
-            onClick={fetchLiveRates}
-            loading={loading}
-          >
+          <Button variant="secondary" onClick={load} loading={loading}>
             {loading
               ? __t("enterprise.currency.fetching") || "Fetching..."
               : __t("enterprise.currency.refresh") || "Refresh rates"}
@@ -1149,7 +1126,7 @@ function CurrencyScreen() {
               ))}
             </Select>
           </Field>
-          <Button variant="primary" onClick={doConvert}>
+          <Button variant="primary" onClick={doConvert} loading={converting}>
             {__t("enterprise.currency.convert") || "Convert"}
           </Button>
         </div>
@@ -1637,37 +1614,16 @@ function APIKeysScreen() {
     expires_in_days: 90,
   });
   const [confirmRevokeId, setConfirmRevokeId] = React.useState(null);
-  const STORAGE_KEY = "enterprise_api_keys";
-  const loadSavedKeys = () => {
-    try {
-      const saved = storage.get(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch (_e) {
-      return [];
-    }
-  };
-  const saveKeys = (keysToSave) => {
-    try {
-      storage.set(STORAGE_KEY, JSON.stringify(keysToSave));
-    } catch (_e) {
-      /* ignore */
-    }
-  };
   const load = () => {
     setLoading(true);
     apiRequest("/api-keys/")
       .then((d) => {
-        const saved = loadSavedKeys();
-        const merged = [
-          ...(Array.isArray(d) ? d : []),
-          ...saved.filter((s) => !d.some((k) => k.id === s.id)),
-        ];
-        setKeys(merged);
+        setKeys(Array.isArray(d) ? d : []);
         setLoading(false);
       })
-      .catch(() => {
-        const saved = loadSavedKeys();
-        setKeys(saved);
+      .catch((e) => {
+        console.error("Failed to load API keys:", e);
+        setKeys([]);
         setLoading(false);
       });
   };
@@ -1709,16 +1665,13 @@ function APIKeysScreen() {
         kind: "success",
       });
       load();
-    } catch (_e) {
-      const saved = loadSavedKeys();
-      const updated = saved.filter((k) => k.id !== id);
-      saveKeys(updated);
+    } catch (e) {
       toast(
-        __t("enterprise.apiKeys.revokedLocal") ||
-          "API key revoked (local only)",
-        { kind: "success" },
+        e.message ||
+          __t("enterprise.apiKeys.revokeFailed") ||
+          "Could not revoke API key — please retry",
+        { kind: "error" },
       );
-      load();
     }
   };
   return (

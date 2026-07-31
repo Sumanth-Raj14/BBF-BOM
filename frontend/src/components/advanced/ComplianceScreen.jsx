@@ -9,9 +9,17 @@ import {
   Badge,
   EmptyState,
   Spinner,
+  Modal,
+  Field,
+  Input,
+  Textarea,
+  Select,
+  toast,
 } from "../ui";
 
 const COMPLIANCE_TABS_ID = "compliance-tabs";
+const NEW_PACK_FORM_ID = "new-compliance-pack-form";
+const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 
 // Domain compliance status -> semantic tone (not covered by the shared
 // STATUS_TONES map, so resolved explicitly here).
@@ -22,65 +30,100 @@ const COMPLIANCE_TONE = {
   missing: "neutral",
 };
 
+const EMPTY_PACK_FORM = { name: "", standard_id: "", description: "", checklist: "" };
+
+// Derive a display status for one compliance standard's certification row
+// (as returned by GET /compliance/compliance/parts/{id}) — real data only,
+// never fabricated. `certified_by` absent means the part has no
+// certification on file for that standard yet.
+function certStatus(std) {
+  if (!std || !std.certified_by) return "missing";
+  if (!std.expiry_date) return "valid";
+  const expiry = new Date(std.expiry_date);
+  if (Number.isNaN(expiry.getTime())) return "valid";
+  const now = new Date();
+  if (expiry < now) return "expired";
+  if (expiry.getTime() - now.getTime() <= NINETY_DAYS_MS) return "expiring";
+  return "valid";
+}
+
+function findStandard(list, re) {
+  return (list || []).find((c) => re.test(c.name || ""));
+}
+
 function ComplianceScreen() {
   const [docs, setDocs] = React.useState([]);
   const [packs, setPacks] = React.useState([]);
+  const [standards, setStandards] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [activeTab, setActiveTab] = React.useState("parts");
 
-  React.useEffect(() => {
+  const [packModalOpen, setPackModalOpen] = React.useState(false);
+  const [packForm, setPackForm] = React.useState(EMPTY_PACK_FORM);
+  const [savingPack, setSavingPack] = React.useState(false);
+
+  const loadCompliance = React.useCallback(() => {
     setLoading(true);
-    Promise.all([
-      api.compliance.dashboard().catch(() => null),
+    return Promise.all([
       api.compliance.packs.list().catch(() => []),
-      api.parts.list({ limit: 100 }).catch(() => ({ items: [] })),
       api.compliance.list().catch(() => []),
+      api.parts.list({ limit: 100 }).catch(() => ({ items: [] })),
     ])
-      .then(([dash, packsData, partsData]) => {
-        setPacks(packsData);
-        const items = partsData.items || [];
-        const mapped = items.map((p) => ({
-          pn: p.pn,
-          id: p.id,
-          rohs: "valid",
-          reach: "valid",
-          conflict: "valid",
-          reach_expires: null,
-          lab: "—",
-        }));
-        setDocs(
-          mapped.length
-            ? mapped
-            : [
-                {
-                  pn: "EL-MCU-STM32H7",
-                  rohs: "valid",
-                  reach: "valid",
-                  conflict: "valid",
-                  reach_expires: "2027-03-15",
-                  lab: "Intertek",
-                },
-                {
-                  pn: "EL-PSU-240W",
-                  rohs: "valid",
-                  reach: "valid",
-                  conflict: "valid",
-                  reach_expires: "2026-08-22",
-                  lab: "TÜV SÜD",
-                },
-                {
-                  pn: "EL-BMS-12S",
-                  rohs: "expiring",
-                  reach: "expiring",
-                  conflict: "missing",
-                  reach_expires: "2026-06-08",
-                  lab: "SGS",
-                },
-              ],
-        );
+      .then(([packsData, standardsData, partsData]) => {
+        setPacks(Array.isArray(packsData) ? packsData : []);
+        setStandards(Array.isArray(standardsData) ? standardsData : []);
+        const items = (partsData && partsData.items) || [];
+
+        if (!items.length) {
+          setDocs([]);
+          return null;
+        }
+
+        // Per-part certification status is only exposed per-part by the
+        // backend (no bulk endpoint yet) — fan out across the loaded page
+        // of parts and gracefully drop any part whose lookup fails.
+        return Promise.all(
+          items.map((p) =>
+            api.compliance.parts
+              .status(p.id)
+              .then((res) => ({ p, compliance: (res && res.compliance) || [] }))
+              .catch(() => ({ p, compliance: [] })),
+          ),
+        ).then((rows) => {
+          setDocs(
+            rows.map(({ p, compliance }) => {
+              const rohsStd = findStandard(compliance, /rohs/i);
+              const reachStd = findStandard(compliance, /reach/i);
+              const conflictStd = findStandard(compliance, /conflict/i);
+              const lab =
+                (reachStd && reachStd.certified_by) ||
+                (rohsStd && rohsStd.certified_by) ||
+                (conflictStd && conflictStd.certified_by) ||
+                "—";
+              return {
+                pn: p.pn,
+                id: p.id,
+                rohs: certStatus(rohsStd),
+                reach: certStatus(reachStd),
+                conflict: certStatus(conflictStd),
+                reach_expires: (reachStd && reachStd.expiry_date) || null,
+                lab,
+              };
+            }),
+          );
+        });
+      })
+      .catch(() => {
+        setDocs([]);
+        setPacks([]);
+        setStandards([]);
       })
       .finally(() => setLoading(false));
   }, []);
+
+  React.useEffect(() => {
+    loadCompliance();
+  }, [loadCompliance]);
 
   const totals = {
     valid: docs.filter(
@@ -140,8 +183,7 @@ function ComplianceScreen() {
           className="mono"
           style={{
             color:
-              d.reach_expires &&
-              new Date(d.reach_expires) < new Date("2026-08-25")
+              d.reach === "expiring" || d.reach === "expired"
                 ? "var(--warn)"
                 : "var(--fg-3)",
           }}
@@ -156,30 +198,91 @@ function ComplianceScreen() {
     {
       key: "name",
       header: "Pack Name",
-      render: (p) => <span className="fw-600">{p.pack_name || p.name}</span>,
+      render: (p) => <span className="fw-600">{p.name || p.pack_name}</span>,
     },
     {
       key: "standard",
       header: "Standard",
-      render: (p) => <Badge tone="accent">{p.standard || "—"}</Badge>,
+      render: (p) => (
+        <Badge tone="accent">{p.standard_name || p.standard || "—"}</Badge>
+      ),
     },
     {
       key: "requirement_count",
       header: "Requirements",
       align: "right",
-      render: (p) => <span className="mono">{p.requirement_count || 0}</span>,
+      render: (p) => (
+        <span className="mono">
+          {(p.checklist && p.checklist.length) || p.requirement_count || 0}
+        </span>
+      ),
     },
     {
       key: "status",
       header: "Status",
-      render: (p) => (
-        <StatusPill
-          tone={p.is_active ? "success" : "neutral"}
-          label={p.is_active ? "Active" : "Inactive"}
-        />
-      ),
+      render: (p) => {
+        const std = standards.find((s) => s.id === p.standard_id);
+        const active = std ? std.isActive : undefined;
+        return (
+          <StatusPill
+            tone={active ? "success" : "neutral"}
+            label={active == null ? "—" : active ? "Active" : "Inactive"}
+          />
+        );
+      },
     },
   ];
+
+  function openPackModal() {
+    setPackForm({
+      ...EMPTY_PACK_FORM,
+      standard_id: standards[0] ? String(standards[0].id) : "",
+    });
+    setPackModalOpen(true);
+  }
+
+  function closePackModal() {
+    if (savingPack) return;
+    setPackModalOpen(false);
+  }
+
+  function updatePackForm(field) {
+    return (e) => {
+      const value = e.target.value;
+      setPackForm((f) => ({ ...f, [field]: value }));
+    };
+  }
+
+  async function handleCreatePack(e) {
+    e.preventDefault();
+    if (!packForm.name.trim() || !packForm.standard_id) {
+      toast("Pack name and standard are required.", { kind: "error" });
+      return;
+    }
+    setSavingPack(true);
+    try {
+      const created = await api.compliance.packs.create({
+        name: packForm.name.trim(),
+        standard_id: Number(packForm.standard_id),
+        description: packForm.description.trim() || undefined,
+        checklist: packForm.checklist
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean),
+      });
+      setPacks((prev) => [...prev, created]);
+      toast(`Compliance pack "${created.name || packForm.name}" created.`, {
+        kind: "success",
+      });
+      setPackModalOpen(false);
+    } catch (err) {
+      toast((err && err.message) || "Failed to create compliance pack.", {
+        kind: "error",
+      });
+    } finally {
+      setSavingPack(false);
+    }
+  }
 
   return (
     <div className="screen-wrap">
@@ -242,7 +345,7 @@ function ComplianceScreen() {
       >
         <div className="flex justify-between items-center mb-12">
           <h3 className="m-0 fs-14 fw-600">Compliance Packs</h3>
-          <Button variant="primary" size="sm">
+          <Button variant="primary" size="sm" onClick={openPackModal}>
             <Icon.Plus size={12} /> New Pack
           </Button>
         </div>
@@ -259,6 +362,85 @@ function ComplianceScreen() {
           }
         />
       </TabPanel>
+
+      <Modal
+        open={packModalOpen}
+        onClose={closePackModal}
+        title="New Compliance Pack"
+        subtitle="Group requirements under a standard for tracking."
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={closePackModal} disabled={savingPack}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              type="submit"
+              form={NEW_PACK_FORM_ID}
+              loading={savingPack}
+              disabled={!standards.length}
+            >
+              Create Pack
+            </Button>
+          </>
+        }
+      >
+        <form id={NEW_PACK_FORM_ID} onSubmit={handleCreatePack}>
+          <Field label="Pack name" required>
+            <Input
+              value={packForm.name}
+              onChange={updatePackForm("name")}
+              placeholder="e.g. RoHS 3 Declaration Pack"
+              required
+            />
+          </Field>
+          <Field
+            label="Standard"
+            required
+            hint={
+              standards.length
+                ? undefined
+                : "No compliance standards configured yet — create one via the Compliance API before adding a pack."
+            }
+          >
+            <Select
+              value={packForm.standard_id}
+              onChange={updatePackForm("standard_id")}
+              disabled={!standards.length}
+              required
+            >
+              <option value="">
+                {standards.length ? "Select a standard…" : "No standards available"}
+              </option>
+              {standards.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Description">
+            <Textarea
+              value={packForm.description}
+              onChange={updatePackForm("description")}
+              rows={2}
+              placeholder="Optional summary of this pack's scope"
+            />
+          </Field>
+          <Field
+            label="Checklist"
+            hint="One requirement per line (optional)"
+          >
+            <Textarea
+              value={packForm.checklist}
+              onChange={updatePackForm("checklist")}
+              rows={4}
+              placeholder={"e.g.\nSupplier declaration on file\nLab test report attached"}
+            />
+          </Field>
+        </form>
+      </Modal>
     </div>
   );
 }

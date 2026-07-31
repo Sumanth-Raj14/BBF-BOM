@@ -2,16 +2,17 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Icon, api } from "../../globals";
-import { Button, Menu, ScreenHeader } from "../ui";
+import { Icon, api, escapeHtml, openPrintWindow } from "../../globals";
+import { Button, EmptyState, Menu, ScreenHeader } from "../ui";
 // ============ DIFF ============
 export default function DiffScreen({ data }) {
   const [swapped, setSwapped] = React.useState(false);
-  const [versionA, setVersionA] = React.useState("v3.1.4");
+  const [versionA, setVersionA] = React.useState("current");
   const [bom1Id] = React.useState(1);
   const [bom2Id] = React.useState(2);
   const [apiDiff, setApiDiff] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
+  const [snapshots, setSnapshots] = React.useState([]);
 
   React.useEffect(() => {
     if (api && api.bomEnterprise) {
@@ -57,114 +58,108 @@ export default function DiffScreen({ data }) {
     }
   }, [bom1Id, bom2Id]);
 
-  const diffsBySource = {
-    "v3.1.4": apiDiff || data.diff,
-    "v3.1.0": {
-      a: { ver: "v3.1.0", date: "2026-03-15", author: "M. Park" },
-      b: (apiDiff || data.diff).b,
-      changes: [
-        {
-          kind: "added",
-          pn: "EL-PCB-MAIN-R3",
-          desc: "Main PCB R3 added (was R2)",
-          side: "b",
-        },
-        {
-          kind: "removed",
-          pn: "EL-PCB-MAIN-R2",
-          desc: "Main PCB R2",
-          side: "a",
-        },
-        {
-          kind: "changed",
-          pn: "EL-PSU-240W",
-          desc: "Cost ₹5,644 → ₹6,972",
-          side: "both",
-        },
-        {
-          kind: "added",
-          pn: "EL-MEM-DDR4-8G",
-          desc: "Memory upgrade DDR3 → DDR4",
-          side: "b",
-        },
-        {
-          kind: "added",
-          pn: "OPT-LNS-25MM",
-          desc: "Lens 25mm f/1.8",
-          side: "b",
-        },
-        { kind: "unchanged", pn: "HW-FAS-M3-08", desc: "Screw, M3×8" },
-        {
-          kind: "changed",
-          pn: "EL-FAN-92",
-          desc: "80mm → 92mm fan upgrade",
-          side: "both",
-        },
-      ],
-    },
-    "v3.0.0": {
-      a: { ver: "v3.0.0", date: "2026-01-20", author: "E. Chen" },
-      b: (apiDiff || data.diff).b,
-      changes: [
-        {
-          kind: "added",
-          pn: "ATL-MFR-CTL",
-          desc: "New control subsystem",
-          side: "b",
-        },
-        {
-          kind: "removed",
-          pn: "ATL-MFR-CTL-OLD",
-          desc: "Legacy controller",
-          side: "a",
-        },
-        {
-          kind: "changed",
-          pn: "ATL-MFR-CHS",
-          desc: "Major redesign — 2 plates replaced",
-          side: "both",
-        },
-        { kind: "added", pn: "OPT-LNS-25MM", desc: "Lens added", side: "b" },
-        { kind: "added", pn: "EL-CAM-IMX477", desc: "Camera added", side: "b" },
-        { kind: "removed", pn: "EL-CAM-OV5640", desc: "Old camera", side: "a" },
-      ],
-    },
-  };
-  const baseDiff = diffsBySource[versionA] || apiDiff || data.diff;
-  const a = swapped ? baseDiff.b : baseDiff.a;
-  const b = swapped ? baseDiff.a : baseDiff.b;
+  // Real archived snapshots for the current BOM, used to populate the
+  // "Compare with…" menu with actual saved versions instead of invented
+  // ones. Snapshots carry metadata + item_count only (no per-item diff
+  // payload), so selecting one shows its real details rather than a
+  // fabricated added/removed/changed breakdown — see the empty-state
+  // branch in the render below.
+  React.useEffect(() => {
+    if (api && api.bomEnterprise && api.bomEnterprise.snapshots) {
+      api.bomEnterprise.snapshots
+        .list(bom2Id)
+        .then((list) => setSnapshots(Array.isArray(list) ? list : []))
+        .catch((err) => {
+          console.warn(
+            "[DiffScreen] snapshot list failed:",
+            err?.message || err,
+          );
+          setSnapshots([]);
+        });
+    }
+  }, [bom2Id]);
+
+  const currentDiff = apiDiff || data.diff;
+  const selectedSnapshot =
+    versionA !== "current"
+      ? snapshots.find((s) => String(s.id) === versionA)
+      : null;
+  const baseDiff = selectedSnapshot ? null : currentDiff;
+
+  const a = baseDiff ? (swapped ? baseDiff.b : baseDiff.a) : null;
+  const b = baseDiff ? (swapped ? baseDiff.a : baseDiff.b) : null;
   const flipKind = (k) =>
     swapped ? (k === "added" ? "removed" : k === "removed" ? "added" : k) : k;
   const flipSide = (s) =>
     swapped ? (s === "a" ? "b" : s === "b" ? "a" : s) : s;
-  const changes = baseDiff.changes.map((c) => ({
-    ...c,
-    kind: flipKind(c.kind),
-    side: flipSide(c.side),
-  }));
+  const changes = baseDiff
+    ? baseDiff.changes.map((c) => ({
+        ...c,
+        kind: flipKind(c.kind),
+        side: flipSide(c.side),
+      }))
+    : [];
   const counts = changes.reduce((acc, c) => {
     acc[c.kind] = (acc[c.kind] || 0) + 1;
     return acc;
   }, {});
 
   const versionChoices = [
-    { key: "v3.1.4", label: "v3.1.4 (" + (__t("diff.prevRelease") || "prev release") + ")" },
-    { key: "v3.1.0", label: "v3.1.0" },
-    { key: "v3.0.0", label: "v3.0.0 (" + (__t("diff.initial") || "initial") + ")" },
+    {
+      key: "current",
+      label:
+        (currentDiff?.a?.ver || "A") +
+        " ↔ " +
+        (currentDiff?.b?.ver || "B") +
+        " (" +
+        (__t("diff.current") || "current") +
+        ")",
+    },
+    ...snapshots.map((s) => ({
+      key: String(s.id),
+      label:
+        (s.version || s.snapshot_name || `#${s.id}`) +
+        (s.snapshot_type ? " · " + s.snapshot_type : ""),
+    })),
   ];
 
-  const exportDiff = () =>
+  const exportDiff = () => {
+    if (!baseDiff || changes.length === 0) {
+      toast(__t("diff.nothingToExport") || "No diff data to export", {
+        kind: "warn",
+      });
+      return;
+    }
+    const rows = changes
+      .map(
+        (c) =>
+          `<tr><td>${escapeHtml(c.kind.toUpperCase())}</td><td>${escapeHtml(c.pn || "")}</td><td>${escapeHtml(c.desc || "")}</td></tr>`,
+      )
+      .join("");
+    const title = `${a.ver} → ${b.ver}`;
+    const html =
+      "<html><head><title>" +
+      escapeHtml(title) +
+      "</title><style>body{font-family:monospace;padding:24px}h2{margin:0 0 4px}table{border-collapse:collapse;width:100%;margin-top:16px}td,th{border:1px solid #ccc;padding:6px 10px;text-align:left;font-size:12px}</style></head><body><h2>" +
+      escapeHtml(__t("diff.title") || "Compare Revisions") +
+      "</h2><p>" +
+      escapeHtml(title) +
+      "</p><table><thead><tr><th>" +
+      escapeHtml(__t("common.type") || "Type") +
+      "</th><th>" +
+      escapeHtml(__t("diff.partNumberCol") || "Part Number") +
+      "</th><th>" +
+      escapeHtml(__t("common.description") || "Description") +
+      "</th></tr></thead><tbody>" +
+      rows +
+      "</tbody></table></body></html>";
+    openPrintWindow(__t("diff.title") || "Compare Revisions", html, {
+      printDelay: 300,
+    });
     toast(__t("diff.exportedAsPdf") || "Diff exported as PDF", {
       kind: "success",
-      action: {
-        label: __t("common.download") || "Download",
-        onClick: () =>
-          toast(
-            __t("diff.downloadedPdf") ||
-              "Downloaded diff_" + a.ver + "_to_" + b.ver + ".pdf",
-          ),
-      },
     });
+  };
 
   return (
     <div className="screen-wrap">
@@ -180,19 +175,30 @@ export default function DiffScreen({ data }) {
           </>
         }
         description={
-          <>
-            <span className="fg-ok">
-              +{counts.added || 0} {__t("diff.added") || "added"}
-            </span>{" "}
-            ·{" "}
-            <span className="fg-danger">
-              −{counts.removed || 0} {__t("diff.removed") || "removed"}
-            </span>{" "}
-            ·{" "}
-            <span className="fg-warn">
-              ↻{counts.changed || 0} {__t("diff.changed") || "changed"}
+          selectedSnapshot ? (
+            <span className="fg-3">
+              {selectedSnapshot.snapshot_name || selectedSnapshot.version} ·{" "}
+              {selectedSnapshot.item_count ?? 0} {__t("diff.items") || "items"}
+              {selectedSnapshot.created_at
+                ? " · " +
+                  new Date(selectedSnapshot.created_at).toLocaleDateString()
+                : ""}
             </span>
-          </>
+          ) : (
+            <>
+              <span className="fg-ok">
+                +{counts.added || 0} {__t("diff.added") || "added"}
+              </span>{" "}
+              ·{" "}
+              <span className="fg-danger">
+                −{counts.removed || 0} {__t("diff.removed") || "removed"}
+              </span>{" "}
+              ·{" "}
+              <span className="fg-warn">
+                ↻{counts.changed || 0} {__t("diff.changed") || "changed"}
+              </span>
+            </>
+          )
         }
         actions={
           <div className="flex gap-8">
@@ -200,7 +206,11 @@ export default function DiffScreen({ data }) {
               ariaLabel={__t("diff.compareWith") || "Compare with…"}
               trigger={
                 <Button variant="secondary" size="sm">
-                  {a.ver} ↔ {b.ver} <Icon.ChevronDown size={10} />
+                  {selectedSnapshot
+                    ? selectedSnapshot.version ||
+                      selectedSnapshot.snapshot_name
+                    : `${a.ver} ↔ ${b.ver}`}{" "}
+                  <Icon.ChevronDown size={10} />
                 </Button>
               }
               items={versionChoices.map((v) => ({
@@ -234,6 +244,20 @@ export default function DiffScreen({ data }) {
           </div>
         }
       />
+      {!baseDiff ? (
+        <EmptyState
+          icon={<Icon.Diff size={22} />}
+          title={__t("diff.snapshotTitle") || "Archived snapshot"}
+          message={
+            selectedSnapshot?.change_description ||
+            (__t("diff.snapshotNoDetail") ||
+              "This is a saved snapshot. Line-by-line comparison against archived snapshots isn't available yet — showing snapshot details only.") +
+              (selectedSnapshot
+                ? ` (${selectedSnapshot.item_count ?? 0} ${__t("diff.items") || "items"})`
+                : "")
+          }
+        />
+      ) : (
       <div
         className="diff-wrap"
         role="group"
@@ -340,6 +364,7 @@ export default function DiffScreen({ data }) {
           })}
         </div>
       </div>
+      )}
     </div>
   );
 }

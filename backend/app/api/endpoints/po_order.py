@@ -167,9 +167,19 @@ async def get_po_header(po_id: int, db: AsyncSession = Depends(get_db)):
         "poNumber": header.poNumber,
         "poDate": header.poDate,
         "vendorName": header.vendorName,
+        "vendorId": header.vendor_id,
         "project": header.project,
         "poTotal": header.poTotal,
         "status": header.status,
+        "notes": header.notes,
+        "shippingAddress": header.shipping_address,
+        "billingAddress": header.billing_address,
+        "paymentTerms": header.payment_terms,
+        "shippingMethod": header.shipping_method,
+        "currency": header.currency,
+        "subtotal": header.subtotal,
+        "taxTotal": header.tax_total,
+        "freightTotal": header.freight_total,
         "createdAt": str(header.createdAt) if header.createdAt else None,
         "items": [
             {
@@ -177,11 +187,13 @@ async def get_po_header(po_id: int, db: AsyncSession = Depends(get_db)):
                 "headerId": i.headerId,
                 "itemName": i.itemName,
                 "itemDesc": i.itemDesc,
+                "partId": i.partId,
                 "quantity": i.quantity,
                 "itemPrice": i.itemPrice,
                 "amount": i.amount,
                 "gst": i.gst,
                 "total": i.total,
+                "eta": i.eta,
             }
             for i in items
         ],

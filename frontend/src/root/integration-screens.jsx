@@ -1,4 +1,3 @@
-import { storage } from "../utils/storage.js";
 import { ANIM } from "../utils/design-tokens.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
@@ -42,17 +41,13 @@ function ERPConnectorsScreen() {
   const [confirmDeleteId, setConfirmDeleteId] = React.useState(null);
   const load = React.useCallback(() => {
     setLoading(true);
-    Promise.all([
-      erpConnectorsAPI?.list().catch(() => {
-        return [];
-      }),
-      erpConnectorsAPI?.logs("latest").catch(() => {
-        return [];
-      }),
-    ])
-      .then(([conns, logEntries]) => {
+    // There is no cross-connector "latest logs" endpoint on the backend —
+    // /erp-connectors/{id}/logs requires a real numeric connector id (a
+    // literal "latest" 422s). Logs are fetched on demand per-connector via
+    // loadLogs() when the user clicks "Logs" on a row.
+    (erpConnectorsAPI?.list() || Promise.resolve([]))
+      .then((conns) => {
         setConnectors(Array.isArray(conns) ? conns : []);
-        setLogs(Array.isArray(logEntries) ? logEntries : []);
         setLoading(false);
       })
       .catch(() => {
@@ -834,7 +829,9 @@ function BulkImportScreen() {
       });
       const jobId = result?.jobId || result?.id;
       if (jobId) {
-        const processed = await bulkImportAPI?.process(jobId);
+        // Backend requires a mappingConfig dict in the body (no default) —
+        // pass {} when no column mapping UI has been configured yet.
+        const processed = await bulkImportAPI?.process(jobId, {});
         const done = processed?.processedRows;
         const errs = processed?.errorRows;
         toast(
@@ -1183,41 +1180,11 @@ function SupplierPortalScreen() {
                   });
                   load();
                 } catch (e) {
-                  // If backend is offline, store locally
-                  if (
-                    e.message?.includes("Failed to fetch") ||
-                    e.message?.includes("Unable to connect")
-                  ) {
-                    const existing = storage.supplierUsers.get();
-                    existing.push({
-                      id: "su-" + Date.now(),
-                      ...newUser,
-                      active: true,
-                    });
-                    storage.supplierUsers.set(existing);
-                    toast(
-                      __t("integrations.supplierPortal.userCreatedLocal") ||
-                        "User created (local)",
-                      { kind: "success" },
-                    );
-                    setShowCreateUser(false);
-                    setNewUser({
-                      email: "",
-                      name: "",
-                      vendorId: "",
-                      password: "",
-                    });
-                    setUsers((prev) => [
-                      ...prev,
-                      { id: "su-" + Date.now(), ...newUser, active: true },
-                    ]);
-                  } else {
-                    toast(
-                      __t("integrations.supplierPortal.createUserFailed") ||
-                        "Failed: " + (e.message || "error"),
-                      { kind: "error" },
-                    );
-                  }
+                  toast(
+                    __t("integrations.supplierPortal.createUserFailed") ||
+                      "Failed: " + (e.message || "error"),
+                    { kind: "error" },
+                  );
                 } finally {
                   setCreatingUser(false);
                 }
