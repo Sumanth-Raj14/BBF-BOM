@@ -24,7 +24,7 @@ test.describe('App smoke tests', () => {
   test('navrail is visible with navigation groups', async ({ page }) => {
     const navrail = page.locator('.navrail');
     await expect(navrail).toBeVisible({ timeout: 10000 });
-    const navItems = navrail.locator('[class*="nav-item"]');
+    const navItems = navrail.locator('.nav-item');
     const count = await navItems.count();
     expect(count).toBeGreaterThanOrEqual(5);
   });
@@ -57,14 +57,21 @@ test.describe('Navigation', () => {
   });
 
   test('clicking BOM Editor nav item switches screen', async ({ page }) => {
-    await page.locator('.navrail').locator('[class*="nav-item"]').filter({ hasText: 'BOM Editor' }).click();
-    const subheader = page.locator('.subheader');
-    await expect(subheader).toBeVisible({ timeout: 10000 });
+    await page.locator('.navrail').locator('.nav-item').filter({ hasText: 'BOM Editor' }).first().click();
+    // #main-content carries data-screen-label of the active screen (set in
+    // App.jsx from the nav label); navigating to BOM Editor sets it to
+    // "BOM Editor". (The old ".subheader" element this test used is gone, and
+    // the BOM Editor screen doesn't use the per-screen ".screen-wrap".)
+    await expect(
+      page.locator('#main-content[data-screen-label="BOM Editor"]')
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test('clicking Dashboard nav item from another screen returns to dashboard', async ({ page }) => {
-    await page.locator('.navrail').locator('[class*="nav-item"]').filter({ hasText: 'BOM Editor' }).click();
-    await page.getByRole('button', { name: 'Dashboard', exact: true }).click();
+    await page.locator('.navrail').locator('.nav-item').filter({ hasText: 'BOM Editor' }).first().click();
+    // Exact ^Dashboard$ so it doesn't also match the "Dashboards" nav item, and
+    // scope to the navrail so it doesn't collide with other "Dashboard" buttons.
+    await page.locator('.navrail').locator('.nav-item').filter({ hasText: /^Dashboard$/ }).first().click();
     const dashboard = page.locator('.screen-wrap[data-screen-label="Dashboard"]');
     await expect(dashboard).toBeVisible({ timeout: 10000 });
   });

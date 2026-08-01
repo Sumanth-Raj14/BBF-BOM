@@ -17,7 +17,7 @@ test.describe('Enterprise screens', () => {
 
   test('enterprise dashboards screen renders', async ({ page }) => {
     const navrail = page.locator('.navrail');
-    await navrail.locator('[class*="nav-item"]').filter({ hasText: 'Dashboards' }).click();
+    await navrail.locator('.nav-item').filter({ hasText: 'Dashboards' }).first().click();
     await page.waitForTimeout(2000);
     const content = page.locator('#main-content');
     await expect(content).toBeVisible({ timeout: 10000 });
@@ -33,7 +33,9 @@ test.describe('Enterprise screens', () => {
   test('API keys screen shows generate button', async ({ page }) => {
     await page.getByRole('button', { name: 'API Keys', exact: true }).click();
     await page.waitForTimeout(2000);
-    const genBtn = page.locator('button').filter({ hasText: 'Generate Key' });
+    // The API Keys screen surfaces a "Generate Key" action in both the header
+    // and the empty-state CTA; assert the first is visible.
+    const genBtn = page.locator('button').filter({ hasText: 'Generate Key' }).first();
     await expect(genBtn).toBeVisible({ timeout: 10000 });
   });
 });

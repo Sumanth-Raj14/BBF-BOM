@@ -89,7 +89,11 @@ function OnboardingChecklist() {
     storage.checklist.dismiss();
     setCollapsed(true);
   };
-  if (dismissed) return null;
+  // Hide once explicitly dismissed OR once onboarding is complete. The
+  // "Get started" checklist is only relevant during the initial setup phase;
+  // afterwards it must not linger as a fixed, click-blocking overlay on top of
+  // the navigation rail.
+  if (dismissed || storage.onboarding.isDone()) return null;
   if (collapsed)
     return (
       <Button
