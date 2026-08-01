@@ -143,6 +143,79 @@ jobs:
           asyncio.run(main())
           "
 
+  pytest-postgres:
+    name: Test Suite on Postgres
+    runs-on: ubuntu-latest
+    # Runs the FULL pytest suite against real Postgres (asyncpg), so the
+    # PostgreSQL-only code paths actually execute -- full-text search
+    # (ts_rank / @@), INTERVAL date math, ::jsonb casts, RETURNING, NUMERIC
+    # precision, tenant NOT NULL constraints -- all of which SQLite silently
+    # tolerates or can't parse. This is the track where the ~14 SQLite-only
+    # "dialect" failures are expected to PASS.
+    #
+    # Non-blocking for now: a few tests (SolidWorks contract stubs) are still
+    # unimplemented and fail on any DB. Flip `continue-on-error` off to make
+    # this a hard gate once those are resolved or explicitly skipped.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bom_user
+          POSTGRES_PASSWORD: ci_postgres_pw_9f3a7c1e
+          POSTGRES_DB: bom_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # conftest reads TEST_DATABASE_URL first; point it at the service DB.
+      # The test_engine drop_all/create_all's this DB, so it must be a throwaway
+      # (bom_test_db, not a bootstrapped one).
+      TEST_DATABASE_URL: postgresql+asyncpg://bom_user:ci_postgres_pw_9f3a7c1e@127.0.0.1:5432/bom_test_db
+      SECRET_KEY: ci-pg-test-signkey-donotuse-9f3a7c1e4b2d5a8b6d4f2a0c8e7b
+      ENCRYPTION_KEY: ci-pg-test-encryption-key-do-not-use-in-prod-4b2d9f3a5a8b
+      S3_SECRET_KEY: ci-pg-test-s3key-donotuse-7c1e4b2d9f3a5a8b6d4f2a0c8e7b
+      POSTGRES_PASSWORD: ci_postgres_pw_9f3a7c1e
+      ADMIN_EMAIL: ci@blackbox-bom.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-test.txt
+
+      - name: Wait for Postgres to accept connections
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h 127.0.0.1 -p 5432 -U bom_user && break
+            echo "Waiting for postgres... ($i)"
+            sleep 2
+          done
+
+      - name: Run pytest against Postgres
+        # Session-scoped asyncio loops are REQUIRED for asyncpg: the session-scoped
+        # test_engine on the default function-scoped loops raises
+        # "another operation is in progress". Passed via -o here (not pytest.ini)
+        # so local / SQLite runs keep function-scoped isolation.
+        run: |
+          python -m pytest -p no:cacheprovider -q \
+            -o asyncio_default_fixture_loop_scope=session \
+            -o asyncio_default_test_loop_scope=session
+
   sqlite-test-suite:
     name: Existing Test Suite (SQLite track)
     runs-on: ubuntu-latest
