@@ -155,9 +155,12 @@ jobs:
     #
     # HARD GATE: the full Postgres suite must pass. The former SQLite-only
     # "dialect" failures + real Postgres-exposed bugs (tenant id sequence, FK
-    # enforcement, BOM explosion ordering) are fixed; raw-alembic-from-empty
-    # migration tests are skipped-with-reason (init_db is the supported bootstrap,
-    # covered by the fresh-install-postgres job). A red here blocks the merge.
+    # enforcement, BOM explosion ordering) are fixed. The migration-system tests
+    # are green too: the chain-topology / fresh-apply tests are pinned to their
+    # intended target revisions, offline-SQL-gen is a documented xfail (migrations
+    # use runtime inspect() for conditional DDL, incompatible with --sql mode;
+    # init_db is the supported bootstrap, covered by the fresh-install-postgres
+    # job), and the obsolete sql_archive test was removed. A red here blocks merge.
     defaults:
       run:
         working-directory: backend

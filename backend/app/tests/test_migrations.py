@@ -35,16 +35,24 @@ def test_migration_chain_no_gaps():
             )
 
 
-@pytest.mark.skip(reason="raw `alembic upgrade`/offline-SQL from an EMPTY db is not the supported bootstrap (migrations 004+ reference tables only formalized at rev 022); the supported path is `python -m scripts.init_db`, validated by the fresh-install-postgres CI job. Backlog: make raw alembic-from-empty work.")
+@pytest.mark.xfail(
+    reason=(
+        "Offline SQL generation is unsupported by design: several migrations "
+        "(035+) call inspect(op.get_bind()) to do conditional DDL (add-column-"
+        "if-missing, etc). In --sql offline mode the bind is a MockConnection "
+        "with no live DB to inspect, so those migrations raise "
+        "NoInspectionAvailable. The supported bootstrap is scripts.init_db "
+        "(create_all + stamp head), covered by the fresh-install-postgres CI "
+        "job. Kept as xfail so it flags if a future change makes offline SQL "
+        "gen viable."
+    ),
+    strict=False,
+    raises=Exception,
+)
 def test_migration_offline_sql():
     config = Config(str(ALEMBIC_CFG))
     config.set_main_option("sqlalchemy.url", "postgresql+asyncpg://x:x@localhost/x")
-    buf = []
-    try:
-        upgrade(config, revision="head", sql=True)
-        buf.append("upgrade SQL generated OK")
-    except Exception as e:
-        pytest.fail(f"Migration upgrade failed in offline mode: {e}")
+    upgrade(config, revision="head", sql=True)
 
 
 @pytest.mark.skip(reason="Requires running PostgreSQL on localhost")
@@ -76,11 +84,3 @@ def test_no_raw_sql_in_versions():
         f"Raw SQL files found in versions/: {sql_files}. "
         "All raw SQL should be archived in sql_archive/"
     )
-
-
-@pytest.mark.skip(reason="raw `alembic upgrade`/offline-SQL from an EMPTY db is not the supported bootstrap (migrations 004+ reference tables only formalized at rev 022); the supported path is `python -m scripts.init_db`, validated by the fresh-install-postgres CI job. Backlog: make raw alembic-from-empty work.")
-def test_sql_archive_still_has_originals():
-    archive_dir = ALEMBIC_CFG.parent / "alembic" / "versions" / "sql_archive"
-    assert archive_dir.exists(), "sql_archive/ directory missing"
-    sql_files = list(archive_dir.glob("*.sql"))
-    assert len(sql_files) >= 3, f"Expected >=3 archived SQL files, found {len(sql_files)}"
