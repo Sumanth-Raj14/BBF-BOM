@@ -140,4 +140,8 @@ async def test_submit_price_update_unauthorized(client, auth_headers):
         "/api/v1/supplier-portal/price-updates",
         json={"partId": 1, "newPrice": 10.0},
     )
-    assert resp.status_code == 401
+    # Unauthorized supplier-portal requests are rejected with 403 (the
+    # supplier-token realm intentionally returns 403, not 401, so the app's
+    # shared API client doesn't treat it as an expired admin session and log
+    # the user out — see get_current_supplier_user).
+    assert resp.status_code == 403

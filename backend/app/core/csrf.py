@@ -24,6 +24,12 @@ CSRF_EXEMPT_PATHS = frozenset(
         # Desktop plugin (e.g. SolidWorks add-in) credential exchange — machine client,
         # authenticates by API key in the body, cannot participate in browser CSRF.
         "/api/v1/auth/plugin-login",
+        # Supplier-portal login is the parallel login handshake to /auth/login:
+        # the client is establishing a session and has no CSRF token or bearer
+        # yet, so it must be exempt for the same reason /auth/login is. (Only
+        # the login endpoint is exempt — every other supplier-portal route still
+        # enforces CSRF.) Credentials are validated in the body.
+        "/api/v1/supplier-portal/login",
     }
 )
 # Removed broad /api/v1/supplier-portal/ exemption — each endpoint should be explicitly exempted if needed
