@@ -24,6 +24,7 @@ export const PRIMARY = [
   { id: "inventory", label: "Inventory", icon: <Icon.Scan size={size} /> },
   { id: "analytics", label: "Analytics", icon: <Icon.Chart size={size} /> },
   { id: "integrations", label: "Integrations", icon: <Icon.Link size={size} /> },
+  { id: "members", label: "Members", icon: <Icon.User size={size} /> },
   { id: "tenant-admin", label: "Admin", icon: <Icon.Settings size={size} /> },
 ];
 

@@ -1,4 +1,5 @@
 import { Routes, Route, useLocation } from "react-router-dom";
+import MembersScreen from "../components/screens/MembersScreen.jsx";
 import { storage } from "../utils/storage.js";
 import { ACCENT_PRESETS } from "../utils/constants.js";
 import { AppContext, AppCtxProvider } from "../context/AppCtx.jsx";
@@ -125,6 +126,14 @@ function VendorsScreenWrapper() {
   return (
     <ErrBD>
       <VendorsScreen data={ctx.data} openModal={ctx.openModal} />
+    </ErrBD>
+  );
+}
+
+function MembersScreenWrapper() {
+  return (
+    <ErrBD>
+      <MembersScreen />
     </ErrBD>
   );
 }
@@ -447,6 +456,7 @@ function AppShell() {
               element={<GenericScreen Component={InventoryScreen} />}
             />
             <Route path="/vendors" element={<VendorsScreenWrapper />} />
+            <Route path="/members" element={<MembersScreenWrapper />} />
             <Route path="/procurement" element={<ProcurementScreenWrapper />} />
             <Route path="/diff" element={<DiffScreenWrapper />} />
             <Route

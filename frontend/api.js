@@ -423,6 +423,35 @@ export const usersAPI = {
     apiRequest(`/users/${id}`, { method: 'DELETE' }),
 };
 
+// RBAC API — roles, permissions, and role<->user assignment.
+// The backend has had these endpoints all along; nothing in the UI called them,
+// so there was no way to add a member or change their privileges.
+export const rbacAPI = {
+  roles: () => apiRequest('/rbac/roles'),
+
+  createRole: (role) =>
+    apiRequest('/rbac/roles', { method: 'POST', body: JSON.stringify(role) }),
+
+  permissions: () => apiRequest('/rbac/permissions'),
+
+  rolePermissions: (roleId) => apiRequest(`/rbac/roles/${roleId}/permissions`),
+
+  roleUsers: (roleId) => apiRequest(`/rbac/roles/${roleId}/users`),
+
+  // Payload keys are userId/roleId (see UserRoleAssign in roles_permissions.py).
+  assignUser: (userId, roleId) =>
+    apiRequest('/rbac/roles/assign-user', {
+      method: 'POST',
+      body: JSON.stringify({ userId, roleId }),
+    }),
+
+  unassignUser: (userId, roleId) =>
+    apiRequest('/rbac/roles/unassign-user', {
+      method: 'POST',
+      body: JSON.stringify({ userId, roleId }),
+    }),
+};
+
 // Notifications API
 export const notificationsAPI = {
   list: (params = {}) => {
@@ -1402,6 +1431,7 @@ export const api = {
   procurement: procurementAPI,
   documents: documentsAPI,
   users: usersAPI,
+  rbac: rbacAPI,
   notifications: notificationsAPI,
   comments: commentsAPI,
   approvals: approvalsAPI,
