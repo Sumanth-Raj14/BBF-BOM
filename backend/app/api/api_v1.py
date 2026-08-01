@@ -215,6 +215,27 @@ api_router.include_router(
     tags=["solidworks-integration"],
 )
 
+# Audit finding A9: these routers were fully implemented and imported but never
+# mounted, so their endpoints had no HTTP surface at all -- notably
+# planning's PO-from-BOM generation. Each needs an explicit prefix: planning
+# and derivatives declare bare "/" and "/{id}" paths that would otherwise
+# collide at the API root.
+api_router.include_router(
+    endpoints.derivatives.router,
+    prefix="/derivatives",
+    tags=["derivatives"],
+)
+api_router.include_router(
+    endpoints.formulas.router,
+    prefix="/formulas",
+    tags=["formulas"],
+)
+api_router.include_router(
+    endpoints.planning.router,
+    prefix="/planning",
+    tags=["planning"],
+)
+
 # Teams + unified work queue (WS2)
 api_router.include_router(endpoints.teams.router, prefix="/teams", tags=["teams"])
 api_router.include_router(endpoints.work_queue.router, prefix="/work", tags=["work-queue"])

@@ -19,16 +19,29 @@ import pytest
 async def _make_part(db_session, tenant_id, pn, name="Part", category="Electrical", cost=0.0):
     part = Part(pn=pn, name=name, category=category, cost=cost, tenantId=tenant_id)
     db_session.add(part)
-    await db_session.commit()
-    await db_session.refresh(part)
+    # Commit+refresh under the ROW's own tenant, not whatever the autouse
+    # fixture happens to have active: refresh() issues a SELECT, and the tenant
+    # filter would hide a row belonging to a different tenant, failing with
+    # "Could not refresh instance". This mirrors production, where a request
+    # only ever writes rows for its own tenant.
+    token = TenantContext.set(tenant_id=tenant_id)
+    try:
+        await db_session.commit()
+        await db_session.refresh(part)
+    finally:
+        TenantContext.reset(token)
     return part
 
 
 async def _make_bom(db_session, tenant_id, bom_number, name="BOM"):
     bom = BOM(bom_number=bom_number, name=name, tenantId=tenant_id)
     db_session.add(bom)
-    await db_session.commit()
-    await db_session.refresh(bom)
+    token = TenantContext.set(tenant_id=tenant_id)
+    try:
+        await db_session.commit()
+        await db_session.refresh(bom)
+    finally:
+        TenantContext.reset(token)
     return bom
 
 
@@ -50,8 +63,12 @@ async def _make_item(
         tenantId=tenant_id,
     )
     db_session.add(item)
-    await db_session.commit()
-    await db_session.refresh(item)
+    token = TenantContext.set(tenant_id=tenant_id)
+    try:
+        await db_session.commit()
+        await db_session.refresh(item)
+    finally:
+        TenantContext.reset(token)
     return item
 
 

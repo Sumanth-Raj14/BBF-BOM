@@ -8,6 +8,7 @@ os.environ["DISABLE_CACHE_DB_FALLBACK"] = "1"
 os.environ["ALLOWED_HOSTS"] = '["localhost","127.0.0.1","testserver",".blackbox-bom.com"]'
 
 import asyncio
+import contextlib
 import warnings
 from contextlib import asynccontextmanager
 
@@ -242,3 +243,45 @@ async def auth_headers(client, test_user):
     if csrf_cookie:
         headers["X-CSRF-Token"] = csrf_cookie.split(".")[0]
     return headers
+
+
+@contextlib.contextmanager
+def no_tenant_filter():
+    """Run a block with tenant SELECT auto-filtering disabled.
+
+    The autouse `setup_tenant_context` fixture pins every test to tenant 1, but
+    some tests legitimately need to observe rows belonging to another tenant:
+    verifying a DB-level fact across tenants, or checking the result of an
+    endpoint (self-signup, tenant provisioning) that runs UNAUTHENTICATED in
+    production and therefore has no tenant context at all.
+
+    Clearing the context is the isolation listener's documented bypass -- it
+    skips filtering when no tenant is set, the same path system/admin queries
+    take. Use this ONLY in test harness code; never to work around a genuine
+    isolation failure.
+
+    Before the A6 fix these lookups worked without any bypass because the
+    SELECT filter was silently dead code (cross-tenant leak).
+    """
+    token = TenantContext.set(tenant_id=None)
+    try:
+        yield
+    finally:
+        TenantContext.reset(token)
+
+
+@pytest_asyncio.fixture
+async def no_tenant_context():
+    """Run the whole test with NO tenant context.
+
+    Request this in tests that exercise UNAUTHENTICATED endpoints (self-signup,
+    tenant provisioning). In production those requests carry no JWT, so no
+    tenant is ever set and the SELECT filter is inactive -- but the autouse
+    `setup_tenant_context` fixture pins every test to tenant 1, which would
+    hide the newly created tenant's rows and break refresh() inside the
+    endpoint. Requested (non-autouse) fixtures resolve after autouse ones, so
+    this wins for the test that asks for it.
+    """
+    token = TenantContext.set(tenant_id=None)
+    yield
+    TenantContext.reset(token)
