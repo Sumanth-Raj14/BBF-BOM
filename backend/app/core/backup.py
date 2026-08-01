@@ -115,17 +115,24 @@ DB_PORT = settings.POSTGRES_PORT
 
 
 def _pg_env() -> dict:
-    """Return environment dict with PG variables + minimal system PATH (for pg_dump/pg_restore library lookup)."""
-    env = {
-        "PGPASSWORD": DB_PASSWORD,
-        "PGHOST": DB_HOST,
-        "PGPORT": str(DB_PORT),
-        "PGUSER": DB_USER,
-        "PGDATABASE": DB_NAME,
-    }
-    # Include PATH so pg_dump can find shared libraries (e.g., on Windows)
-    if "PATH" in os.environ:
-        env["PATH"] = os.environ["PATH"]
+    """Return the process environment overlaid with PG connection variables.
+
+    Start from a copy of the real environment (not a minimal dict): pg_dump /
+    pg_basebackup are native tools that need platform vars beyond PATH — on
+    Windows the Winsock/TCP layer requires SYSTEMROOT, and stripping it makes
+    pg_dump fail with an empty "pg_dump: error:" and exit 1. Overlaying keeps
+    SYSTEMROOT/TEMP/etc. while still injecting the PG_* connection settings.
+    """
+    env = os.environ.copy()
+    env.update(
+        {
+            "PGPASSWORD": DB_PASSWORD,
+            "PGHOST": DB_HOST,
+            "PGPORT": str(DB_PORT),
+            "PGUSER": DB_USER,
+            "PGDATABASE": DB_NAME,
+        }
+    )
     return env
 
 
@@ -197,13 +204,23 @@ async def record_backup(db, result: BackupResult) -> int:
     params = asdict(result)
     params["started_at"] = _parse_dt(params["started_at"])
     params["completed_at"] = _parse_dt(params["completed_at"])
+    # backup_history is a SYSTEM-level log: a full-cluster backup spans all tenants,
+    # and /backup/history reads it superuser-only WITHOUT any tenant filter -- so the
+    # blanket-applied NOT NULL "tenantId" is vestigial here (never used for isolation).
+    # This raw INSERT bypasses the ORM before_insert listener that would populate it,
+    # and the scheduler runs with no tenant context, so on real Postgres the NOT NULL
+    # was violated (SQLite silently tolerated it). Attribute the row to the primary
+    # (lowest-id) tenant to satisfy the constraint.
+    # ponytail: primary-tenant attribution; make "tenantId" nullable if a true
+    # system/all-tenant marker is ever needed in the history view.
     stmt = text("""
         INSERT INTO backup_history
             (backup_type, status, started_at, completed_at, size_bytes,
-             storage_path, storage_type, error_message, retention_tier, backup_metadata)
+             storage_path, storage_type, error_message, retention_tier, backup_metadata, "tenantId")
         VALUES
             (:backup_type, :status, :started_at, :completed_at, :size_bytes,
-             :storage_path, :storage_type, :error_message, :retention_tier, :metadata)
+             :storage_path, :storage_type, :error_message, :retention_tier, :metadata,
+             (SELECT MIN(id) FROM tenants))
         RETURNING id
     """)
     r = await db.execute(stmt, params)
