@@ -207,6 +207,13 @@ api_router.include_router(
     prefix="/solidworks",
     tags=["solidworks-integration"],
 )
+# SolidWorks add-in contract: property-mapping CRUD + complex part-number
+# generation (the router was defined but never registered).
+api_router.include_router(
+    endpoints.solidworks_contract.router,
+    prefix="/solidworks",
+    tags=["solidworks-integration"],
+)
 
 # Teams + unified work queue (WS2)
 api_router.include_router(endpoints.teams.router, prefix="/teams", tags=["teams"])
