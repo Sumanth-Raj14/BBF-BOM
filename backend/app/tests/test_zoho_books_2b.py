@@ -148,7 +148,9 @@ async def test_true_money_conflict_routes_to_review_and_preserves_local(
 
 
 @pytest.mark.asyncio
-async def test_conflict_resolution_rebaselines_no_redetect(db_session, test_tenant, tenant_id):
+async def test_conflict_resolution_rebaselines_no_redetect(
+    db_session, test_tenant, test_user, tenant_id
+):
     conn = await _enabled_conn(db_session, tenant_id)
     part = await _linked_part(db_session, tenant_id, pn="PN-4", name="Nut",
                               cost=99, external_id="ZI-4", base_cost=10)
@@ -160,7 +162,9 @@ async def test_conflict_resolution_rebaselines_no_redetect(db_session, test_tena
         ZohoSyncLog.event == "conflict_detected"))).scalar_one()
 
     # Resolve books_wins: apply Books value + re-baseline.
-    await resolve_conflict(db_session, tenant_id, conflict.id, "books_wins", resolved_by=1)
+    await resolve_conflict(
+        db_session, tenant_id, conflict.id, "books_wins", resolved_by=test_user.id
+    )
     await db_session.commit()
 
     await db_session.refresh(part)

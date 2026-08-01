@@ -793,6 +793,10 @@ async def _build_explosion_tree(
     )
     if tid is not None:
         stmt = stmt.where(BOMItem.tenantId == tid)
+    # Deterministic child order (matches get_bom_explosion_via_closure's id sort).
+    # Without it, Postgres returns siblings in arbitrary order, so the recursive
+    # and closure-backed explosions diverge (SQLite happened to match by rowid).
+    stmt = stmt.order_by(BOMItem.id)
     result = await db.execute(stmt)
     items = result.scalars().all()
     if not items:
