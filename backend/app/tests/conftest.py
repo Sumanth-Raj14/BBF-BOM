@@ -134,11 +134,25 @@ async def client(db_session):
 @pytest_asyncio.fixture(autouse=True)
 async def clean_db(test_engine):
     yield
+    # Wipe all rows between tests. The mechanism is dialect-specific:
+    #   - SQLite: PRAGMA foreign_keys OFF/ON around per-table deletes.
+    #   - PostgreSQL: PRAGMA is a syntax error there, so use TRUNCATE ... CASCADE
+    #     (also resets identity sequences for clean test isolation). Previously
+    #     the PRAGMA ran unconditionally and failed at teardown on Postgres for
+    #     every test, which also left tables un-wiped -> cascading IntegrityErrors.
+    is_sqlite = test_engine.dialect.name == "sqlite"
     async with test_engine.begin() as conn:
-        await conn.exec_driver_sql("PRAGMA foreign_keys = OFF")
-        for table in reversed(Base.metadata.sorted_tables):
-            await conn.execute(table.delete())
-        await conn.exec_driver_sql("PRAGMA foreign_keys = ON")
+        if is_sqlite:
+            await conn.exec_driver_sql("PRAGMA foreign_keys = OFF")
+            for table in reversed(Base.metadata.sorted_tables):
+                await conn.execute(table.delete())
+            await conn.exec_driver_sql("PRAGMA foreign_keys = ON")
+        else:
+            tables = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
+            if tables:
+                await conn.exec_driver_sql(
+                    f"TRUNCATE {tables} RESTART IDENTITY CASCADE"
+                )
 
 
 @pytest.fixture(autouse=True)
