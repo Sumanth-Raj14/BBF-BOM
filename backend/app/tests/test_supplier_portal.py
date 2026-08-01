@@ -1,4 +1,18 @@
 import pytest
+import pytest_asyncio
+
+from app.models.part import Part
+from app.models.vendor import Vendor
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _seed_refs(db_session, test_tenant, tenant_id):
+    # Tests reference vendorId 1/2 and partId 1; create them so the supplier
+    # FKs hold (Postgres enforces them, SQLite doesn't).
+    for vid in (1, 2):
+        db_session.add(Vendor(id=vid, name=f"Vendor {vid}", tenantId=tenant_id))
+    db_session.add(Part(id=1, pn="P-1", name="Part 1", tenantId=tenant_id))
+    await db_session.commit()
 
 
 @pytest.mark.asyncio
