@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     ALGORITHM: str = "RS256"
 
+    # Human-readable application name, used in notification/alert copy (e.g. the
+    # backup-failure email subject). Kept as a plain attribute so references
+    # like `settings.APP_NAME` never raise AttributeError.
+    APP_NAME: str = "Blackbox BOM"
+
     # PostgreSQL
     POSTGRES_SERVER: str = "127.0.0.1"
     POSTGRES_PORT: int = 5432
@@ -110,6 +115,14 @@ class Settings(BaseSettings):
         host = data.get("POSTGRES_SERVER", "127.0.0.1")
         port = data.get("POSTGRES_PORT", 5432)
         db = data.get("POSTGRES_DB", "bom_db")
+        # URL-encode credentials so special characters (@ : / # ? etc.) in the
+        # password or user don't corrupt the DSN. SQLAlchemy/asyncpg parse this
+        # string as a URL, so an unencoded '@' in the password would be read as
+        # the host separator and the connection would silently fail.
+        from urllib.parse import quote
+
+        user = quote(str(user), safe="")
+        password = quote(str(password), safe="")
         return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{db}"
 
     # CORS - override via env var BACKEND_CORS_ORIGINS as JSON array

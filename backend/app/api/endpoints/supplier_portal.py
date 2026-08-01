@@ -243,7 +243,9 @@ async def submit_price_update(
 # ============ RFQ Workflow ============
 
 
+from app.models.part import Part
 from app.models.supplier_portal import RfqHeader, RfqLineItem, RfqSupplierResponse
+from app.models.vendor import Vendor
 from app.schemas.supplier_portal import (
     RfqCreate,
     RfqListResponse,
@@ -271,7 +273,13 @@ async def list_rfqs(
     query = query.order_by(RfqHeader.created_at.desc())
     result = await db.execute(query)
     rfqs = result.scalars().all()
-    return RfqListResponse(total=len(rfqs), items=[_rfq_to_response(r) for r in rfqs])
+    resp_map = await _load_rfq_responses(
+        db, [r.id for r in rfqs], current_user.tenantId
+    )
+    return RfqListResponse(
+        total=len(rfqs),
+        items=[_rfq_to_response(r, resp_map.get(r.id)) for r in rfqs],
+    )
 
 
 @router.post("/rfqs", response_model=RfqResponse)
@@ -320,7 +328,8 @@ async def get_rfq(
     rfq = result.scalar_one_or_none()
     if not rfq:
         raise HTTPException(status_code=404, detail="RFQ not found")
-    return _rfq_to_response(rfq)
+    resp_map = await _load_rfq_responses(db, [rfq.id], current_user.tenantId)
+    return _rfq_to_response(rfq, resp_map.get(rfq.id))
 
 
 @router.post("/rfqs/{rfq_id}/respond", response_model=RfqRespondResponse)
@@ -379,7 +388,7 @@ async def award_rfq(
     return {"status": "awarded", "rfq_id": rfq_id, "supplier_id": supplier_id}
 
 
-def _rfq_to_response(rfq: RfqHeader) -> dict:
+def _rfq_to_response(rfq: RfqHeader, responses: list | None = None) -> dict:
     return {
         "id": rfq.id,
         "rfq_number": rfq.rfq_number,
@@ -391,7 +400,102 @@ def _rfq_to_response(rfq: RfqHeader) -> dict:
         "awarded_to_vendor_id": rfq.awarded_to_vendor_id,
         "created_by": rfq.created_by,
         "created_at": str(rfq.created_at) if rfq.created_at else None,
+        "responses": responses or [],
     }
+
+
+async def _load_rfq_responses(
+    db: AsyncSession, rfq_ids: list[int], tenant_id: int
+) -> dict[int, list[dict]]:
+    """Return {rfq_id: [quote, ...]} for the given RFQs, resolving each
+    supplier response to its vendor name and part/quantity. Tenant-scoped.
+    Uses a handful of batched lookups (no N+1), and never fabricates: a
+    missing vendor/part/price simply yields a null in that field."""
+    if not rfq_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(RfqSupplierResponse).where(
+                RfqSupplierResponse.rfq_id.in_(rfq_ids),
+                RfqSupplierResponse.tenantId == tenant_id,
+            )
+        )
+    ).scalars().all()
+    if not rows:
+        return {}
+
+    su_ids = {r.supplier_user_id for r in rows}
+    su_map = {
+        su.id: su
+        for su in (
+            await db.execute(select(SupplierUser).where(SupplierUser.id.in_(su_ids)))
+        ).scalars().all()
+    }
+    vendor_ids = {su.vendorId for su in su_map.values()}
+    v_map = (
+        {
+            v.id: v
+            for v in (
+                await db.execute(select(Vendor).where(Vendor.id.in_(vendor_ids)))
+            ).scalars().all()
+        }
+        if vendor_ids
+        else {}
+    )
+    li_ids = {r.line_item_id for r in rows}
+    li_map = {
+        li.id: li
+        for li in (
+            await db.execute(select(RfqLineItem).where(RfqLineItem.id.in_(li_ids)))
+        ).scalars().all()
+    }
+    part_ids = {li.part_id for li in li_map.values()}
+    p_map = (
+        {
+            p.id: p
+            for p in (
+                await db.execute(select(Part).where(Part.id.in_(part_ids)))
+            ).scalars().all()
+        }
+        if part_ids
+        else {}
+    )
+
+    out: dict[int, list[dict]] = {}
+    for r in rows:
+        su = su_map.get(r.supplier_user_id)
+        vendor = v_map.get(su.vendorId) if su else None
+        vname = (
+            getattr(vendor, "name", None)
+            or (getattr(su, "name", None) if su else None)
+            or f"Supplier {r.supplier_user_id}"
+        )
+        li = li_map.get(r.line_item_id)
+        part = p_map.get(li.part_id) if li else None
+        pname = getattr(part, "name", None) or getattr(part, "pn", None)
+        qty = getattr(li, "quantity", None)
+        price = float(r.quoted_price) if r.quoted_price is not None else None
+        out.setdefault(r.rfq_id, []).append(
+            {
+                "id": r.id,
+                "vendor": vname,
+                "vendorName": vname,
+                "supplier_user_id": r.supplier_user_id,
+                "line_item_id": r.line_item_id,
+                "part_id": getattr(li, "part_id", None),
+                "part": pname,
+                "quoted_price": price,
+                "price": price,
+                "unit": price,
+                "quoted_lead_time_days": r.quoted_lead_time_days,
+                "lead": r.quoted_lead_time_days,
+                "leadTime": r.quoted_lead_time_days,
+                "qty": qty,
+                "quantity": qty,
+                "status": r.status,
+            }
+        )
+    return out
 
 
 @router.put("/price-updates/{update_id}/approve", response_model=SupplierPriceUpdateResponse)
