@@ -27,7 +27,6 @@ ALEMBIC_CFG = Path(__file__).resolve().parents[2] / "alembic.ini"
 _ZOHO_TABLES = {"zoho_sync_state", "zoho_sync_cursor", "zoho_sync_log"}
 
 
-@pytest.mark.skip(reason="raw `alembic upgrade`/offline-SQL from an EMPTY db is not the supported bootstrap (migrations 004+ reference tables only formalized at rev 022); the supported path is `python -m scripts.init_db`, validated by the fresh-install-postgres CI job. Backlog: make raw alembic-from-empty work.")
 def test_migration_head_to_new_applies_on_fresh_sqlite(tmp_path):
     from alembic import command
     from alembic.config import Config
@@ -59,8 +58,13 @@ def test_migration_head_to_new_applies_on_fresh_sqlite(tmp_path):
 
     def _run():
         try:
-            command.stamp(cfg, "040_postgres_rls_tenant_isolation")
-            command.upgrade(cfg, "head")
+            # 041_zoho sits mid-chain now (…->044->041_zoho->045->…), so stamp at
+            # its parent (044) and upgrade to 041_zoho specifically — running ONLY
+            # the zoho-tables migration on top of the create_all'd pre-schema, as
+            # this test intends. Upgrading to "head" would also re-run 045-047,
+            # whose tables create_all already made -> duplicate-table errors.
+            command.stamp(cfg, "044_compliance_evaluations")
+            command.upgrade(cfg, "041_zoho_books_sync_tables")
         except BaseException as e:  # noqa: BLE001 — re-raised on the main thread
             err["e"] = e
 

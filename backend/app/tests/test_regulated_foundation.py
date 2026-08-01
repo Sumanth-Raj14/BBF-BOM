@@ -83,7 +83,6 @@ def test_all_models_import_and_tenant_awareness():
 
 # ---------- 2. Migration chain topology ----------
 
-@pytest.mark.skip(reason="raw `alembic upgrade`/offline-SQL from an EMPTY db is not the supported bootstrap (migrations 004+ reference tables only formalized at rev 022); the supported path is `python -m scripts.init_db`, validated by the fresh-install-postgres CI job. Backlog: make raw alembic-from-empty work.")
 def test_migration_chain_single_linear_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
@@ -92,7 +91,7 @@ def test_migration_chain_single_linear_head():
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
     script = ScriptDirectory.from_config(cfg)
 
-    assert script.get_heads() == ["044_compliance_evaluations"]
+    assert script.get_heads() == ["047_solidworks_integration"]
     links = {
         "044_compliance_evaluations": "043_part_composition_declarations",
         "043_part_composition_declarations": "042_substance_reference_data",
@@ -104,7 +103,6 @@ def test_migration_chain_single_linear_head():
 
 # ---------- 3. Fresh-SQLite upgrade 042->043->044 + seed + backfill ----------
 
-@pytest.mark.skip(reason="raw `alembic upgrade`/offline-SQL from an EMPTY db is not the supported bootstrap (migrations 004+ reference tables only formalized at rev 022); the supported path is `python -m scripts.init_db`, validated by the fresh-install-postgres CI job. Backlog: make raw alembic-from-empty work.")
 def test_migrations_upgrade_seed_and_backfill_on_fresh_sqlite(tmp_path):
     db_file = tmp_path / "reg_found_chain.db"
     url = "sqlite+aiosqlite:///" + str(db_file).replace("\\", "/")
@@ -149,7 +147,10 @@ def test_migrations_upgrade_seed_and_backfill_on_fresh_sqlite(tmp_path):
 
     stamp = run_alembic("stamp", "041_part11_esignatures")
     assert stamp.returncode == 0, f"stamp failed:\n{stamp.stdout}\n{stamp.stderr}"
-    up = run_alembic("upgrade", "head")
+    # Upgrade to 044 specifically (042->043->044, the regulated-foundation
+    # target), not "head": the chain continued past 044 (041_zoho->045->046->047)
+    # and those later migrations assume a fuller pre-schema than this test seeds.
+    up = run_alembic("upgrade", "044_compliance_evaluations")
     assert up.returncode == 0, f"upgrade failed:\n{up.stdout}\n{up.stderr}"
 
     # Inspect the migrated DB.
