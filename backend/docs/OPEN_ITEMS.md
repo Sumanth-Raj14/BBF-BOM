@@ -25,7 +25,7 @@
 ## Infrastructure
 - [ ] **Outer test suite consolidation** — `tests/` has 3 unique test files (`test_api.py`, `test_rbac.py`, `test_search.py`) that use a different conftest from `app/tests/`. Consolidation requires reconciling fixture differences.
 - [ ] **Phase 12: Frontend consolidation** — Two separate frontend apps need merging into one unified app. Test directories also need consolidation.
-- [ ] **PostgreSQL test infrastructure** — Docker-based PostgreSQL test runner + CI pipeline. Currently only SQLite tested.
+- [x] **PostgreSQL test infrastructure** — DONE. CI runs the full suite on real PostgreSQL 16 as a green hard gate (`.github/workflows/postgres-ci.yml`: 634 passed / 0 failed / 1 skipped / 1 xfailed) plus a fresh-install `init_db` bootstrap job. Local dev still uses SQLite; a local docker-compose PG runner remains a nice-to-have.
 - [ ] **`test.db` cleanup** — Add `test.db` to `.gitignore`, ensure deletion between runs.
 - [ ] **Seed enterprise data** — `seed_enterprise_data.py` exists but requires running against a live PostgreSQL instance.
 
