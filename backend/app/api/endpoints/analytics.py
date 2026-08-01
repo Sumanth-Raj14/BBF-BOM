@@ -185,6 +185,59 @@ async def analytics_categories(
     ]
 
 
+@router.get("/inflation")
+async def analytics_inflation(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Category-level price inflation trend for the Inflation Analysis modal
+    (frontend/src/components/advanced/InflationAnalysisModal.jsx). Derived
+    from price_history joined to parts for category, tenant-scoped via
+    price_history."tenantId". Categories need at least two distinct months
+    of price records to produce a trend; thin data is omitted rather than
+    guessed at.
+    """
+    tf, tf_params = _tenant_filter_params(current_user, "ph")
+    rows = await db.execute(
+        text(f"""
+            SELECT COALESCE(p.category, 'Other') as category,
+                   TO_CHAR(COALESCE(ph."effectiveDate", ph."recordedAt"), 'YYYY-MM') as month,
+                   AVG(ph.price) as avg_price
+            FROM price_history ph
+            JOIN parts p ON p.id = ph."partId"
+            WHERE {tf}
+            GROUP BY COALESCE(p.category, 'Other'),
+                     TO_CHAR(COALESCE(ph."effectiveDate", ph."recordedAt"), 'YYYY-MM')
+            ORDER BY category, month
+        """),
+        tf_params,
+    )
+
+    by_category: dict[str, list[dict]] = {}
+    for row in rows.fetchall():
+        by_category.setdefault(row[0], []).append({"month": row[1], "avgPrice": float(row[2])})
+
+    categories = []
+    for category, points in by_category.items():
+        if len(points) < 2:
+            continue
+        baseline = points[0]["avgPrice"]
+        current = points[-1]["avgPrice"]
+        change_pct = ((current - baseline) / baseline * 100) if baseline else 0.0
+        categories.append(
+            {
+                "category": category,
+                "points": points,
+                "baseline": baseline,
+                "current": current,
+                "changePct": change_pct,
+            }
+        )
+    categories.sort(key=lambda c: c["changePct"], reverse=True)
+    return {"categories": categories}
+
+
 @router.get("/vendor-scorecards")
 async def vendor_scorecards(
     db: AsyncSession = Depends(get_db),

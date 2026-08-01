@@ -3,70 +3,57 @@ import { useState } from "react";
 
 import { Icon } from "../../globals";
 import { Modal, Button, Field, Input, Card, Badge, DataTable, Spinner } from "../ui";
+import { api } from "../../../api.js";
+import { toast } from "../../utils/toast";
+
+// Fields already surfaced in the summary card above the table — don't repeat
+// them in the raw-extraction spec list.
+const SUMMARY_KEYS = new Set(["pn", "mpn", "manufacturer", "description", "price"]);
 
 function InternetScrapeModal({ open, onClose }) {
   const [url, setUrl] = useState("");
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   if (!open) return null;
 
   const scrape = async () => {
     if (!url.trim()) return;
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 800 + Math.random() * 400));
-    const domain = url.includes("digikey")
-      ? "digikey"
-      : url.includes("mouser")
-        ? "mouser"
-        : "generic";
-    const mock = {
-      digikey: {
-        pn: "STM32H743VIT6",
-        mfr: "STMicroelectronics",
-        desc: "ARM Cortex-M7 480MHz 2MB Flash LQFP-100",
-        specs: {
-          Core: "ARM Cortex-M7 @ 480 MHz",
-          Flash: "2 MB",
-          Package: "LQFP-100",
-        },
-        price_breaks: [
-          { qty: 1, price: 22.8 },
-          { qty: 10, price: 20.5 },
-          { qty: 100, price: 17.2 },
-        ],
-        stock: 4850,
-        lead: "12 weeks",
-        rohs: true,
-      },
-      mouser: {
-        pn: "EL-PSU-240W",
-        mfr: "Mean Well",
-        desc: "240W AC/DC Power Supply 24V 10A",
-        specs: { "Output Power": "240W", "Output Voltage": "24V DC" },
-        price_breaks: [
-          { qty: 1, price: 92.5 },
-          { qty: 25, price: 84.3 },
-          { qty: 50, price: 78.0 },
-        ],
-        stock: 230,
-        lead: "8 weeks",
-        rohs: true,
-      },
-      generic: {
-        pn: url.split("/").pop() || "Unknown",
-        mfr: "Unknown",
-        desc: "Scraped from " + domain,
-        specs: { Manufacturer: "Unknown" },
-        price_breaks: [{ qty: 1, price: 10.0 }],
-        stock: null,
-        lead: "Contact vendor",
-        rohs: null,
-      },
-    };
-    setResults(mock[domain] || mock.generic);
-    setLoading(false);
+    setError(null);
+    try {
+      const data = await api.scraping.scrape(url.trim());
+      setResults(data || null);
+      if (!data) {
+        setError("Scrape returned no data for this URL.");
+      }
+    } catch (e) {
+      setResults(null);
+      setError(e?.message || "Scrape failed");
+      toast(`Scrape failed: ${e?.message || "unknown error"}`, { kind: "error" });
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const applyToBom = () => {
+    // The scraping modal is opened as a standalone tool (see BomEditorScreen's
+    // "scraping" trigger) without a target part/BOM-line id, and there is no
+    // backend endpoint yet to merge scraped fields into a BOM item. Rather
+    // than silently doing nothing, tell the user honestly why this is a
+    // no-op instead of fabricating a success state.
+    toast(
+      "Apply to BOM isn't wired yet — open scraping from a specific BOM line so there's a target part to update.",
+      { kind: "info", duration: 5000 },
+    );
+  };
+
+  const specRows = results
+    ? Object.entries(results.rawExtracted || {})
+        .filter(([key, value]) => !SUMMARY_KEYS.has(key) && value)
+        .map(([spec, value]) => ({ spec, value: String(value) }))
+    : [];
 
   const specColumns = [
     {
@@ -95,7 +82,7 @@ function InternetScrapeModal({ open, onClose }) {
           <Button variant="secondary" onClick={onClose}>
             Close
           </Button>
-          <Button variant="primary" disabled={!results}>
+          <Button variant="primary" onClick={applyToBom} disabled={!results}>
             Apply to BOM
           </Button>
         </>
@@ -133,10 +120,16 @@ function InternetScrapeModal({ open, onClose }) {
         </div>
       )}
 
-      {results && !loading && (
+      {!loading && error && (
+        <div className="text-center fg-3 fs-12" style={{ padding: 40 }}>
+          {error}
+        </div>
+      )}
+
+      {results && !loading && !error && (
         <Card
-          title={results.pn}
-          subtitle={results.mfr}
+          title={results.pn || "Unknown part"}
+          subtitle={results.manufacturer || "Manufacturer unknown"}
           actions={
             <Badge tone="accent" pill>
               {results.source || "source"}
@@ -144,33 +137,36 @@ function InternetScrapeModal({ open, onClose }) {
           }
           className="mb-16"
         >
-          <p className="fs-11 fg-2">{results.desc}</p>
+          <p className="fs-11 fg-2">{results.description || "No description extracted."}</p>
           <div className="flex items-center gap-8 font-mono fs-10 fg-3 mt-8">
             <span>
-              {results.stock != null
+              {typeof results.stock === "number"
                 ? `${results.stock.toLocaleString()} in stock`
-                : "Stock N/A"}
+                : results.stock || "Stock N/A"}
             </span>
-            <span aria-hidden="true">·</span>
-            <span>Lead: {results.lead}</span>
-            {results.rohs != null && (
-              <Badge tone={results.rohs ? "success" : "neutral"} pill>
-                {results.rohs ? "RoHS compliant" : "RoHS unknown"}
-              </Badge>
+            {results.priceBreaks && results.priceBreaks.length > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>
+                  ${results.priceBreaks[0].price} @ qty {results.priceBreaks[0].qty}
+                </span>
+              </>
             )}
           </div>
         </Card>
       )}
 
-      {results && !loading && (
+      {results && !loading && !error && (
         <DataTable
           columns={specColumns}
-          rows={Object.entries(results.specs).map(([spec, value]) => ({
-            spec,
-            value,
-          }))}
+          rows={specRows}
           getRowKey={(r) => r.spec}
           ariaLabel="Scraped specifications"
+          empty={
+            <span className="fs-11 fg-3">
+              No additional specifications were extracted from this page.
+            </span>
+          }
           dense
         />
       )}

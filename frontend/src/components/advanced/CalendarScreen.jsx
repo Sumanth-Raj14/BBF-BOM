@@ -1,14 +1,17 @@
 import { storage } from "../../utils/storage.js";
 
 import { toast } from "../../utils/toast";
-import { Icon } from "../../globals";
+import { Icon, poOrdersAPI, orderTrackingAPI } from "../../globals";
+import { ecoAPI } from "../../../api.js";
 import {
   Button,
   Card,
+  EmptyState,
   Field,
   Input,
   ScreenHeader,
   Select,
+  Spinner,
 } from "../ui";
 
 const TYPE_COLOR = {
@@ -26,54 +29,32 @@ const TYPE_LABEL = {
   approval: "Approval",
 };
 
+// Backend date fields are free-form strings; normalize to YYYY-MM-DD so they
+// line up with the grid's ISO day keys. Returns null (never throws) on junk.
+function toISODate(value) {
+  if (!value) return null;
+  const s = String(value).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
 function CalendarScreen() {
   const [showForm, setShowForm] = React.useState(false);
-  const [events, setEvents] = React.useState(() => {
+  const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState(null);
+  // Real data pulled from the backend (PO deliveries + ECO dates) — never
+  // fabricated, rebuilt fresh on every load().
+  const [apiEvents, setApiEvents] = React.useState([]);
+  // Manually-added events have no dedicated calendar backend endpoint, so
+  // they remain local to this browser (persisted via localStorage), same as
+  // before. Merged with apiEvents for display.
+  const [manualEvents, setManualEvents] = React.useState(() => {
     try {
       const saved = storage.calendarEvents.get();
-      if (saved && saved.length) return saved;
+      if (Array.isArray(saved)) return saved;
     } catch {
-      console.warn("Failed to parse calendar events");
+      console.warn("Failed to parse saved calendar events");
     }
-    return [
-      {
-        date: "2026-05-26",
-        type: "po-eta",
-        label: "Crucial DDR4 SODIMM",
-        value: 50,
-      },
-      {
-        date: "2026-05-27",
-        type: "po-eta",
-        label: "McMaster M3 screws",
-        value: 1000,
-      },
-      { date: "2026-05-29", type: "rfq", label: "RFQ response: JLCPCB" },
-      {
-        date: "2026-06-02",
-        type: "po-eta",
-        label: "Edmund 25mm lens",
-        value: 25,
-      },
-      {
-        date: "2026-06-08",
-        type: "compliance",
-        label: "BMS REACH cert expires",
-      },
-      {
-        date: "2026-06-12",
-        type: "milestone",
-        label: "BOM v3.3 release target",
-      },
-      {
-        date: "2026-06-18",
-        type: "po-eta",
-        label: "STM32H743 MCUs",
-        value: 50,
-      },
-      { date: "2026-06-25", type: "approval", label: "Q3 budget review due" },
-      { date: "2026-07-15", type: "milestone", label: "ATLAS Demo Day" },
-    ];
+    return [];
   });
   const [newEvent, setNewEvent] = React.useState({
     date: "",
@@ -81,6 +62,94 @@ function CalendarScreen() {
     label: "",
     value: "",
   });
+
+  const load = React.useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    Promise.all([
+      orderTrackingAPI
+        ?.list({ per_page: 200 })
+        .catch(() => ({ items: [] })),
+      poOrdersAPI?.list({ per_page: 200 }).catch(() => ({ items: [] })),
+      ecoAPI?.list({ per_page: 200 }).catch(() => ({ items: [] })),
+    ])
+      .then(([trackingRes, poRes, ecoRes]) => {
+        const built = [];
+
+        (trackingRes?.items || []).forEach((t) => {
+          const poLabel = t.po?.poNumber
+            ? `PO ${t.po.poNumber}`
+            : `PO #${t.poHeaderId}`;
+          const vendor = t.po?.vendorName ? ` · ${t.po.vendorName}` : "";
+          const deliveredDate = toISODate(t.actualDelivery);
+          const etaDate = toISODate(t.estimatedDelivery);
+          if (deliveredDate) {
+            built.push({
+              date: deliveredDate,
+              type: "po-eta",
+              label: `${poLabel}${vendor} — delivered`,
+              value: null,
+            });
+          } else if (etaDate) {
+            built.push({
+              date: etaDate,
+              type: "po-eta",
+              label: `${poLabel}${vendor}${t.carrier ? ` (${t.carrier})` : ""} — ETA`,
+              value: null,
+            });
+          }
+        });
+
+        (poRes?.items || []).forEach((h) => {
+          const placedDate = toISODate(h.poDate);
+          if (!placedDate) return;
+          built.push({
+            date: placedDate,
+            type: "po-eta",
+            label: `PO ${h.poNumber}${h.vendorName ? ` · ${h.vendorName}` : ""} — placed`,
+            value: Array.isArray(h.items) && h.items.length ? h.items.length : null,
+          });
+        });
+
+        (ecoRes?.items || []).forEach((e) => {
+          const targetDate = toISODate(e.target_completion_date);
+          const effectiveDate = toISODate(e.effective_date);
+          if (targetDate) {
+            built.push({
+              date: targetDate,
+              type: "approval",
+              label: `ECO ${e.eco_number || e.id}: ${e.title || "Untitled"} — target completion`,
+              value: null,
+            });
+          }
+          if (effectiveDate) {
+            built.push({
+              date: effectiveDate,
+              type: "milestone",
+              label: `ECO ${e.eco_number || e.id}: ${e.title || "Untitled"} — effective`,
+              value: null,
+            });
+          }
+        });
+
+        setApiEvents(built);
+      })
+      .catch(() => {
+        setLoadError("Could not load PO / ECO dates from the server.");
+        setApiEvents([]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  React.useEffect(() => {
+    load();
+  }, [load]);
+
+  const events = React.useMemo(
+    () => [...apiEvents, ...manualEvents],
+    [apiEvents, manualEvents],
+  );
+
   const today = new Date();
   const start = new Date(today);
   start.setDate(start.getDate() - start.getDay());
@@ -101,27 +170,35 @@ function CalendarScreen() {
       label: newEvent.label,
       value: newEvent.value ? Number(newEvent.value) : null,
     };
-    const next = [...events, entry];
-    setEvents(next);
+    const next = [...manualEvents, entry];
+    setManualEvents(next);
     storage.calendarEvents.set(next);
     setNewEvent({ date: "", type: "milestone", label: "", value: "" });
     setShowForm(false);
+    toast("Event added", { kind: "success" });
   };
 
   return (
     <div className="screen-wrap">
       <ScreenHeader
         title="Calendar & Timeline"
-        description={`${events.length} upcoming events · Next 8 weeks`}
+        description={
+          loading
+            ? "Loading PO deliveries and ECO dates…"
+            : `${events.length} upcoming events · Next 8 weeks${loadError ? " · " + loadError : ""}`
+        }
         actions={
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => setShowForm(!showForm)}
-            aria-expanded={showForm}
-          >
-            <Icon.Plus size={12} /> Add event
-          </Button>
+          <div className="flex gap-8 items-center">
+            {loading && <Spinner size="sm" label="Loading calendar" />}
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setShowForm(!showForm)}
+              aria-expanded={showForm}
+            >
+              <Icon.Plus size={12} /> Add event
+            </Button>
+          </div>
         }
       />
 
@@ -212,6 +289,19 @@ function CalendarScreen() {
         ))}
       </ul>
 
+      {!loading && events.length === 0 && (
+        <EmptyState
+          icon={<Icon.Calendar size={28} />}
+          title="No scheduled events"
+          message={
+            loadError
+              ? "PO/ECO data couldn't be loaded right now. You can still add a manual event below."
+              : "No PO deliveries or ECO dates yet, and no manual events added. Use “Add event” to create one."
+          }
+          className="mb-14"
+        />
+      )}
+
       <Card flush bodyClassName="p-0" className="overflow-h">
         <div
           className="d-grid border-bottom bg-sunk"
@@ -265,7 +355,7 @@ function CalendarScreen() {
                     title={e.label + (e.value ? " ×" + e.value : "")}
                     style={{
                       padding: "2px 4px",
-                      background: TYPE_COLOR[e.type],
+                      background: TYPE_COLOR[e.type] || TYPE_COLOR.milestone,
                       color: "white",
                       textOverflow: "ellipsis",
                     }}

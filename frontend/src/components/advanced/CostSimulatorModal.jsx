@@ -1,19 +1,27 @@
 import PropTypes from "prop-types";
 
 import { BOM_DATA, Icon, INR, useAppStore } from "../../globals";
-import { Button, DataTable, Input, Modal } from "../ui";
+import { Button, DataTable, EmptyState, Input, Modal } from "../ui";
 
 function CostSimulatorModal({ open, onClose }) {
   const ctx = useAppStore();
   const [sims, setSims] = React.useState([]);
 
+  // Real backend-loaded rows (see AppCtx: populated from partsAPI/bom items
+  // when the API is reachable) take priority. Only fall back to the bundled
+  // demo fixture — and say so in the UI — when there is no live data yet, so
+  // this never silently presents fabricated numbers as real cost figures.
+  const liveRows = Array.isArray(ctx?.rows) && ctx.rows.length > 0 ? ctx.rows : null;
+  const usingLiveData = !!liveRows;
+  const sourceRows = liveRows || BOM_DATA.rows;
+  const baseRows = (sourceRows?.[0]?.children || []).flatMap(
+    (s) => s.children || [],
+  );
+
   // Re-seed the simulation whenever the modal is (re)opened, rather than
   // conditionally calling hooks after an early return.
   React.useEffect(() => {
     if (!open) return;
-    const baseRows = (ctx?.rows || BOM_DATA.rows)[0].children.flatMap(
-      (s) => s.children || [],
-    );
     setSims(
       baseRows.slice(0, 6).map((r) => ({ ...r, simQty: r.qty, simCost: r.cost })),
     );
@@ -122,6 +130,11 @@ function CostSimulatorModal({ open, onClose }) {
       onClose={onClose}
       icon={<Icon.Sparkles size={16} />}
       title="Cost simulator · what-if analysis"
+      subtitle={
+        usingLiveData
+          ? undefined
+          : "No live BOM data loaded — showing demo figures, not real costs"
+      }
       size="xl"
       footer={
         <>
@@ -180,6 +193,12 @@ function CostSimulatorModal({ open, onClose }) {
         getRowKey={(r) => r.pn}
         dense
         ariaLabel="Cost simulation, base versus simulated quantity and unit cost per part"
+        empty={
+          <EmptyState
+            title="No parts to simulate"
+            message="No BOM lines with cost data are available yet."
+          />
+        }
       />
     </Modal>
   );

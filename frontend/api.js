@@ -1482,3 +1482,37 @@ bulkImportAPI.list = (params = {}) => {
   const q = new URLSearchParams(params).toString();
   return apiRequest(`/import/jobs${q ? '?' + q : ''}`);
 };
+
+// Appended for InflationAnalysisModal.jsx: category-level price inflation
+// trend backing GET /analytics/inflation (see backend/app/api/endpoints/analytics.py).
+analyticsAPI.inflation = () => apiRequest('/analytics/inflation');
+
+// Appended for OnboardingChecklist.jsx: tenant-scoped BOM header list/count,
+// backing the already-existing GET /bom/ (see backend/app/api/endpoints/
+// bom_enterprise.py list_boms, mounted at prefix "/bom" in api_v1.py). Takes
+// skip/limit (not page/per_page) to match that endpoint's own query params.
+bomEnterpriseAPI.list = (params = {}) => {
+  const q = new URLSearchParams(params).toString();
+  return apiRequest(`/bom/${q ? '?' + q : ''}`);
+};
+
+// Appended for modals-extra.jsx (API Keys modal): user-scoped API key
+// management backing GET/POST /api-keys, POST /api-keys/{id}/rotate and
+// DELETE /api-keys/{id} (see backend/app/api/endpoints/api_keys.py).
+// list() returns a plain array of key metadata (never the raw secret);
+// create()/rotate() return the raw key once, at creation/rotation time only.
+export const apiKeysAPI = {
+  list: () => apiRequest('/api-keys/'),
+
+  create: (data) =>
+    apiRequest('/api-keys/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  rotate: (id) => apiRequest(`/api-keys/${id}/rotate`, { method: 'POST' }),
+
+  revoke: (id) => apiRequest(`/api-keys/${id}`, { method: 'DELETE' }),
+};
+api.apiKeys = apiKeysAPI;
+window.apiKeysAPI = apiKeysAPI;

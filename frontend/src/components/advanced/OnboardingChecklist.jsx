@@ -1,11 +1,51 @@
 import { storage } from "../../utils/storage.js";
 import { Icon, useAppStore } from "../../globals";
 import { Button, Checkbox } from "../ui";
+import { api } from "../../../api.js";
 
 function OnboardingChecklist() {
   const ctx = useAppStore();
   const [collapsed, setCollapsed] = React.useState(false);
   const [done, setDone] = React.useState(() => storage.checklist.get());
+  // Auto-detected completion from real tenant data, keyed by task id. A task
+  // is left out of this map (falls back to the manual `done` list below)
+  // until its lookup resolves, and stays out forever if that lookup fails —
+  // this only ever flips a task to *done* off real counts, never fabricates
+  // or crashes the widget when a count can't be fetched.
+  const [autoDone, setAutoDone] = React.useState({});
+
+  React.useEffect(() => {
+    let cancelled = false;
+    // One-row requests: we only need the `.total` off each paginated
+    // envelope, not the actual rows.
+    Promise.allSettled([
+      api.users.list({ per_page: 1 }),
+      api.vendors.list({ per_page: 1 }),
+      api.bomEnterprise.list({ limit: 1 }),
+      api.procurement.list({ per_page: 1 }),
+    ]).then(([usersR, vendorsR, bomR, poR]) => {
+      if (cancelled) return;
+      const next = {};
+      // More tenant users than just yourself means a teammate exists.
+      if (usersR.status === "fulfilled") {
+        next.invite = Number(usersR.value?.total) > 1;
+      }
+      if (vendorsR.status === "fulfilled") {
+        next.vendor = Number(vendorsR.value?.total) > 0;
+      }
+      if (bomR.status === "fulfilled") {
+        next.import = Number(bomR.value?.total) > 0;
+      }
+      if (poR.status === "fulfilled") {
+        next.po = Number(poR.value?.total) > 0;
+      }
+      setAutoDone(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const tasks = [
     {
       id: "invite",
@@ -28,11 +68,17 @@ function OnboardingChecklist() {
       action: () => ctx?.openModal("new-po"),
     },
   ];
-  const completed = done.length;
+  // A task is done if real backend data says so, or the user manually
+  // checked it off (e.g. work done before this data existed, or a feature
+  // whose backend signal isn't available yet).
+  const isTaskDone = (id) => autoDone[id] === true || done.includes(id);
+  const completed = tasks.filter((t) => isTaskDone(t.id)).length;
   const total = tasks.length;
   const allDone = completed === total;
   const dismissed = storage.checklist.isDismissed();
   const toggle = (id) => {
+    // Real data already confirmed this one — nothing to toggle.
+    if (autoDone[id] === true) return;
     const next = done.includes(id)
       ? done.filter((x) => x !== id)
       : [...done, id];
@@ -110,7 +156,8 @@ function OnboardingChecklist() {
         style={{ padding: 10, maxHeight: 280, listStyle: "none" }}
       >
         {tasks.map((t) => {
-          const isDone = done.includes(t.id);
+          const isDone = isTaskDone(t.id);
+          const isAuto = autoDone[t.id] === true;
           const inputId = `onboard-task-${t.id}`;
           return (
             <li
@@ -121,6 +168,7 @@ function OnboardingChecklist() {
               <Checkbox
                 id={inputId}
                 checked={isDone}
+                disabled={isAuto}
                 onChange={() => toggle(t.id)}
                 className="flex-1"
                 label={
@@ -132,6 +180,11 @@ function OnboardingChecklist() {
                     }}
                   >
                     {t.label}
+                    {isAuto && (
+                      <span className="fg-3" style={{ marginLeft: 4 }}>
+                        (detected)
+                      </span>
+                    )}
                   </span>
                 }
               />
