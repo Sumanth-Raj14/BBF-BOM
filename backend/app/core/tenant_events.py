@@ -49,8 +49,15 @@ def _register_select_filter():
         if not execute_state.is_select:
             return
         if not execute_state.is_orm_statement:
+            # Raw/textual SELECTs cannot be auto-filtered safely (we don't know
+            # which column carries the tenant, and some raw queries are
+            # deliberately tenant-agnostic). We do NOT block them — the caller
+            # is responsible for scoping raw SQL by tenant explicitly. Log at
+            # warning so these bypasses are auditable; the previous message
+            # falsely claimed the query was "blocked".
             logger.warning(
-                "Non-ORM SELECT blocked by tenant isolation: %s",
+                "Raw (non-ORM) SELECT bypasses automatic tenant isolation — "
+                "ensure it is tenant-scoped manually: %s",
                 execute_state.statement,
             )
             return

@@ -4,6 +4,7 @@ import asyncio
 import base64
 import gzip
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -762,11 +763,14 @@ async def restore_physical_backup(
         # Handle encrypted backups
         if path.suffix == _ENCRYPTION_SUFFIX:
             fernet = _get_fernet()
-            with open(path, "rb") as f:
-                decrypted_data = fernet.decrypt(f.read())
             decrypt_path = path.with_suffix("")
-            with open(decrypt_path, "wb") as f:
-                f.write(decrypted_data)
+            # Backups are written by _stream_encrypt as a sequence of
+            # length-prefixed Fernet chunks, so they must be decrypted the same
+            # way (as the logical restore path already does). The previous
+            # single-shot fernet.decrypt(f.read()) raised InvalidToken on any
+            # real (multi-chunk) physical backup, so encrypted physical restore
+            # never worked.
+            _stream_decrypt(path, decrypt_path, fernet)
             path = decrypt_path
             result["decrypted_path"] = str(path)
 
@@ -986,8 +990,16 @@ async def _send_webhook_alerts(result: BackupResult) -> None:
         async with httpx.AsyncClient(timeout=10) as client:
             for webhook in webhooks:
                 try:
-                    signature = hashlib.sha256(
-                        (payload + (webhook.secret or "")).encode()
+                    # HMAC-SHA256 over the payload, keyed by the webhook secret —
+                    # the standard webhook signature scheme (GitHub/Stripe-style,
+                    # "sha256=" prefix). The previous sha256(payload+secret) was
+                    # not a real HMAC: it is forgeable and length-extension-weak.
+                    # NOTE: receivers must verify with HMAC-SHA256 (not a plain
+                    # hash) against the raw JSON body.
+                    signature = "sha256=" + hmac.new(
+                        (webhook.secret or "").encode(),
+                        payload.encode(),
+                        hashlib.sha256,
                     ).hexdigest()
                     await client.post(
                         webhook.url,

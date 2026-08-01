@@ -370,7 +370,11 @@ class ConnectionManager:
         self.user_connections: dict[int, list[WebSocket]] = {}
         self.channel_presence: dict[str, set[int]] = {}  # channel -> set of user_ids
         self.channel_cursors: dict[str, dict[int, dict]] = {}  # channel -> {user_id: cursor_pos}
-        self.doc_locks: dict[str, int] = {}  # document_id -> user_id holding lock
+        # (channel, document_id) -> user_id holding the lock. The channel is
+        # included in the key so a document id is only ever compared within its
+        # own collaboration scope — two tenants/projects sharing a numeric doc
+        # id can no longer collide on the same lock.
+        self.doc_locks: dict[tuple[str, str], int] = {}
 
     async def connect(self, ws: WebSocket, channel: str, user_id: int = None):
         await ws.accept()
@@ -402,6 +406,25 @@ class ConnectionManager:
                     asyncio.ensure_future(self._broadcast_presence(channel))
             if channel in self.channel_cursors and user_id in self.channel_cursors[channel]:
                 del self.channel_cursors[channel][user_id]
+            # Once the user has no remaining connections, release any document
+            # locks they still hold — otherwise a crash / closed tab would leave
+            # the document locked forever. Broadcast each release to its channel.
+            if not self.user_connections.get(user_id):
+                held = [k for k, uid in list(self.doc_locks.items()) if uid == user_id]
+                for lock_key in held:
+                    del self.doc_locks[lock_key]
+                    lock_channel, lock_doc = lock_key
+                    asyncio.ensure_future(
+                        self.broadcast(
+                            lock_channel,
+                            {
+                                "type": "lock",
+                                "document_id": lock_doc,
+                                "user_id": user_id,
+                                "action": "released",
+                            },
+                        )
+                    )
         self._update_ws_metric()
 
     def _update_ws_metric(self):
@@ -504,19 +527,20 @@ class ConnectionManager:
         elif msg_type == "lock":
             doc_id = msg.get("document_id")
             action = msg.get("action")
+            lock_key = (channel, doc_id)
             if action == "acquire":
-                if doc_id in self.doc_locks and self.doc_locks[doc_id] != user_id:
+                if lock_key in self.doc_locks and self.doc_locks[lock_key] != user_id:
                     await self.send_to_user(
                         user_id,
                         {
                             "type": "lock_error",
                             "document_id": doc_id,
-                            "held_by": self.doc_locks[doc_id],
+                            "held_by": self.doc_locks[lock_key],
                             "message": "Document is locked by another user",
                         },
                     )
                     return
-                self.doc_locks[doc_id] = user_id
+                self.doc_locks[lock_key] = user_id
                 await self.broadcast(
                     channel,
                     {
@@ -527,8 +551,8 @@ class ConnectionManager:
                     },
                 )
             elif action == "release":
-                if doc_id in self.doc_locks and self.doc_locks[doc_id] == user_id:
-                    del self.doc_locks[doc_id]
+                if lock_key in self.doc_locks and self.doc_locks[lock_key] == user_id:
+                    del self.doc_locks[lock_key]
                     await self.broadcast(
                         channel,
                         {
@@ -541,7 +565,7 @@ class ConnectionManager:
 
         elif msg_type == "doc_update":
             doc_id = msg.get("document_id")
-            if doc_id in self.doc_locks and self.doc_locks[doc_id] != user_id:
+            if (channel, doc_id) in self.doc_locks and self.doc_locks[(channel, doc_id)] != user_id:
                 await self.send_to_user(
                     user_id,
                     {
