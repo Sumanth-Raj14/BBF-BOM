@@ -84,6 +84,9 @@ class RfqResponse(BaseModel):
     awarded_to_vendor_id: Optional[int] = None
     created_by: int
     created_at: Optional[str] = None
+    # Per-supplier quotes for this RFQ (vendor, price, lead time, part, qty).
+    # Empty until suppliers respond. Consumed by the RFQ compare UI.
+    responses: Optional[list[dict]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
