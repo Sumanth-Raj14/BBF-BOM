@@ -78,7 +78,9 @@ async def create_role(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    result = await roles_service.create_role(db, role_data.name, role_data.description)
+    result = await roles_service.create_role(
+        db, role_data.name, role_data.description, current_user.tenantId
+    )
     result["userCount"] = 0
     result["permissionCount"] = 0
     return RoleResponse(**result)

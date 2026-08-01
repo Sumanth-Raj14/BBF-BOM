@@ -50,12 +50,19 @@ async def list_roles(db: AsyncSession) -> list[dict]:
     return responses
 
 
-async def create_role(db: AsyncSession, name: str, description: Optional[str] = None) -> dict:
-    result = await db.execute(select(Role).where(Role.name == name))
+async def create_role(
+    db: AsyncSession,
+    name: str,
+    description: Optional[str] = None,
+    tenant_id: Optional[int] = None,
+) -> dict:
+    result = await db.execute(
+        select(Role).where(Role.name == name, Role.tenantId == tenant_id)
+    )
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Role name already exists")
 
-    role = Role(name=name, description=description)
+    role = Role(name=name, description=description, tenantId=tenant_id)
     db.add(role)
     await db.commit()
     await db.refresh(role)
