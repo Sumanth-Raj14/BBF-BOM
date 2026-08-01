@@ -198,6 +198,18 @@ async def test_tenant(db_session, tenant_id):
     tenant = Tenant(id=tenant_id, tenant_name="Test Tenant", tenant_code="TEST")
     db_session.add(tenant)
     await db_session.commit()
+    # On PostgreSQL an explicit-id INSERT does NOT advance the identity sequence,
+    # so a later app INSERT with no id (e.g. self-registration bootstrapping a
+    # tenant) would reuse this id and hit a duplicate-key error. Advance the
+    # sequence past it. No-op on SQLite (rowid handles this itself).
+    if db_session.bind.dialect.name == "postgresql":
+        from sqlalchemy import text
+
+        await db_session.execute(
+            text("SELECT setval(pg_get_serial_sequence('tenants', 'id'), :v, true)"),
+            {"v": tenant.id},
+        )
+        await db_session.commit()
     return tenant
 
 
