@@ -119,7 +119,14 @@ async def client(db_session):
 
     app.dependency_overrides[get_db] = override_get_db
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as c:
+    # follow_redirects=True so the client transparently follows FastAPI's
+    # trailing-slash 307 redirects (e.g. /resource -> /resource/), matching how
+    # real browsers and the app's ApiTrailingSlashMiddleware behave. Without it
+    # the client stops at the 307 and tests assert against the redirect instead
+    # of the real endpoint response.
+    async with AsyncClient(
+        transport=transport, base_url="http://testserver", follow_redirects=True
+    ) as c:
         yield c
     app.dependency_overrides.clear()
 
