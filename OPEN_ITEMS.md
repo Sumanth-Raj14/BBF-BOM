@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-This document tracks outstanding work across the Blackbox BOM platform (backend + frontend + plugin). Current shipped release is v2.1.0 on master. All three feature branches have been merged to master: feat/regulated (FDA Part 11 + RoHS/REACH), feat/zoho-books (two-way Zoho Books sync), and feat/polish (WCAG-AA dark mode, a11y modes, mobile/scanner polish). Fresh PostgreSQL installs are now fully supported with 155 tables.
+This document tracks outstanding work across the Blackbox BOM platform (backend + frontend + plugin). Current shipped release is v2.1.0 on master. All three feature branches have been merged to master: feat/regulated (FDA Part 11 + RoHS/REACH), feat/zoho-books (two-way Zoho Books sync), and feat/polish (WCAG-AA dark mode, a11y modes, mobile/scanner polish). Fresh PostgreSQL installs are fully supported; head is now `047_solidworks_integration` with **159 tables**.
 
 **Recently resolved (v2.1.0 release):**
 1. ✅ **Migration collision resolved** — feat/regulated `041_part11_esignatures` and feat/zoho-books `041_zoho_books_sync_tables` relinked into linear chain via Alembic rebase (041_compliance_pack -> 041_part11_esignatures -> 042_substance_reference_data -> 043_part_composition_declarations -> 044_compliance_evaluations -> 041_zoho_books_sync_tables)
@@ -16,8 +16,11 @@ This document tracks outstanding work across the Blackbox BOM platform (backend 
 3. ✅ **3 compliance orphan tables resolved** — compliance_packs, substance_reference_data, part_composition_declarations now properly modeled in migrations 042-044
 4. ✅ **ALLOWED_HOSTS/testserver misconfig fixed** — pytest now passes testserver; unblocked ~412 of 414 previously-failing tests
 
+**Recently resolved (2026-08-01 — Postgres hard gate):**
+5. ✅ **Full test-suite re-baseline DONE on real Postgres** — `Test Suite on Postgres` CI job is a green HARD GATE: **634 passed / 0 failed / 1 skipped / 1 xfailed** on PG16. No remaining test failures. (See CHANGELOG `[Unreleased]` and TEST_FAILURES_TRIAGE.md resolution banner.)
+6. ✅ **Migration-system tests fixed** — re-pinned to real head `047`; offline-SQL test `xfail`ed (documented); obsolete `sql_archive` test removed.
+
 **Current blocking issues:**
-- Full test-suite RE-BASELINE after ALLOWED_HOSTS fix (true pass/fail status of 412 unblocked tests not yet measured)
 - PITR/WAL end-to-end live verification in packaged desktop environment
 
 ---
@@ -31,9 +34,9 @@ This document tracks outstanding work across the Blackbox BOM platform (backend 
 | **Alembic .env fallback** | Bug | HIGH | Backend | ✅ RESOLVED | v2.1 | Fixed. alembic/env.py now reads POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_SERVER from .env via python-dotenv, same pattern as app/core/config.py. |
 | **3 compliance orphan tables** | Bug | HIGH | Backend | ✅ RESOLVED | v2.1 | Fixed. compliance_packs, substance_reference_data, part_composition_declarations now properly modeled in migrations 042-044. |
 | **ALLOWED_HOSTS/testserver misconfig** | Bug | HIGH | Backend | ✅ RESOLVED | v2.1 | Fixed. pytest now allows 'testserver' in ALLOWED_HOSTS. Unblocked ~412 of 414 previously-failing tests. |
-| **Test suite RE-BASELINE (post-ALLOWED_HOSTS)** | Testing | HIGH | Backend | OPEN | v2.1 | Run full pytest suite to measure true pass/fail status of 412 unblocked tests. Current baseline (73 pre-existing stubs) needs re-measurement. |
-| **Test suite SQLite-only (local)** | Infrastructure | HIGH | Backend | OPEN | v2.2 | Local PostgreSQL test runner not yet configured. GitHub Actions runs Postgres CI; dev boxes still use SQLite. Consider docker-compose.test.yml for local Postgres testing. |
-| **~73 pre-existing test failures** | Testing | MEDIUM | Backend | OPEN | v2.1 | Documented as unrelated stubs (see backend/docs/TESTING_AND_VALIDATION.md v1.1.0 baseline). No systematic coverage of enterprise models (ECO, MBOM, Work Orders, Quality). |
+| **Test suite RE-BASELINE (post-ALLOWED_HOSTS)** | Testing | HIGH | Backend | ✅ RESOLVED | v2.1 | Done on real Postgres: `Test Suite on Postgres` CI = **634 passed / 0 failed / 1 skipped / 1 xfailed** (PG16). This is now the authoritative hard gate. |
+| **Test suite SQLite-only (local)** | Infrastructure | MEDIUM | Backend | OPEN | v2.2 | Fast local/dev track is still SQLite. CI now runs the FULL suite on real Postgres (hard gate) + a fresh-install bootstrap job, so PG-only behavior is covered in CI. A local docker-compose.test.yml Postgres runner is still a nice-to-have for pre-push parity. |
+| **~73 pre-existing test failures** | Testing | MEDIUM | Backend | ✅ RESOLVED | v2.1 | 0 failures on the Postgres hard gate. The prior "~73 stubs" were the ALLOWED_HOSTS-masked cascade plus a handful of stale test contracts, all fixed. |
 | **feat/regulated merged** | Integration | HIGH | Backend | ✅ RESOLVED | v2.1 | Merged to master. FDA 21 CFR Part 11 e-signatures + RoHS/REACH substance compliance. Live in v2.1.0. |
 | **feat/zoho-books merged** | Integration | HIGH | Backend | ✅ RESOLVED | v2.1 | Merged to master. Two-way Zoho Books sync (parts/items, vendors/contacts, POs, cost) with conflict resolution engine. Live in v2.1.0. |
 | **feat/polish merged** | Integration | MEDIUM | Frontend | ✅ RESOLVED | v2.1 | Merged to master. Real WCAG-AA dark mode + high-contrast/colorblind a11y modes. Mobile scanner polish. Compose secrets + backup WAL path fixes. Live in v2.1.0. |
@@ -80,11 +83,11 @@ Alembic's default `alembic_version.version_num` column is VARCHAR(32). Migration
 **Fix Applied:**
 - Modified `backend/alembic/env.py` to detect Postgres and auto-widen `alembic_version.version_num` to VARCHAR(255) on first run
 - Added .env fallback support (POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_SERVER)
-- Fresh Postgres installs now succeed; migration chain builds 155 tables without errors
+- Fresh Postgres installs now succeed; migration chain builds 159 tables without errors
 
 **References:**
 - `backend/alembic/env.py` (fixed version with widening logic)
-- Single Alembic head: `041_zoho_books_sync_tables`
+- Single Alembic head: `047_solidworks_integration`
 
 ---
 
@@ -162,19 +165,18 @@ Alembic's default `alembic_version.version_num` column is VARCHAR(32). Migration
 ## Testing & Quality Assurance
 
 ### Test Coverage (v2.1.0)
-**Backend:** 238 tests (app/tests/) + 41 tests (tests/) = **279 total**  
-- **Database:** SQLite locally. PostgreSQL CI in GitHub Actions.
-- **Markers:** `@pytest.mark.requires_postgres` skips 1 test on SQLite; rest pass due to schema compatibility.
-- **ALLOWED_HOSTS fix:** pytest now allows 'testserver'. Unblocked ~412 of 414 previously-failing tests (true pass/fail status pending re-baseline).
-- **Pre-existing failures:** ~73 tests documented as stubs (see backend/docs/TESTING_AND_VALIDATION.md v1.1.0 baseline). Unrelated to current development.
+**Backend:** full suite green on the **Postgres hard gate** — **634 passed / 0 failed / 1 skipped / 1 xfailed** (real PG16, `Test Suite on Postgres` CI job).  
+- **Database:** SQLite for fast local/dev; the FULL suite runs against real PostgreSQL 16 in CI (authoritative hard gate) plus a fresh-install `init_db` bootstrap job.
+- **Skipped (1):** `test_migration_up_down_cycle` (needs a live localhost PG). **xfailed (1):** `test_migration_offline_sql` (offline `--sql` generation unsupported by design).
+- **Pre-existing failures:** none remaining — the ALLOWED_HOSTS-masked cascade and the handful of stale test contracts are all fixed.
 
 **Frontend:** 96 unit tests (Vitest) + **0 E2E tests**  
 - **E2E:** app/tests/e2e/ exists but empty. Playwright configured; no scenarios.
 - **Load testing:** locustfile.py exists; no passing baseline.
 
 ### Test Infrastructure Issues — Priority Fix Needed
-1. **Test suite RE-BASELINE** (CRITICAL) — ~412 tests unblocked by ALLOWED_HOSTS fix. Must run full pytest suite to establish new baseline and measure true pass/fail counts.
-2. **SQLite vs. Postgres divergence** — Local dev uses SQLite (faster); fresh Postgres installs now work but need comprehensive local testing setup (docker-compose.test.yml pending).
+1. ✅ **Test suite RE-BASELINE** — DONE. Full suite runs green on the real-Postgres hard gate (634 passed / 0 failed / 1 skipped / 1 xfailed).
+2. **SQLite vs. Postgres divergence** — Local dev uses SQLite (faster); the full suite + a fresh-install bootstrap now run on real Postgres in CI, so PG-only behavior is covered. A local docker-compose.test.yml runner is still a nice-to-have for pre-push parity.
 3. **Outer test suite not consolidated** — tests/ (function-scoped, slow, 10+ min) should merge with app/tests/ (session-scoped, fast, 4-5 min). Different conftest setups.
 4. **No E2E coverage** — Critical workflows (multi-tenant auth, BOM explosion, PO approval, signature workflows, Zoho sync conflict resolution) not tested end-to-end.
 5. **Load testing baseline missing** — locustfile.py exists; no evidence of passing benchmarks for 500 endpoints, 50 concurrent users, 5-min ramp.

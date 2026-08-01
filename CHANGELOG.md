@@ -5,6 +5,19 @@ All notable changes to the Blackbox BOM Management Tool will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+**Green Postgres hard gate + migration/test hardening.**
+
+### Changed
+- **Postgres CI is now a HARD GATE and passes green.** The full pytest suite runs against a real PostgreSQL 16 service (`Test Suite on Postgres` job): **634 passed / 0 failed / 1 skipped / 1 xfailed**. Session-scoped asyncio loops (required for asyncpg) are passed via `-o` on the CLI so the fast SQLite/dev track keeps function-scoped isolation. A red here blocks merge.
+- Alembic migration head advanced to `047_solidworks_integration` (47 migrations; linear chain …044_compliance_evals → 041_zoho_books → 045 → 046 → 047). Fresh install now builds **159 tables**. Registered the previously-unregistered SolidWorks contract router at `/api/v1/solidworks`.
+
+### Fixed
+- **Migration-system tests** (`test_migrations`, `test_regulated_foundation`, `test_zoho_books_foundation`): chain-topology and fresh-apply tests re-pinned to the real head/targets; `test_migration_offline_sql` marked `xfail` (offline `--sql` generation is unsupported by design — migrations use runtime `inspect()` for conditional DDL); obsolete `test_sql_archive_still_has_originals` removed (the archive convention never existed in-repo).
+- **`get_not_found` smoke tests** (`test_api_keys`, `test_part_vendors`): repointed from a nonexistent `GET /{id}` (which correctly returns 405) to the real id-taking `DELETE /{id}` endpoint that raises 404 for a missing row.
+- **CI config**: fresh-install verify step now tracks the real head (`047`, was hardcoded `041`); pytest-job secret *values* no longer contain the `_WEAK_SECRET_VALUES` substring `"test"` (→ `"suite"`), which `Settings._is_weak_secret` rejects — that rejection made conftest fail to import (pytest exit 4, mis-read as a test failure).
+- **`app/main.py`**: SPA serving now gated strictly on the `SERVE_FRONTEND` flag (removed `dist/` auto-detect), so `GET /` returns the JSON welcome payload in API/test mode.
+
 ## [2.1.0] - 2026-07-19
 **Regulated compliance, Zoho Books integration, polish a11y/mobile, WS7 desktop packaging + auto-update shipped.**
 

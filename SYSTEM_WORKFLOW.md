@@ -681,7 +681,7 @@ graph TD
 
 3. **Schema Bootstrap** (`init_db.py`):
    - Greenfield (no `alembic_version` table):
-     - `Base.metadata.create_all()` (creates 155 tables)
+     - `Base.metadata.create_all()` (creates 159 tables)
      - `alembic stamp head` (records current migration)
    - Existing:
      - `alembic upgrade head` (applies pending migrations)
@@ -1240,7 +1240,7 @@ ORDER BY ts_rank(...) DESC;
 - `alembic/versions/` — Numbered migration scripts
 - `alembic/env.py` — Migration environment config
 - `alembic/alembic.ini` — Fallback DB credentials
-- Current head: `040_postgres_rls_tenant_isolation.py`
+- Current head: `047_solidworks_integration.py`
 
 **Known Issues (documented from Postgres bring-up)**:
 
@@ -1263,7 +1263,7 @@ ORDER BY ts_rank(...) DESC;
    ```
 
 3. **Test Suite Runs on SQLite, Not PostgreSQL**
-   - ~73 pre-existing test failures documented (unrelated stubs)
+   - 0 remaining test failures — full suite green on the Postgres hard gate (634 passed / 0 failed)
    - Postgres-only defects (VARCHAR enforcement, RLS, dialect SQL) not tested
    - **Risk**: Postgres-specific features may have bugs not caught in CI
    - **Mitigation**: Run integration tests on real Postgres before production deploy

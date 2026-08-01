@@ -4,10 +4,9 @@
 
 ## 0. Snapshot
 - **Version:** 2.1.0
-- **Last updated:** 2026-07-19
-- **Content tree (master):** `5c40440355a549cdbc20be6c5673d40d02d3758c` (blackbox == BBF-BOM, byte-identical)
-- **Alembic head:** `041_zoho_books_sync_tables` (single, linear) · fresh install builds **155 tables**
-- **Test baseline:** 471 passing / 93 failed / 24 errored (SQLite suite; post-ALLOWED_HOSTS fix)
+- **Last updated:** 2026-08-01
+- **Alembic head:** `047_solidworks_integration` (single, linear · 47 migrations) · fresh install builds **159 tables**
+- **Test status:** **Postgres CI is a green HARD GATE — 634 passed / 0 failed / 1 skipped / 1 xfailed** on real PG16 (`.github/workflows/postgres-ci.yml`). SQLite remains the fast local/dev track.
 - **State:** feature-complete + published; remaining work is packaging/ops handoffs (see §12)
 
 ## 1. What it is
@@ -37,7 +36,7 @@ backend/
   app/services/*.py           # 18 business-logic services
   app/core/                   # config.py (settings), deps.py, security, tenant_events.py (tenant isolation), backup.py
   app/db/                     # session.py (async engine), base.py (Base + model registry)
-  alembic/                    # env.py + versions/*.py (44 migrations); alembic.ini
+  alembic/                    # env.py + versions/*.py (47 migrations, head 047_solidworks_integration); alembic.ini
   scripts/                    # init_db.py (schema bootstrap), db_backup.py, pitr_restore.py, restore_wizard.py, startup_health_check.py
   app/tests/                  # pytest (SQLite via create_all)
   docker-compose.yml, Dockerfile(.prod), .env (gitignored — real secrets)
@@ -59,7 +58,7 @@ install.ps1 / install.bat / Makefile / docker-compose.yml   # deploy entry point
 ## 6. Database
 - **Multi-tenancy:** primary = app-layer (`app/core/tenant_events.py` auto-filters SELECT, guards UPDATE/DELETE, auto-populates `tenantId` on INSERT). Opt-in Postgres RLS (`ENABLE_RLS`, default off) is defense-in-depth (migration 040).
 - **Schema owner / bootstrap:** `backend/scripts/init_db.py` — greenfield DB → `Base.metadata.create_all()` + `alembic stamp head`; existing DB → `alembic upgrade head`. Wired into the deploy path (Makefile, docker-entrypoint.sh, INSTALL, runbook). **This exists because the historical migration chain can't build from base** (migration 004 references `po_headers`, a `create_all`-era table not formalized until 022).
-- **Migrations:** 44 files in `backend/alembic/versions`; single linear head `041_zoho_books_sync_tables` (chain: 040→041_compliance→041_part11→042_substance→043_composition→044_evaluations→041_zoho). `alembic/env.py` reads `DATABASE_URL` else falls back to `settings.DATABASE_URI`, and widens `alembic_version.version_num` to VARCHAR(255) on Postgres.
+- **Migrations:** 47 files in `backend/alembic/versions`; single linear head `047_solidworks_integration` (chain: 040→041_compliance→041_part11→042_substance→043_composition→044_evaluations→041_zoho→045→046→047; the two `041_*` files thread linearly — not a multi-head split). `alembic/env.py` reads `DATABASE_URL` else falls back to `settings.DATABASE_URI`, and widens `alembic_version.version_num` to VARCHAR(255) on Postgres.
 - **Dev DB:** native Postgres 18 `bom_db` (owner `bom_user`), at head, on `127.0.0.1:5432`. `bom_user` password = the 24-char `POSTGRES_PASSWORD` in `backend/.env`; superuser `postgres` password = `admin` (dev machine only).
 - **Three Postgres-only bugs fixed this cycle** (invisible to SQLite tests): (1) `version_num` VARCHAR(32) truncation at migration 036; (2) env.py ignoring `.env`; (3) `CheckConstraint` raw-SQL camelCase columns unquoted (Postgres folds to lowercase) — fixed in capa/contract/deviation/document models.
 
@@ -77,9 +76,10 @@ install.ps1 / install.bat / Makefile / docker-compose.yml   # deploy entry point
 - **To build the installer:** on a Windows box, install Inno Setup 6, then `python desktop/build.py --skip-frontend` → `desktop/dist/BlackboxBOM-Setup-2.1.0.exe`. Unsigned unless a code-signing cert is set (`CODE_SIGN_PFX`). Full steps: `desktop/DESKTOP_PACKAGING.md`.
 
 ## 9. Testing
-- Suite runs on **SQLite via `create_all`** (`TEST_DATABASE_URL=sqlite+aiosqlite:///...`), not migrations — so Postgres-only defects escape (documented). Baseline **471 passed / 93 failed / 24 errored** after the `ALLOWED_HOSTS`/`testserver` fix (was 109 passing — that one misconfig masked ~412 tests). Remaining 117 are genuine, bounded (see `TEST_FAILURES_TRIAGE.md`).
-- **Postgres-track CI** (`.github/workflows/postgres-ci.yml`) validates a fresh `init_db` bootstrap on a real Postgres service + runs the suite. Needs repo secret **`CI_PG_PASSWORD`**.
-- `app/core/config.py` `_is_weak_secret` **hard-rejects any SECRET_KEY containing a dictionary word** ("secret","test",…) regardless of entropy — CI/test secrets must avoid those substrings.
+- **Postgres CI is the authoritative gate and is a HARD GATE that passes green:** `.github/workflows/postgres-ci.yml` runs (a) a fresh `init_db` bootstrap on a real Postgres 16 service and (b) the **full pytest suite against real PG16** — last result **634 passed / 0 failed / 1 skipped / 1 xfailed** (session-scoped asyncio loops via `-o`, required for asyncpg). A red here blocks merge. Uses inline throwaway CI creds (a disposable `bom_test_db`); **no repo secret required**.
+  - The 1 skip = `test_migration_up_down_cycle` (needs a live localhost PG). The 1 xfail = `test_migration_offline_sql` (offline `--sql` generation is unsupported by design — several migrations call runtime `inspect()` for conditional DDL; `init_db` is the supported bootstrap).
+- SQLite (`TEST_DATABASE_URL=sqlite+aiosqlite:///...`, `create_all`) is the **fast local/dev track** — same tests, function-scoped loops, no Postgres service needed. Postgres-only behavior (FK/NOT-NULL enforcement, identity sequences, full-text search, `::jsonb`, `RETURNING`, NUMERIC precision) only truly executes on the PG gate above.
+- `app/core/config.py` `_is_weak_secret` **hard-rejects any SECRET_KEY containing a `_WEAK_SECRET_VALUES` substring** ("secret","test","admin",…, stripping `-_!`) regardless of entropy — so CI/test secret *values* must avoid those substrings (the CI jobs use "suite"/"track", not "test"). A violation makes conftest fail to import → pytest exits 4 (looks like a usage error, not a test failure).
 
 ## 10. How to build & run
 - **Dev backend:** `cd backend; python -m uvicorn app.main:app --host 127.0.0.1 --port 8000` (uses `.env`→bom_db). Add `SERVE_FRONTEND=1 FRONTEND_DIST_DIR=../frontend/dist` to serve the built UI from the same process.
@@ -94,9 +94,8 @@ install.ps1 / install.bat / Makefile / docker-compose.yml   # deploy entry point
 
 ## 12. Open items / what's on the user's side
 - **BBF-BOM = primary going forward** (this repo's `origin` being pointed at BBF-BOM; git identity = Sumanth; no AI co-author trailers).
-- **Add repo secret `CI_PG_PASSWORD`** (GitHub Settings) so Postgres-CI passes.
+- **Enable branch protection** requiring the `Test Suite on Postgres` check (and `Fresh Install on Postgres`) before merge to `master` — the workflow is already a hard gate (fails the run); a GitHub branch-protection rule makes it *block* the merge button. User-only (GitHub Settings).
 - **Build the signed/unsigned installer** on a Windows box (§8).
-- **~117 remaining test failures** — future triage/fix pass (non-blocking).
 - **Live integration creds:** Zoho OAuth, ClickUp/Cliq tokens, SolidWorks machine.
 - **Optional:** code-signing cert; extend autosave to more screens; full PITR replay test in the packaged app.
 
