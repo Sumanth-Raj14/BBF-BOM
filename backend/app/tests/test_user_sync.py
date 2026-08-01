@@ -8,9 +8,14 @@ async def test_user_sync_list(client, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_user_sync_create(client, auth_headers):
-    resp = await client.post("/api/v1/user-sync/data-store", headers=auth_headers, json={"name": "test"})
-    assert resp.status_code in (201, 200, 401, 403, 422)
+async def test_user_sync_upsert(client, auth_headers):
+    # Data-store writes are PUT /data-store/{key}, not POST /data-store.
+    resp = await client.put(
+        "/api/v1/user-sync/data-store/testkey",
+        headers=auth_headers,
+        json={"data_value": {"x": 1}},
+    )
+    assert resp.status_code in (200, 201, 401, 403, 422)
 
 
 @pytest.mark.asyncio

@@ -8,9 +8,10 @@ async def test_sessions_list(client, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_sessions_create(client, auth_headers):
-    resp = await client.post("/api/v1/sessions/sessions", headers=auth_headers, json={"name": "test"})
-    assert resp.status_code in (201, 200, 401, 403, 422)
+async def test_sessions_stats(client, auth_headers):
+    # There is no session-create endpoint; sessions are read/revoke only.
+    resp = await client.get("/api/v1/sessions/sessions/stats", headers=auth_headers)
+    assert resp.status_code in (200, 401, 403)
 
 
 @pytest.mark.asyncio
