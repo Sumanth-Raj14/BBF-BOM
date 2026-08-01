@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import select
 
 from app.core.tenant_context import TenantContext
+from app.tests.conftest import no_tenant_filter
 from app.models.bom import BOM, BOMItem
 from app.models.bom_closure import BomClosure
 from app.models.part import Part
@@ -148,12 +149,16 @@ async def test_closure_rows_scoped_by_tenant(db_session, test_tenant):
     finally:
         TenantContext.reset(token)
 
-    rows_a = (
-        await db_session.execute(select(BomClosure).where(BomClosure.tenantId == tenant_a_id))
-    ).scalars().all()
-    rows_b = (
-        await db_session.execute(select(BomClosure).where(BomClosure.tenantId == tenant_b_id))
-    ).scalars().all()
+    # Deliberate cross-tenant verification: this asserts a DB-level fact about
+    # BOTH tenants' closure rows, so it must bypass the tenant SELECT filter
+    # (which would otherwise AND in the active tenant and empty out rows_b).
+    with no_tenant_filter():
+        rows_a = (
+            await db_session.execute(select(BomClosure).where(BomClosure.tenantId == tenant_a_id))
+        ).scalars().all()
+        rows_b = (
+            await db_session.execute(select(BomClosure).where(BomClosure.tenantId == tenant_b_id))
+        ).scalars().all()
 
     assert len(rows_a) > 0
     assert len(rows_b) > 0

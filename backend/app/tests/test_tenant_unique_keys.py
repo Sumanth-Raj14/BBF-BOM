@@ -50,6 +50,26 @@ async def _create_under_tenant(db_session, tid, obj):
     return obj
 
 
+async def _execute_across_tenants(db_session, stmt):
+    """Run `stmt` with tenant SELECT filtering disabled.
+
+    These tests assert a DATABASE-level fact -- that the per-tenant unique
+    constraints allow the same business key under two different tenants -- so
+    the verification query must be able to see both. Clearing the tenant
+    context is the isolation listener's documented bypass (it skips filtering
+    when no tenant is set), the same path system/admin queries take.
+
+    Before the A6 fix these queries returned both rows without any bypass,
+    because the SELECT filter was silently dead. That was the bug, not the
+    behaviour these tests meant to assert.
+    """
+    token = TenantContext.set(tenant_id=None)
+    try:
+        return await db_session.execute(stmt)
+    finally:
+        TenantContext.reset(token)
+
+
 # ---------------------------------------------------------------------------
 # Part.pn
 # ---------------------------------------------------------------------------
@@ -68,7 +88,7 @@ async def test_same_pn_different_tenants_both_persist(
 
     from sqlalchemy import select
 
-    result = await db_session.execute(select(Part).where(Part.pn == "DUP-PN-001"))
+    result = await _execute_across_tenants(db_session, select(Part).where(Part.pn == "DUP-PN-001"))
     rows = result.scalars().all()
     assert len(rows) == 2
     assert {r.tenantId for r in rows} == {tenant_id, second_tenant.id}
@@ -105,7 +125,7 @@ async def test_same_bom_number_different_tenants_both_persist(
 
     from sqlalchemy import select
 
-    result = await db_session.execute(select(BOM).where(BOM.bom_number == "DUP-BOM-001"))
+    result = await _execute_across_tenants(db_session, select(BOM).where(BOM.bom_number == "DUP-BOM-001"))
     rows = result.scalars().all()
     assert len(rows) == 2
     assert {r.tenantId for r in rows} == {tenant_id, second_tenant.id}
@@ -149,7 +169,7 @@ async def test_same_eco_number_different_tenants_both_persist(
 
     from sqlalchemy import select
 
-    result = await db_session.execute(select(EcoHeader).where(EcoHeader.eco_number == "DUP-ECO-001"))
+    result = await _execute_across_tenants(db_session, select(EcoHeader).where(EcoHeader.eco_number == "DUP-ECO-001"))
     rows = result.scalars().all()
     assert len(rows) == 2
     assert {r.tenantId for r in rows} == {tenant_id, second_tenant.id}
@@ -194,7 +214,7 @@ async def test_same_po_number_different_tenants_both_persist(
 
     from sqlalchemy import select
 
-    result = await db_session.execute(select(POHeader).where(POHeader.poNumber == "DUP-PO-001"))
+    result = await _execute_across_tenants(db_session, select(POHeader).where(POHeader.poNumber == "DUP-PO-001"))
     rows = result.scalars().all()
     assert len(rows) == 2
     assert {r.tenantId for r in rows} == {tenant_id, second_tenant.id}
@@ -241,7 +261,8 @@ async def test_same_serial_number_different_tenants_both_persist(
 
     from sqlalchemy import select
 
-    result = await db_session.execute(
+    result = await _execute_across_tenants(
+        db_session,
         select(SerialNumber).where(SerialNumber.serialNumber == "DUP-SN-001")
     )
     rows = result.scalars().all()
