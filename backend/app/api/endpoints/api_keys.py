@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user
 from app.core.security import get_password_hash
 from app.db.session import get_db
+from app.models.api_key import ApiKey
 from app.models.user import User
 
 router = APIRouter()
@@ -54,24 +55,21 @@ async def create_api_key(
 
         expires_at_val = datetime.now(UTC) + timedelta(days=body.expires_in_days)
 
-    import json
-
-    scopes_json = json.dumps(body.scopes or ["read", "write"])
-
-    await db.execute(
-        text(
-            "INSERT INTO api_keys (user_id, name, description, key_hash, key_prefix, scopes, expires_at) VALUES (:uid, :name, :desc, :kh, :kp, :scopes::json, :expires_at)"
-        ),
-        {
-            "uid": user.id,
-            "name": body.name,
-            "desc": body.description,
-            "kh": key_hash,
-            "kp": key_prefix,
-            "scopes": scopes_json,
-            "expires_at": expires_at_val,
-        },
+    # Use the ORM instead of raw SQL: SQLAlchemy binds the JSON `scopes` value
+    # correctly per dialect. The old raw ":scopes::json" cast broke asyncpg's
+    # named->positional parameter conversion on PostgreSQL ("syntax error at or
+    # near ':'"); the ORM also populates the tenant-scoped tenantId.
+    api_key = ApiKey(
+        user_id=user.id,
+        tenantId=user.tenantId,
+        name=body.name,
+        description=body.description,
+        key_hash=key_hash,
+        key_prefix=key_prefix,
+        scopes=body.scopes or ["read", "write"],
+        expires_at=expires_at_val,
     )
+    db.add(api_key)
     await db.commit()
     return {
         "key": raw_key,
