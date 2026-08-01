@@ -62,7 +62,7 @@ async def test_first_registration_bootstraps_new_tenant(client, db_session):
 
 @pytest.mark.asyncio
 async def test_opt_in_self_signup_grants_tenant_admin_not_global_superuser(
-    client, test_tenant, db_session, monkeypatch
+    client, test_tenant, db_session, monkeypatch, no_tenant_context
 ):
     """Security regression test.
 

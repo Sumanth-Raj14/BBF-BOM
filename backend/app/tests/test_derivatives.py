@@ -239,8 +239,16 @@ async def user_t2(db_session, second_tenant):
         tenantId=second_tenant.id,
     )
     db_session.add(user)
-    await db_session.commit()
-    await db_session.refresh(user)
+    # Commit+refresh under tenant 2: refresh() issues a SELECT, and the tenant
+    # filter (autouse context = tenant 1) would hide this row, failing with
+    # "Could not refresh instance". Mirrors production, where a request only
+    # writes rows for its own tenant.
+    token = TenantContext.set(tenant_id=second_tenant.id)
+    try:
+        await db_session.commit()
+        await db_session.refresh(user)
+    finally:
+        TenantContext.reset(token)
     return user
 
 

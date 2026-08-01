@@ -54,10 +54,18 @@ async def _make_user(db_session, tenant_id, role, email, username, password="tes
         tenantId=tenant_id,
     )
     db_session.add(user)
-    await db_session.commit()
-    await db_session.refresh(user)
-    await db_session.execute(user_roles.insert().values(user_id=user.id, role_id=role.id))
-    await db_session.commit()
+    # Commit+refresh under the user's OWN tenant: refresh() issues a SELECT and
+    # the tenant filter would hide a row belonging to another tenant, failing
+    # with "Could not refresh instance". Mirrors production, where a request
+    # only ever writes rows for its own tenant.
+    token = TenantContext.set(tenant_id=tenant_id)
+    try:
+        await db_session.commit()
+        await db_session.refresh(user)
+        await db_session.execute(user_roles.insert().values(user_id=user.id, role_id=role.id))
+        await db_session.commit()
+    finally:
+        TenantContext.reset(token)
     return user
 
 
