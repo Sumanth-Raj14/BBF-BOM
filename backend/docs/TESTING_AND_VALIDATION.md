@@ -1,14 +1,16 @@
 # Testing & Validation
 
+> **Current status (2026-08-01):** the full backend suite is a green **hard gate on real PostgreSQL 16** in CI (`.github/workflows/postgres-ci.yml` → `Test Suite on Postgres`): **634 passed / 0 failed / 1 skipped / 1 xfailed**, plus a fresh-install `init_db` bootstrap job. Schema head is `047_solidworks_integration` (47 migrations, 159 tables). SQLite (below) remains the fast local/dev track; the per-suite counts below are the older v1.1.0 baseline, kept for reference.
+
 ## Test Suites
 
 ### Inner Tests (`app/tests/`)
-- **238 tests** (v1.1.0 baseline), 1 skipped
+- **238 tests** (v1.1.0 baseline; the suite has grown since — see current-status note above), 1 skipped
 - Run: `python -m pytest app/tests/ --tb=short -q`
-- SQLite backend (`sqlite+aiosqlite:///./test.db`)
+- SQLite backend for fast local/dev (`sqlite+aiosqlite:///./test.db`); the **full suite runs on real PostgreSQL 16 in CI** (the authoritative gate — asyncpg needs session-scoped asyncio loops, passed via `-o` on the CI CLI so local stays function-scoped)
 - Session-scoped engine fixture (tables created once per session)
 - Autouse `clean_db` fixture deletes data after each test
-- Duration: ~4-5 minutes
+- Duration: ~4-5 minutes (SQLite local); ~10 min full suite on Postgres CI
 
 ### Outer Tests (`tests/`) — Pending Consolidation
 - **41 tests**
