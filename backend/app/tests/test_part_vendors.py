@@ -14,8 +14,10 @@ async def test_part_vendors_create(client, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_part_vendors_get_not_found(client, auth_headers):
-    resp = await client.get("/api/v1/part-vendors/99999", headers=auth_headers)
+async def test_part_vendors_delete_not_found(client, auth_headers):
+    # There is no GET-by-id endpoint (GET /{id} -> 405). DELETE /{link_id} is the
+    # id-taking route; it raises 404 for a missing link.
+    resp = await client.delete("/api/v1/part-vendors/99999", headers=auth_headers)
     assert resp.status_code in (404, 401, 403)
 
 
