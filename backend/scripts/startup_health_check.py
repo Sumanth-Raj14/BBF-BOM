@@ -114,7 +114,9 @@ async def check_database() -> dict:
                     [
                         "pg_isready",
                         "-h",
-                        db_info[2] if db_info[2] else "localhost",
+                        # inet_server_addr() comes back as an IPv4Address via asyncpg;
+                        # subprocess needs a str (cf. the str() on the same value at line ~39).
+                        str(db_info[2]) if db_info[2] else "localhost",
                         "-p",
                         str(db_info[3]),
                     ],
