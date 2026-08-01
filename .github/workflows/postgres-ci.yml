@@ -153,10 +153,11 @@ jobs:
     # tolerates or can't parse. This is the track where the ~14 SQLite-only
     # "dialect" failures are expected to PASS.
     #
-    # Non-blocking for now: a few tests (SolidWorks contract stubs) are still
-    # unimplemented and fail on any DB. Flip `continue-on-error` off to make
-    # this a hard gate once those are resolved or explicitly skipped.
-    continue-on-error: true
+    # HARD GATE: the full Postgres suite must pass. The former SQLite-only
+    # "dialect" failures + real Postgres-exposed bugs (tenant id sequence, FK
+    # enforcement, BOM explosion ordering) are fixed; raw-alembic-from-empty
+    # migration tests are skipped-with-reason (init_db is the supported bootstrap,
+    # covered by the fresh-install-postgres job). A red here blocks the merge.
     defaults:
       run:
         working-directory: backend
