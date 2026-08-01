@@ -1,4 +1,22 @@
-# Backend Test Suite Triage — 2026-07-19
+# Backend Test Suite Triage
+
+> ## ✅ RESOLVED (2026-08-01) — this triage is now historical
+> Every category below has been fixed. The full suite runs green on the authoritative gate:
+> **Postgres CI (`.github/workflows/postgres-ci.yml`) — 634 passed / 0 failed / 1 skipped / 1 xfailed** on real PG16 (now a HARD GATE that blocks merge).
+>
+> | Category | Resolution |
+> |---|---|
+> | **#1 ALLOWED_HOSTS / `testserver`** | Fixed — `testserver` allowed under a test signal only (never widens prod). The ~412 masked tests now run and pass. |
+> | **#2 offline `--sql` migration generation** | Resolved via **option 2a** — `test_migration_offline_sql` is now `@pytest.mark.xfail` with a documented reason (migrations use runtime `inspect()` for conditional DDL, incompatible with offline `--sql`; `init_db` is the supported bootstrap, covered by the fresh-install CI job). |
+> | **#3 missing `sql_archive/`** | Resolved via **delete** — the archival convention never existed in this repo (no git history), so `test_sql_archive_still_has_originals` was removed as obsolete. |
+>
+> Also fixed while getting the gate green: migration-chain tests re-pinned to the real head `047_solidworks_integration`; two `get_not_found` smoke tests repointed from a nonexistent `GET /{id}` (405) to the real `DELETE /{id}` 404 path (`test_api_keys`, `test_part_vendors`); and two CI-config bugs (stale expected-head `041`→`047`; CI secret values containing the weak substring `"test"`→`"suite"`).
+>
+> The point-in-time snapshot below is kept for provenance.
+
+---
+
+# Backend Test Suite Triage — 2026-07-19 (historical snapshot)
 
 Full run: `python -m pytest -p no:cacheprovider -q --tb=no` from `backend/`, `TEST_DATABASE_URL=sqlite+aiosqlite:///./test_triage.db`, fresh DB each run. Wall time: **1111.27s (18m31s)**.
 

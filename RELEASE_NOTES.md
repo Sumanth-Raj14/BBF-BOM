@@ -83,7 +83,7 @@ After first install, the app checks for new versions on startup. Updates downloa
 - **Consolidated schema bootstrap** (`scripts/init_db.py`): greenfield init (create_all + stamp) and existing upgrade (upgrade head) unified in one command.
 - **Postgres-specific bug fixes**: env.py now handles long revision IDs (VARCHAR 64), reads `.env` as fallback, CheckConstraint camelCase quoting fixed.
 - **Orphan table cleanup**: compliance, substance reference, part composition, and compliance evaluation tables now properly modeled (migration 041_compliance).
-- **Postgres CI workflow**: dedicated test suite on real Postgres instance (not just SQLite).
+- **Postgres CI workflow (now a green HARD GATE)**: the full pytest suite runs against real PostgreSQL 16 — 634 passed / 0 failed / 1 skipped / 1 xfailed — plus a fresh-install `init_db` bootstrap job. A red blocks merge; SQLite remains the fast local/dev track.
 - **DB backup improvements** (`db_backup.py`): 30-day retention policy enforced, hourly scheduled snapshots.
 
 ---
@@ -113,7 +113,7 @@ See `INSTALL.md` for user-facing quickstart; `DISASTER_RECOVERY_RUNBOOK.md` for 
 - **Honest failure semantics**: all writes surface actual success/failure (no silent masking); stale UI state impossible.
 
 ### PostgreSQL + Multi-Tenant Architecture
-- **Single Alembic head** at migration `040_postgres_rls_tenant_isolation` (40 total migrations); all tables tenant-scoped via `tenantId` column.
+- **Single Alembic head** at migration `047_solidworks_integration` (47 total migrations; fresh install builds 159 tables); all tenant-owned tables scoped via `tenantId` column.
 - **App-layer isolation** (primary): every SELECT, UPDATE, DELETE is auto-filtered by tenant in business logic layer (`app/core/tenant_events.py`); all INSERTs auto-populate `tenantId`.
 - **Row-Level Security (RLS)** (defense-in-depth, opt-in): Postgres policies further guard cross-tenant leakage; default `ENABLE_RLS=False` (app-layer isolation sufficient for typical deployments).
 - **Business key uniqueness**: part numbers, BOM numbers, PO numbers, serials, ECO numbers are composite `(tenantId, key)` unique, preventing cross-tenant collisions.

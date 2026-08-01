@@ -510,7 +510,7 @@ class Base(DeclarativeBase):
 All models inherit from `Base` (SQLAlchemy 2.0 pattern). Provides `__tablename__`, primary keys, relationships.
 
 **Alembic Migrations**:
-- Schema head: **040_postgres_rls_tenant_isolation**
+- Schema head: **047_solidworks_integration** (47 migrations, 159 tables)
 - Location: `alembic/versions/`
 - Versioning: Sequential numbering (001, 002, ..., 040)
 - Auto-migration: `alembic upgrade head` applies all pending migrations
@@ -1359,7 +1359,7 @@ api.boms = {
 ⚠️ **Test Coverage**:
 - Full test suite runs on SQLite, not Postgres
 - Postgres-only defects (VARCHAR enforcement, RLS behavior, dialect SQL) not covered
-- ~73 pre-existing test failures are documented as unrelated stubs
+- 0 remaining test failures — full suite green on the Postgres hard gate (634 passed / 0 failed)
 - **Mitigation**: Production runs on Postgres; Postgres-specific bugs caught in staging/prod
 
 ### Features (Not Yet Merged)

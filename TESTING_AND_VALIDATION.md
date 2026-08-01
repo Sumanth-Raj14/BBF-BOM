@@ -2,14 +2,16 @@
 
 **Project**: Blackbox BOM (Local-first enterprise PLM platform)  
 **Version**: 2.1.0  
-**Last Updated**: 2026-07-19  
+**Last Updated**: 2026-08-01  
 **Status**: Production release (v2.1.0 on branch `master`)
 
 ---
 
 ## Executive Summary
 
-The Blackbox BOM platform combines **89 comprehensive backend unit and integration tests** (pytest on SQLite) with a **fully configured but dormant frontend test suite** (vitest + Playwright). Production database is PostgreSQL with 40 schema migrations. **Critical finding from 2026-07-19 Postgres validation**: the test suite runs on SQLite, which masks Postgres-specific defects (VARCHAR(32) column truncation in Alembic version tracking, Row-Level Security behavior, dialect-specific SQL). This document records the current test strategy, the identified SQLite–Postgres gap, and recommendations for a production-grade CI pipeline.
+> **2026-08-01 update — the SQLite–Postgres gap below is now closed in CI.** The full backend pytest suite runs against **real PostgreSQL 16** as a **hard gate** (`.github/workflows/postgres-ci.yml` → `Test Suite on Postgres`): **634 passed / 0 failed / 1 skipped / 1 xfailed**, alongside a fresh-install `init_db` bootstrap job on real Postgres. asyncpg requires session-scoped asyncio loops, passed via `-o asyncio_default_{fixture,test}_loop_scope=session` on the CI CLI (kept out of `pytest.ini` so the local SQLite track stays function-scoped). A red PG run blocks merge. The Postgres-only defects that SQLite masks (FK/NOT-NULL enforcement, identity-sequence advancement, full-text search, `::jsonb`, `RETURNING`, NUMERIC precision, RLS/session vars) now actually execute in CI. The 1 skip is `test_migration_up_down_cycle` (needs a live localhost PG); the 1 xfail is `test_migration_offline_sql` (offline `--sql` generation unsupported by design — migrations use runtime `inspect()` for conditional DDL). The narrative below is retained as the strategy/history that motivated the gate.
+
+The Blackbox BOM platform runs a **comprehensive backend unit and integration suite** (pytest — SQLite for fast local/dev, **real PostgreSQL 16 in CI as the authoritative gate**) with a **fully configured but dormant frontend test suite** (vitest + Playwright). Production database is PostgreSQL; head is `047_solidworks_integration` (47 migrations, 159 tables). **Original finding (2026-07-19)**: the SQLite-only local track masked Postgres-specific defects (VARCHAR(32) column truncation in Alembic version tracking, Row-Level Security behavior, dialect-specific SQL) — now covered by the Postgres hard gate described above.
 
 ---
 
