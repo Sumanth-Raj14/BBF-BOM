@@ -1,5 +1,5 @@
 import PropTypes from "prop-types";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { __t } from "../../i18n";
 import { INR, Icon } from "../../globals";
@@ -7,7 +7,9 @@ import { Modal } from "../ui/Modal.jsx";
 import { Button } from "../ui/Button.jsx";
 import { DataTable } from "../ui/DataTable.jsx";
 import { StatusPill } from "../ui/Badge.jsx";
-import { EmptyState } from "../ui/Feedback.jsx";
+import { EmptyState, Spinner } from "../ui/Feedback.jsx";
+import { api } from "../../../api.js";
+import { toast } from "../../utils/toast";
 
 const FILTERS = [
   ["all", "All"],
@@ -54,43 +56,93 @@ function Trend({ values, dir }) {
 }
 
 function PriceAlertsModal({ open, onClose }) {
-  const [alerts] = useState([
-    {
-      pn: "EL-PSU-240W",
-      name: "Power Supply 240W",
-      vendor: "Mean Well",
-      base: 84.0,
-      current: 92.5,
-      pct: 10.1,
-      dir: "up",
-      trend: [84, 85, 84, 86, 88, 90, 92.5],
-      status: "active",
-    },
-    {
-      pn: "EL-MCU-STM32H7",
-      name: "STM32H743 MCU",
-      vendor: "STMicro",
-      base: 18.5,
-      current: 22.8,
-      pct: 23.2,
-      dir: "up",
-      trend: [18.5, 19.2, 20.0, 20.8, 21.5, 22.2, 22.8],
-      status: "active",
-    },
-    {
-      pn: "HW-FAS-M3-08",
-      name: "M3x8 Screw A2",
-      vendor: "McMaster",
-      base: 0.08,
-      current: 0.07,
-      pct: -12.5,
-      dir: "down",
-      trend: [0.08, 0.08, 0.075, 0.075, 0.07, 0.07, 0.07],
-      status: "resolved",
-    },
-  ]);
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [filter, setFilter] = useState("all");
   const [threshold, setThreshold] = useState(5);
+
+  // Derived from real /price-history records (grouped per part, oldest vs.
+  // newest recorded price). There is no backend concept of an alert being
+  // "resolved"/dismissed yet — every computed entry is reported as "active"
+  // so the Resolved filter honestly returns empty instead of fabricating a
+  // resolution state.
+  useEffect(() => {
+    if (!open) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    (async () => {
+      try {
+        const history = await api.priceHistory.list({ per_page: 500 });
+        const records = Array.isArray(history?.items) ? history.items : [];
+
+        const byPart = new Map();
+        for (const rec of records) {
+          if (rec == null || rec.partId == null || rec.price == null) continue;
+          const list = byPart.get(rec.partId) || [];
+          list.push(rec);
+          byPart.set(rec.partId, list);
+        }
+        // Only parts with 2+ recorded price points have a real change to show.
+        const partIds = [...byPart.keys()].filter(
+          (id) => byPart.get(id).length >= 2,
+        );
+
+        const parts = await Promise.all(
+          partIds.map((id) => api.parts.get(id).catch(() => null)),
+        );
+        const partById = new Map(partIds.map((id, i) => [id, parts[i]]));
+
+        const computed = partIds
+          .map((id) => {
+            const recs = byPart
+              .get(id)
+              .slice()
+              .sort(
+                (a, b) =>
+                  new Date(a.effectiveDate || a.recordedAt) -
+                  new Date(b.effectiveDate || b.recordedAt),
+              );
+            const base = Number(recs[0].price);
+            const current = Number(recs[recs.length - 1].price);
+            const trend = recs.map((r) => Number(r.price)).filter(Number.isFinite);
+            if (!Number.isFinite(base) || !Number.isFinite(current) || base === 0) {
+              return null;
+            }
+            const part = partById.get(id);
+            return {
+              key: id,
+              pn: part?.pn || `Part #${id}`,
+              name: part?.name || "—",
+              vendor: part?.vendor || "—",
+              base,
+              current,
+              pct: ((current - base) / base) * 100,
+              dir: current >= base ? "up" : "down",
+              trend,
+              status: "active",
+            };
+          })
+          .filter(Boolean);
+
+        if (!cancelled) setAlerts(computed);
+      } catch (e) {
+        if (!cancelled) {
+          setAlerts([]);
+          setError(e?.message || "Failed to load price alerts");
+          toast(`Failed to load price alerts: ${e?.message || "unknown error"}`, {
+            kind: "error",
+          });
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   if (!open) return null;
 
@@ -244,18 +296,38 @@ function PriceAlertsModal({ open, onClose }) {
           ))}
         </div>
       </div>
-      <DataTable
-        columns={columns}
-        rows={filtered}
-        getRowKey={(r) => r.pn}
-        ariaLabel="Price alerts"
-        empty={
-          <EmptyState
-            title="No alerts"
-            message="No alerts matching filters"
-          />
-        }
-      />
+      {loading && (
+        <div className="text-center" style={{ padding: 60 }}>
+          <Spinner size="lg" label="Loading price alerts" />
+          <div className="font-mono fs-11 fg-3 mt-14" aria-hidden="true">
+            Loading price alerts…
+          </div>
+        </div>
+      )}
+      {!loading && error && (
+        <EmptyState
+          title="Couldn't load price alerts"
+          message={error}
+        />
+      )}
+      {!loading && !error && (
+        <DataTable
+          columns={columns}
+          rows={filtered}
+          getRowKey={(r) => r.key}
+          ariaLabel="Price alerts"
+          empty={
+            <EmptyState
+              title="No alerts"
+              message={
+                alerts.length === 0
+                  ? "No parts have more than one recorded price point yet, so there's no price change to alert on. Record prices via purchase orders or quotes to start tracking."
+                  : "No alerts matching filters"
+              }
+            />
+          }
+        />
+      )}
     </Modal>
   );
 }

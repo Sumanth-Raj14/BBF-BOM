@@ -5,6 +5,7 @@ import { storage } from "../utils/storage.js";
 import PropTypes from "prop-types";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import { api } from "../../api.js";
 // Dark mode removed — the app is light-only. A real WCAG-AA dark theme is a
 // later build; the previous setTheme/toggleTheme + prefers-color-scheme
 // auto-apply added a `.dark` class with no matching token set (dead/broken).

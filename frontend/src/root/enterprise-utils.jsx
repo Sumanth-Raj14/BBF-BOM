@@ -333,6 +333,26 @@ export const keyboardShortcuts = {
 };
 window.keyboardShortcuts = keyboardShortcuts;
 
+// ============ ACTIVE-EDITOR SAVE REGISTRY ============
+// Screens that own a real, persisting "Save" action (e.g. the BOM editor's
+// Save button, which calls the actual bomEnterpriseAPI.items.* endpoints)
+// can register their save function here so the global Ctrl+S shortcut below
+// triggers real persistence instead of a decorative toast. Register on
+// mount, unregister on unmount; the most recently registered handler is
+// treated as the active editor. With nothing registered, Ctrl+S is a no-op
+// — no fabricated "saved" confirmation is shown for work that was never
+// actually persisted.
+const _saveHandlers = [];
+export function registerSaveHandler(fn) {
+  if (typeof fn === "function") _saveHandlers.push(fn);
+}
+export function unregisterSaveHandler(fn) {
+  const i = _saveHandlers.lastIndexOf(fn);
+  if (i !== -1) _saveHandlers.splice(i, 1);
+}
+window.registerSaveHandler = registerSaveHandler;
+window.unregisterSaveHandler = unregisterSaveHandler;
+
 // Register default shortcuts
 keyboardShortcuts.register(
   "ctrl+k",
@@ -343,9 +363,19 @@ keyboardShortcuts.register(
 );
 keyboardShortcuts.register(
   "ctrl+s",
-  (e) => {
+  async (e) => {
     e.preventDefault();
-    toast(__t("enterprise.bomSaved") || "BOM saved", { kind: "success" });
+    const handler = _saveHandlers[_saveHandlers.length - 1];
+    if (!handler) return; // No active editor registered a save handler — nothing to persist.
+    try {
+      await handler();
+      toast(__t("enterprise.bomSaved") || "BOM saved", { kind: "success" });
+    } catch (err) {
+      toast(
+        err?.message || __t("enterprise.saveFailed") || "Save failed",
+        { kind: "error" },
+      );
+    }
   },
   __t("enterprise.shortcutSaveBom") || "Save current BOM",
 );

@@ -2,6 +2,9 @@ import PropTypes from "prop-types";
 import { Icon } from "../../globals";
 import { Button, Textarea } from "../ui";
 
+const AI_NOT_CONFIGURED_TEXT =
+  "AI backend not configured. Conversational assistance isn't available yet — this workspace doesn't have a chat/LLM endpoint wired up. You can still use the dedicated AI tools (demand forecast, interchangeability, validation) elsewhere in the app.";
+
 function AIAssistant({ open, onClose }) {
   const [messages, setMessages] = React.useState([
     {
@@ -35,28 +38,11 @@ function AIAssistant({ open, onClose }) {
     setMessages((m) => [...m, { role: "user", text }]);
     setInput("");
     setLoading(true);
-    const mockReply = (q) => {
-      const l = q.toLowerCase();
-      if (/cost|budget|spend/.test(l))
-        return "ATLAS BOM cost is ₹4,218 (+2.2% vs last rev). Workspace YTD spend ₹1.84 Cr against ₹5 Cr budget — 36.8% allocated.";
-      if (/risk|supply|delay/.test(l))
-        return "3 supply risks today: EL-BMS-12S lead time crept 28→35d (Daly, CN), HW-FAS-M3-08 has a 95% duplicate match.";
-      if (/vendor|supplier/.test(l))
-        return "14 vendors active across 6 countries. Top scorer: McMaster (A+, 99% on-time).";
-      if (/lead.*time|deliver/.test(l))
-        return "Avg lead time across active BOM is 21 days. Critical path is EL-MCU-STM32H7 at 42 days.";
-      return "I don't have a precise answer for that yet. Try asking about cost, vendors, lead times, supply risk, or duplicates.";
-    };
-    try {
-      const reply = window.aiAssistant?.complete
-        ? await window.aiAssistant.complete({
-            messages: [{ role: "user", content: text }],
-          })
-        : mockReply(text);
-      setMessages((m) => [...m, { role: "assistant", text: reply }]);
-    } catch {
-      setMessages((m) => [...m, { role: "assistant", text: mockReply(text) }]);
-    }
+    // No conversational AI/chat backend exists in this workspace (checked
+    // api.aiAPI: only demand-forecast, interchangeability, and validation
+    // endpoints are implemented — none accept free-form chat). Rather than
+    // fabricate an answer, tell the user honestly that it isn't wired up.
+    setMessages((m) => [...m, { role: "assistant", text: AI_NOT_CONFIGURED_TEXT }]);
     setLoading(false);
   };
 

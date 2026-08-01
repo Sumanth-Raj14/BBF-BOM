@@ -38,6 +38,15 @@ async def test_analytics_categories(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_analytics_inflation(client, auth_headers):
+    resp = await client.get("/api/v1/analytics/inflation", headers=auth_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "categories" in data
+    assert isinstance(data["categories"], list)
+
+
+@pytest.mark.asyncio
 async def test_analytics_vendor_scorecards(client, auth_headers):
     resp = await client.get("/api/v1/analytics/vendor-scorecards", headers=auth_headers)
     assert resp.status_code == 200
