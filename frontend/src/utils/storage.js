@@ -21,6 +21,11 @@ export const KEYS = {
   THEME: "__bbox_theme",
   A11Y: "__bbox_a11y",
   DRAFT_PREFIX: "__bbox_draft_",
+  BOM_ROWS: "__bbox_bom_rows",
+  PO_DRAFT: "__bbox_po_draft",
+  COMMENTS: "__bbox_comments",
+  APPROVALS: "__bbox_approvals",
+  WORK_ORDERS: "__bbox_work_orders",
 };
 
 function get(key, fallback = null) {
@@ -247,5 +252,40 @@ export const storage = {
         return [];
       }
     },
+  },
+
+  // Local-first persistence domains for editor / collaboration / procurement
+  // state. These mirror the getJSON pattern above (graceful fallback on
+  // missing/corrupt data) and act as offline/local caches alongside their
+  // backend counterparts, so in-progress work survives a reload even when the
+  // server is unreachable (see the local-first principle in the project docs).
+  bomRows: {
+    get: () => getJSON(KEYS.BOM_ROWS, null),
+    set: (rows) => setJSON(KEYS.BOM_ROWS, rows),
+    remove: () => remove(KEYS.BOM_ROWS),
+  },
+
+  poDraft: {
+    get: () => getJSON(KEYS.PO_DRAFT, []),
+    set: (rows) => setJSON(KEYS.PO_DRAFT, rows),
+    remove: () => remove(KEYS.PO_DRAFT),
+  },
+
+  comments: {
+    get: (init) => getJSON(KEYS.COMMENTS, init),
+    set: (c) => setJSON(KEYS.COMMENTS, c),
+    remove: () => remove(KEYS.COMMENTS),
+  },
+
+  approvals: {
+    get: (init) => getJSON(KEYS.APPROVALS, init ?? null),
+    set: (a) => setJSON(KEYS.APPROVALS, a),
+    remove: () => remove(KEYS.APPROVALS),
+  },
+
+  workOrders: {
+    get: (init) => getJSON(KEYS.WORK_ORDERS, init ?? null),
+    set: (w) => setJSON(KEYS.WORK_ORDERS, w),
+    remove: () => remove(KEYS.WORK_ORDERS),
   },
 };
