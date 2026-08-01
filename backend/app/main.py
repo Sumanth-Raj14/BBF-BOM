@@ -702,13 +702,17 @@ async def root():
     # entry at "/" so the browser opens the app UI instead of this API message.
     # No-op for normal API/dev runs (no dist dir, SERVE_FRONTEND unset) — returns
     # the JSON welcome exactly as before.
+    # Serve the SPA at "/" only when explicitly enabled (SERVE_FRONTEND=1, as the
+    # desktop bundle sets). Auto-detecting a stray dist/ made "/" non-deterministic
+    # (returned HTML in any checkout that happened to have a built frontend, e.g.
+    # after a local `vite build`), breaking API clients and tests.
     _flag = os.environ.get("SERVE_FRONTEND", "").strip().lower()
-    if _flag not in ("0", "false", "no"):
+    if _flag in ("1", "true", "yes"):
         _dist = os.environ.get("FRONTEND_DIST_DIR") or os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "..", "..", "frontend", "dist"
         )
         _index = os.path.join(_dist, "index.html")
-        if (_flag in ("1", "true", "yes") or os.path.isdir(_dist)) and os.path.isfile(_index):
+        if os.path.isfile(_index):
             from fastapi.responses import FileResponse
 
             return FileResponse(_index)
