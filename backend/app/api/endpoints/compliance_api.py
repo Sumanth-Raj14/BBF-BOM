@@ -73,9 +73,9 @@ async def create_compliance(
 ):
     r = await db.execute(
         text(
-            'INSERT INTO compliance (name, description) VALUES (:name, :desc) RETURNING id, name, description, "isActive", "createdAt", "updatedAt"'
+            'INSERT INTO compliance (name, description, "tenantId") VALUES (:name, :desc, :tid) RETURNING id, name, description, "isActive", "createdAt", "updatedAt"'
         ),
-        {"name": body.name, "desc": body.description},
+        {"name": body.name, "desc": body.description, "tid": user.tenantId},
     )
     await db.commit()
     return dict(r.mappings().one())

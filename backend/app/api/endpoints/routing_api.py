@@ -84,7 +84,7 @@ async def create_routing(
     num = f"RT-{count + 1:04d}"
     await db.execute(
         text(
-            "INSERT INTO routing_tables (routing_number, name, description, part_id, created_by) VALUES (:rn, :n, :d, :p, :u)"
+            'INSERT INTO routing_tables (routing_number, name, description, part_id, created_by, "tenantId") VALUES (:rn, :n, :d, :p, :u, :tid)'
         ),
         {
             "rn": num,
@@ -92,6 +92,7 @@ async def create_routing(
             "d": body.description,
             "p": body.part_id,
             "u": user.id,
+            "tid": user.tenantId,
         },
     )
     await db.commit()

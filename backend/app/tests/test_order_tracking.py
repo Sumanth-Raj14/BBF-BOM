@@ -3,13 +3,13 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_order_tracking_list(client, auth_headers):
-    resp = await client.get("/api/v1/order-tracking/", headers=auth_headers)
+    resp = await client.get("/api/v1/order-tracking", headers=auth_headers)
     assert resp.status_code in (200, 401, 403)
 
 
 @pytest.mark.asyncio
 async def test_order_tracking_create(client, auth_headers):
-    resp = await client.post("/api/v1/order-tracking/", headers=auth_headers, json={"name": "test"})
+    resp = await client.post("/api/v1/order-tracking", headers=auth_headers, json={"name": "test"})
     assert resp.status_code in (201, 200, 401, 403, 422)
 
 
@@ -21,5 +21,5 @@ async def test_order_tracking_get_not_found(client, auth_headers):
 
 @pytest.mark.asyncio
 async def test_order_tracking_without_auth(client):
-    resp = await client.get("/api/v1/order-tracking/")
+    resp = await client.get("/api/v1/order-tracking")
     assert resp.status_code in (200, 401)
