@@ -1646,32 +1646,11 @@ WebhooksModal.propTypes = {
 };
 function ScheduledReportsModal({ open, onClose }) {
   if (!open) return null;
-  const [reports, setReports] = React.useState([
-    {
-      id: 1,
-      name: "Monday budget snapshot",
-      schedule: "Weekly \u00B7 Mon 9am IST",
-      format: "PDF",
-      recipients: "team@blackboxfactories.com",
-      active: true,
-    },
-    {
-      id: 2,
-      name: "End-of-month spend report",
-      schedule: "Monthly \u00B7 Last day",
-      format: "XLSX",
-      recipients: "tom@blackboxfactories.com, karan@blackboxfactories.com",
-      active: true,
-    },
-    {
-      id: 3,
-      name: "Supply risk alerts",
-      schedule: "Daily \u00B7 8am IST",
-      format: "Slack message",
-      recipients: "#procurement",
-      active: true,
-    },
-  ]);
+  // No backend endpoint exists yet for scheduled/auto-emailed reports (see
+  // api.js \u2014 schedulingAPI is manufacturing production scheduling, unrelated
+  // to this feature). Nothing is fetched or persisted here; entries created
+  // below are a local, unsaved preview only.
+  const [reports, setReports] = React.useState([]);
   return (
     <Modal
       open={open}
@@ -1694,8 +1673,11 @@ function ScheduledReportsModal({ open, onClose }) {
               setReports([
                 {
                   id: Date.now(),
-                  name: "New report",
-                  schedule: "Weekly \u00B7 Mon",
+                  name:
+                    __t("power.scheduledReports.newReportName") ||
+                    "New report",
+                  schedule:
+                    __t("power.scheduledReports.weeklyMon") || "Weekly \u00B7 Mon",
                   format: "PDF",
                   recipients: "",
                   active: true,
@@ -1703,8 +1685,9 @@ function ScheduledReportsModal({ open, onClose }) {
                 ...reports,
               ]);
               toast(
-                __t("power.scheduledReports.reportScheduled") ||
-                  "Report scheduled",
+                __t("power.scheduledReports.notPersisted") ||
+                  "Added to preview \u00B7 no backend configured for this yet, so it will not be saved or sent",
+                { kind: "warn" },
               );
             }}
           >
@@ -1714,35 +1697,54 @@ function ScheduledReportsModal({ open, onClose }) {
         </>
       }
     >
-      {reports.map((r) => (
-        <div
-          key={r.id}
-          className="border-line rounded-r2 mb-8"
-          style={{ padding: 12 }}
-        >
-          <div className="flex justify-between items-center mb-4">
-            <div className="fw-600 fs-13">{r.name}</div>
-            <Checkbox
-              name="reportActive"
-              className="fs-11"
-              defaultChecked={r.active}
-              label={
-                <span className="fg-3 font-mono">
-                  {__t("power.scheduledReports.active") || "Active"}
-                </span>
-              }
-            />
-          </div>
+      <div
+        className="bg-sunk border-line rounded-r2 font-mono fs-11 fg-3 mb-12"
+        style={{ padding: 10 }}
+      >
+        {__t("power.scheduledReports.noBackend") ||
+          "No backend configured for this yet. Schedules added below are a local preview only \u2014 nothing is saved or emailed."}
+      </div>
+      {reports.length === 0 ? (
+        <EmptyState
+          title={
+            __t("power.scheduledReports.noReports") || "No scheduled reports"
+          }
+          message={
+            __t("power.scheduledReports.noReportsMsg") ||
+            "No backend configured for this yet. Use \u201CNew schedule\u201D to preview the flow."
+          }
+        />
+      ) : (
+        reports.map((r) => (
           <div
-            className="d-grid gap-10 font-mono fs-11 fg-3"
-            style={{ gridTemplateColumns: "auto auto 1fr" }}
+            key={r.id}
+            className="border-line rounded-r2 mb-8"
+            style={{ padding: 12 }}
           >
-            <span>{r.schedule}</span>
-            <span>{r.format}</span>
-            <span>\u2192 {r.recipients}</span>
+            <div className="flex justify-between items-center mb-4">
+              <div className="fw-600 fs-13">{r.name}</div>
+              <Checkbox
+                name="reportActive"
+                className="fs-11"
+                defaultChecked={r.active}
+                label={
+                  <span className="fg-3 font-mono">
+                    {__t("power.scheduledReports.active") || "Active"}
+                  </span>
+                }
+              />
+            </div>
+            <div
+              className="d-grid gap-10 font-mono fs-11 fg-3"
+              style={{ gridTemplateColumns: "auto auto 1fr" }}
+            >
+              <span>{r.schedule}</span>
+              <span>{r.format}</span>
+              <span>\u2192 {r.recipients || "\u2014"}</span>
+            </div>
           </div>
-        </div>
-      ))}
+        ))
+      )}
     </Modal>
   );
 }
@@ -1752,36 +1754,12 @@ ScheduledReportsModal.propTypes = {
 };
 function EmailParseModal({ open, onClose }) {
   if (!open) return null;
-  const [emails] = React.useState([
-    {
-      from: "sales@meanwell.com.tw",
-      subject: "Quotation Q-2026-0182",
-      confidence: 0.96,
-      parsed: { pn: "EL-PSU-240W", unit: 82.5, qty: 100, lead: 21 },
-      status: "ready",
-    },
-    {
-      from: "quote@daly-bms.com",
-      subject: "RE: BMS 12S 60A quote request",
-      confidence: 0.91,
-      parsed: { pn: "EL-BMS-12S", unit: 58.2, qty: 25, lead: 35 },
-      status: "ready",
-    },
-    {
-      from: "rfq@jlcpcb.com",
-      subject: "JLCPCB Quote - Main PCB R3",
-      confidence: 0.88,
-      parsed: { pn: "EL-PCB-MAIN-R3", unit: 58.4, qty: 100, lead: 14 },
-      status: "ready",
-    },
-    {
-      from: "noreply@digikey.com",
-      subject: "Order shipment notification",
-      confidence: 0.42,
-      parsed: { pn: "\u2014", unit: 0, qty: 0, lead: 0 },
-      status: "skip",
-    },
-  ]);
+  // No backend endpoint exists yet for inbound-email quote parsing (no
+  // /email-parse or similar route in api.js). There is nothing to fetch, so
+  // this always renders the honest empty state below instead of fabricating
+  // vendor emails and confidence scores.
+  const [emails] = React.useState([]);
+  const readyCount = emails.filter((e) => e.status === "ready").length;
   return (
     <Modal
       open={open}
@@ -1801,10 +1779,20 @@ function EmailParseModal({ open, onClose }) {
           <Button
             variant="primary"
             onClick={() => {
+              if (readyCount === 0) {
+                toast(
+                  __t("power.emailParse.noBackend") ||
+                    "No backend configured for this yet \u2014 there are no parsed emails to import",
+                  { kind: "warn" },
+                );
+                return;
+              }
               onClose();
               toast(
-                __t("power.emailParse.rfqsImported") ||
-                  "3 RFQs imported into procurement",
+                readyCount +
+                  " " +
+                  (__t("power.emailParse.rfqsImportedSuffix") ||
+                    "RFQs imported into procurement"),
                 {
                   kind: "success",
                   action: {
@@ -1821,57 +1809,68 @@ function EmailParseModal({ open, onClose }) {
         </>
       }
     >
-      {emails.map((e) => (
-        <div
-          key={e.subject}
-          className="border-line rounded-r2 mb-8"
-          style={{ padding: 12, opacity: e.status === "skip" ? 0.5 : 1 }}
-        >
+      {emails.length === 0 ? (
+        <EmptyState
+          title={__t("power.emailParse.noEmails") || "No parsed emails"}
+          message={
+            __t("power.emailParse.noEmailsMsg") ||
+            "No backend configured for this yet. Connect an email/AI parsing backend to see vendor quotes extracted here."
+          }
+        />
+      ) : (
+        emails.map((e) => (
           <div
-            className="d-grid gap-14 items-center"
-            style={{ gridTemplateColumns: "1fr 80px 80px" }}
+            key={e.subject}
+            className="border-line rounded-r2 mb-8"
+            style={{ padding: 12, opacity: e.status === "skip" ? 0.5 : 1 }}
           >
-            <div>
-              <div className="fw-600 fs-12">{e.subject}</div>
-              <div className="font-mono fs-10 fg-3">{e.from}</div>
-              {e.status === "ready" && (
-                <div className="font-mono fs-11 mt-6 fg-2">
-                  <strong>{e.parsed.pn}</strong> \u00B7 {INR(e.parsed.unit, 2)}
-                  /ea \u00D7 {e.parsed.qty} \u00B7 {e.parsed.lead}d{" "}
-                  {__t("power.emailParse.lead") || "lead"}
-                </div>
-              )}
-            </div>
-            <span className="text-center">
-              <Badge
-                tone={
-                  e.confidence >= 0.9
-                    ? "success"
-                    : e.confidence >= 0.7
-                      ? "warning"
-                      : "danger"
-                }
-              >
-                {Math.round(e.confidence * 100)}%
-              </Badge>
-            </span>
-            <span className="text-right">
-              {e.status === "ready" ? (
-                <Icon.Check size={14} aria-hidden="true" />
-              ) : (
-                <Badge tone="neutral">
-                  {__t("power.emailParse.skip") || "SKIP"}
+            <div
+              className="d-grid gap-14 items-center"
+              style={{ gridTemplateColumns: "1fr 80px 80px" }}
+            >
+              <div>
+                <div className="fw-600 fs-12">{e.subject}</div>
+                <div className="font-mono fs-10 fg-3">{e.from}</div>
+                {e.status === "ready" && (
+                  <div className="font-mono fs-11 mt-6 fg-2">
+                    <strong>{e.parsed.pn}</strong> \u00B7 {INR(e.parsed.unit, 2)}
+                    /ea \u00D7 {e.parsed.qty} \u00B7 {e.parsed.lead}d{" "}
+                    {__t("power.emailParse.lead") || "lead"}
+                  </div>
+                )}
+              </div>
+              <span className="text-center">
+                <Badge
+                  tone={
+                    e.confidence >= 0.9
+                      ? "success"
+                      : e.confidence >= 0.7
+                        ? "warning"
+                        : "danger"
+                  }
+                >
+                  {Math.round(e.confidence * 100)}%
                 </Badge>
-              )}
-              <span className="sr-only">
-                {e.status === "ready"
-                  ? __t("power.emailParse.readyToImport") || "Ready to import"
-                  : __t("power.emailParse.skip") || "Skip"}
               </span>
-            </span>
+              <span className="text-right">
+                {e.status === "ready" ? (
+                  <Icon.Check size={14} aria-hidden="true" />
+                ) : (
+                  <Badge tone="neutral">
+                    {__t("power.emailParse.skip") || "SKIP"}
+                  </Badge>
+                )}
+                <span className="sr-only">
+                  {e.status === "ready"
+                    ? __t("power.emailParse.readyToImport") ||
+                      "Ready to import"
+                    : __t("power.emailParse.skip") || "Skip"}
+                </span>
+              </span>
+            </div>
           </div>
-        </div>
-      ))}
+        ))
+      )}
     </Modal>
   );
 }

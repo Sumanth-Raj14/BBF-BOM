@@ -2,7 +2,15 @@ import PropTypes from "prop-types";
 
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
-import { Icon, Modal, downloadBlob } from "../globals";
+import {
+  Icon,
+  Modal,
+  downloadBlob,
+  api,
+  EmptyState,
+  LoadingState,
+  ErrorState,
+} from "../globals";
 import {
   PODetailModal,
   VendorDetailModal,
@@ -44,90 +52,90 @@ Object.assign(window, {
 });
 
 // ============ AUDIT LOG ============
+// Real audit-log rows have no actor/target/details/kind fields — those are
+// derived here from the actual AuditLog columns returned by GET /audit-logs/
+// (id, action, entityType, entityId, entityName, changes, userId, userEmail,
+// createdAt — see backend/app/api/endpoints/audit_logs.py). Nothing below is
+// fabricated; unmapped cases fall back to an honest "system"/"—" label.
+function auditLogKind(action) {
+  const a = String(action || "").toLowerCase();
+  if (a.includes("create")) return "create";
+  if (a.includes("delete")) return "delete";
+  if (a.includes("approve")) return "approve";
+  if (a.includes("release") || a.includes("publish")) return "release";
+  if (a.includes("comment")) return "comment";
+  if (a.includes("export")) return "export";
+  if (a.includes("update") || a.includes("edit")) return "edit";
+  return "system";
+}
+
+function auditLogChangeSummary(changes) {
+  if (!changes) return "";
+  if (typeof changes === "string") return changes;
+  if (typeof changes === "object") {
+    const keys = Object.keys(changes);
+    if (!keys.length) return "";
+    return keys.length === 1
+      ? `${keys[0]} changed`
+      : `${keys.length} fields changed`;
+  }
+  return String(changes);
+}
+
+function normalizeAuditEvent(raw, i) {
+  const actor =
+    raw && raw.userEmail
+      ? raw.userEmail
+      : raw && raw.userId != null
+        ? `user #${raw.userId}`
+        : "system";
+  const target =
+    raw && raw.entityName
+      ? raw.entityName
+      : raw && raw.entityType
+        ? `${raw.entityType}${raw.entityId != null ? " #" + raw.entityId : ""}`
+        : "—";
+  return {
+    key: raw && raw.id != null ? String(raw.id) : `row-${i}`,
+    at:
+      raw && raw.createdAt
+        ? String(raw.createdAt).replace("T", " ").slice(0, 19)
+        : "—",
+    actor,
+    action: String((raw && raw.action) || "").toLowerCase(),
+    target,
+    details: auditLogChangeSummary(raw && raw.changes),
+    kind: auditLogKind(raw && raw.action),
+  };
+}
+
 function AuditLogModal({ open, onClose }) {
   const [filter, setFilter] = React.useState("All");
-  const events = [
-    {
-      at: "2026-05-25 09:42:18",
-      actor: "elena@blackboxfactories.com",
-      action: "created",
-      target: "BOM v3.3.0",
-      details: "Forked from v3.2.0",
-      kind: "create",
-    },
-    {
-      at: "2026-05-24 16:08:42",
-      actor: "marie@blackboxfactories.com",
-      action: "edited",
-      target: "EL-MCU-STM32H7",
-      details: "rev A → B; lead 35 → 42",
-      kind: "edit",
-    },
-    {
-      at: "2026-05-24 15:11:09",
-      actor: "karan@blackboxfactories.com",
-      action: "approved",
-      target: "PO-2026-0481",
-      details: "₹1,74,300.00 · Mean Well",
-      kind: "approve",
-    },
-    {
-      at: "2026-05-24 14:55:33",
-      actor: "system",
-      action: "auto-scraped",
-      target: "EL-MCU-STM32H7",
-      details: "5 sources, 12 fields, 91% confidence",
-      kind: "system",
-    },
-    {
-      at: "2026-05-24 11:30:00",
-      actor: "elena@blackboxfactories.com",
-      action: "released",
-      target: "BOM v3.2.0",
-      details: "Rev C locked",
-      kind: "release",
-    },
-    {
-      at: "2026-05-23 18:22:15",
-      actor: "ryo@blackboxfactories.com",
-      action: "commented on",
-      target: "EL-PCB-MAIN-R3",
-      details: "Safety stock concern",
-      kind: "comment",
-    },
-    {
-      at: "2026-05-23 14:08:01",
-      actor: "system",
-      action: "detected",
-      target: "HW-FAS-M3-08",
-      details: "Duplicate match HW-SCR-M3X8 · 95%",
-      kind: "system",
-    },
-    {
-      at: "2026-05-22 17:55:18",
-      actor: "tom@blackboxfactories.com",
-      action: "exported",
-      target: "BOM_v3.1.4.xlsx",
-      details: "412 KB · finance review",
-      kind: "export",
-    },
-    {
-      at: "2026-05-22 13:14:42",
-      actor: "marie@blackboxfactories.com",
-      action: "deleted",
-      target: "EL-FAN-80",
-      details: "Replaced by EL-FAN-92",
-      kind: "delete",
-    },
-    {
-      at: "2026-05-22 09:00:00",
-      actor: "system",
-      action: "synced",
-      target: "ATL-MFR-A_v3.2.sldasm",
-      details: "87 parts imported from SolidWorks",
-      kind: "system",
-    },
-  ];
+  const [events, setEvents] = React.useState([]);
+  const [loading, setLoading] = React.useState(false);
+  const [loadError, setLoadError] = React.useState(false);
+
+  const loadAuditLog = React.useCallback(() => {
+    setLoading(true);
+    setLoadError(false);
+    api.auditLogs
+      .list({ per_page: 100, sort_dir: "desc" })
+      .then((data) => {
+        const items = Array.isArray(data) ? data : (data && data.items) || [];
+        setEvents(items.map(normalizeAuditEvent));
+      })
+      .catch((err) => {
+        console.warn("Failed to load audit log:", err);
+        setEvents([]);
+        setLoadError(true);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  React.useEffect(() => {
+    if (!open) return;
+    loadAuditLog();
+  }, [open, loadAuditLog]);
   const kindIcon = {
     create: "+",
     edit: "\u270E",
@@ -245,33 +253,58 @@ function AuditLogModal({ open, onClose }) {
         className="border-line rounded-r2 overflow-h oy-auto"
         style={{ maxHeight: 460 }}
       >
-        {filtered.map((e, i) => (
-          <div
-            key={e.at + "-" + e.actor + "-" + i}
-            className="d-grid gap-12 items-center fs-11 font-mono"
-            style={{
-              gridTemplateColumns: "auto 150px 160px 1fr",
-              padding: "10px 14px",
-              borderBottom: "1px solid var(--line-soft)",
-            }}
-          >
-            <span
-              className="w-22 h-22 br-4 bg-sunk inline-flex items-center justify-center fs-12 fw-700"
-              style={{ color: kindColor[e.kind] }}
+        {loading ? (
+          <LoadingState
+            message={__t("auditLog.loading") || "Loading audit log\u2026"}
+          />
+        ) : loadError ? (
+          <ErrorState
+            message={__t("auditLog.loadFailed") || "Could not load audit log"}
+            onRetry={loadAuditLog}
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={<Icon.Activity size={28} />}
+            title={__t("auditLog.empty") || "No audit log entries"}
+            description={
+              events.length === 0
+                ? __t("auditLog.emptyMsg") ||
+                  "No actions have been recorded yet."
+                : __t("auditLog.emptyFilterMsg") ||
+                  "No entries match this filter."
+            }
+          />
+        ) : (
+          filtered.map((e) => (
+            <div
+              key={e.key}
+              className="d-grid gap-12 items-center fs-11 font-mono"
+              style={{
+                gridTemplateColumns: "auto 150px 160px 1fr",
+                padding: "10px 14px",
+                borderBottom: "1px solid var(--line-soft)",
+              }}
             >
-              {kindIcon[e.kind]}
-            </span>
-            <span className="fg-3">{e.at}</span>
-            <span>{e.actor}</span>
-            <span>
-              <span className="fg-2">{e.action}</span>{" "}
-              <span className="bg-sunk br-2 fg" style={{ padding: "0 4px" }}>
-                {e.target}
+              <span
+                className="w-22 h-22 br-4 bg-sunk inline-flex items-center justify-center fs-12 fw-700"
+                style={{ color: kindColor[e.kind] }}
+              >
+                {kindIcon[e.kind]}
               </span>
-              <span className="fg-3 ml-8">\u00B7 {e.details}</span>
-            </span>
-          </div>
-        ))}
+              <span className="fg-3">{e.at}</span>
+              <span>{e.actor}</span>
+              <span>
+                <span className="fg-2">{e.action}</span>{" "}
+                <span className="bg-sunk br-2 fg" style={{ padding: "0 4px" }}>
+                  {e.target}
+                </span>
+                {e.details ? (
+                  <span className="fg-3 ml-8">{"\u00B7"} {e.details}</span>
+                ) : null}
+              </span>
+            </div>
+          ))
+        )}
       </div>
     </Modal>
   );
@@ -282,62 +315,102 @@ AuditLogModal.propTypes = {
 };
 
 // ============ API KEYS ============
+// Real API keys come from GET /api-keys/ (plain array of
+// { id, name, description, key_prefix, scopes, is_active, expires_at,
+// last_used_at, created_at } \u2014 see backend/app/api/endpoints/api_keys.py).
+// The full secret is only ever returned once, from create()/rotate(); the
+// list never includes it, so we never fabricate one for display.
+function apiKeyScopeList(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+      return [];
+    }
+  }
+  return [];
+}
+
+function formatApiKeyDate(value) {
+  if (!value) return "\u2014";
+  return String(value).replace("T", " ").slice(0, 10);
+}
+
 function APIKeysModal({ open, onClose }) {
-  const [keys, setKeys] = React.useState([
-    {
-      id: "ak_live_aZ7\u202632fK",
-      label: "Production API",
-      created: "2026-01-12",
-      last: "5 min ago",
-      scope: "read+write",
-    },
-    {
-      id: "sk_live_19xQ\u20260Lpm",
-      label: "SolidWorks integration",
-      created: "2026-02-04",
-      last: "2 hr ago",
-      scope: "read+sync",
-    },
-    {
-      id: "rk_read_n3jB\u2026X8sR",
-      label: "Analytics dashboard",
-      created: "2025-12-18",
-      last: "yesterday",
-      scope: "read",
-    },
-  ]);
+  const [keys, setKeys] = React.useState([]);
+  const [loading, setLoading] = React.useState(false);
+  const [loadError, setLoadError] = React.useState(false);
+  const [creating, setCreating] = React.useState(false);
+  const [revokingId, setRevokingId] = React.useState(null);
+
+  const loadKeys = React.useCallback(() => {
+    setLoading(true);
+    setLoadError(false);
+    api.apiKeys
+      .list()
+      .then((data) => setKeys(Array.isArray(data) ? data : []))
+      .catch((err) => {
+        console.warn("Failed to load API keys:", err);
+        setKeys([]);
+        setLoadError(true);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  React.useEffect(() => {
+    if (!open) return;
+    loadKeys();
+  }, [open, loadKeys]);
+
   const generate = () => {
-    const id =
-      "ak_live_" +
-      Math.random().toString(36).slice(2, 8) +
-      "\u2026" +
-      Math.random().toString(36).slice(2, 6);
-    setKeys([
-      {
-        id,
-        label: "New API key",
-        created: "just now",
-        last: "\u2014",
-        scope: "read+write",
-      },
-      ...keys,
-    ]);
-    toast(
-      __t("apiKeys.generatedToast") ||
-        "New API key generated \u2014 copy now, it won't be shown again",
-      {
-        kind: "warn",
-        action: {
-          label: __t("common.copy") || "Copy",
-          onClick: () => toast((__t("apiKeys.copied") || "Copied ") + id),
-        },
-      },
-    );
+    setCreating(true);
+    api.apiKeys
+      .create({ name: __t("apiKeys.defaultLabel") || "New API key" })
+      .then((res) => {
+        const rawKey = res && (res.key || res.api_key);
+        toast(
+          __t("apiKeys.generatedToast") ||
+            "New API key generated \u2014 copy now, it won't be shown again",
+          {
+            kind: "warn",
+            action: rawKey
+              ? {
+                  label: __t("common.copy") || "Copy",
+                  onClick: () =>
+                    toast((__t("apiKeys.copied") || "Copied ") + rawKey),
+                }
+              : undefined,
+          },
+        );
+        loadKeys();
+      })
+      .catch((err) => {
+        console.warn("Failed to generate API key:", err);
+        toast(__t("apiKeys.generateFailed") || "Could not generate API key", {
+          kind: "warn",
+        });
+      })
+      .finally(() => setCreating(false));
   };
   const revoke = (id) => {
-    setKeys(keys.filter((k) => k.id !== id));
-    toast(__t("apiKeys.revokedToast") || "Key revoked", { kind: "warn" });
+    setRevokingId(id);
+    api.apiKeys
+      .revoke(id)
+      .then(() => {
+        toast(__t("apiKeys.revokedToast") || "Key revoked", { kind: "warn" });
+        loadKeys();
+      })
+      .catch((err) => {
+        console.warn("Failed to revoke API key:", err);
+        toast(__t("apiKeys.revokeFailed") || "Could not revoke key", {
+          kind: "warn",
+        });
+      })
+      .finally(() => setRevokingId(null));
   };
+  const activeCount = keys.filter((k) => k.is_active !== false).length;
   return (
     <Modal
       open={open}
@@ -347,16 +420,22 @@ function APIKeysModal({ open, onClose }) {
       subtitle={(
         __t("apiKeys.subtitle") ||
         "{count} active key(s) \u00B7 all requests audited"
-      ).replace("{count}", keys.length)}
+      ).replace("{count}", activeCount)}
       wide
       footer={
         <>
           <button className="btn" onClick={onClose}>
             {__t("common.close") || "Close"}
           </button>
-          <button className="btn primary" onClick={generate}>
+          <button
+            className="btn primary"
+            onClick={generate}
+            disabled={creating}
+          >
             <Icon.Plus size={12} />{" "}
-            {__t("apiKeys.generateNewKey") || "Generate new key"}
+            {creating
+              ? __t("apiKeys.generating") || "Generating\u2026"
+              : __t("apiKeys.generateNewKey") || "Generate new key"}
           </button>
         </>
       }
@@ -365,67 +444,132 @@ function APIKeysModal({ open, onClose }) {
         {__t("apiKeys.description") ||
           "Use API keys to authenticate Blackbox BOM API requests. Keep keys secret \u2014 anyone with the key can act on your behalf."}
       </p>
-      <div className="border-line rounded-r2 overflow-h">
-        <table className="bom-table table-auto">
-          <thead>
-            <tr>
-              <th className="pl-12">{__t("apiKeys.key") || "Key"}</th>
-              <th>{__t("apiKeys.label") || "Label"}</th>
-              <th>{__t("apiKeys.scope") || "Scope"}</th>
-              <th>{__t("apiKeys.created") || "Created"}</th>
-              <th>{__t("apiKeys.lastUsed") || "Last used"}</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {keys.map((k) => (
-              <tr key={k.id}>
-                <td className="mono pl-12 fw-600">{k.id}</td>
-                <td>{k.label}</td>
-                <td>
-                  <span
-                    className="tag-pill"
-                    style={{
-                      borderColor:
-                        k.scope === "read" ? "var(--info)" : "var(--accent)",
-                      color:
-                        k.scope === "read"
-                          ? "var(--info)"
-                          : "var(--accent-text)",
-                    }}
-                  >
-                    {k.scope}
-                  </span>
-                </td>
-                <td className="mono fg-3">{k.created}</td>
-                <td className="mono fg-3">{k.last}</td>
-                <td>
-                  <span className="inline-flex gap-2">
-                    <button
-                      className="icon-btn w-22 h-22"
-                      onClick={() =>
-                        toast((__t("apiKeys.copied") || "Copied ") + k.id)
-                      }
-                      title={__t("common.copy") || "Copy"}
-                      aria-label={__t("common.copy") || "Copy"}
-                    >
-                      <Icon.Link size={11} />
-                    </button>
-                    <button
-                      className="icon-btn w-22 h-22 fg-danger"
-                      onClick={() => revoke(k.id)}
-                      title={__t("apiKeys.revoke") || "Revoke"}
-                      aria-label={__t("apiKeys.revoke") || "Revoke"}
-                    >
-                      <Icon.Trash size={11} />
-                    </button>
-                  </span>
-                </td>
+      {loading ? (
+        <LoadingState
+          message={__t("apiKeys.loading") || "Loading API keys\u2026"}
+        />
+      ) : loadError ? (
+        <ErrorState
+          message={__t("apiKeys.loadFailed") || "Could not load API keys"}
+          onRetry={loadKeys}
+        />
+      ) : keys.length === 0 ? (
+        <EmptyState
+          icon={<Icon.Link size={28} />}
+          title={__t("apiKeys.empty") || "No API keys yet"}
+          description={
+            __t("apiKeys.emptyMsg") ||
+            "Generate a key to start authenticating API requests."
+          }
+        />
+      ) : (
+        <div className="border-line rounded-r2 overflow-h">
+          <table className="bom-table table-auto">
+            <thead>
+              <tr>
+                <th className="pl-12">{__t("apiKeys.key") || "Key"}</th>
+                <th>{__t("apiKeys.label") || "Label"}</th>
+                <th>{__t("apiKeys.scope") || "Scope"}</th>
+                <th>{__t("apiKeys.created") || "Created"}</th>
+                <th>{__t("apiKeys.lastUsed") || "Last used"}</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {keys.map((k) => {
+                const revoked = k.is_active === false;
+                const scopes = apiKeyScopeList(k.scopes);
+                return (
+                  <tr
+                    key={k.id}
+                    style={revoked ? { opacity: 0.5 } : undefined}
+                  >
+                    <td className="mono pl-12 fw-600">
+                      {k.key_prefix ? `${k.key_prefix}\u2026` : "\u2014"}
+                      <span className="fg-3 ml-8">#{k.id}</span>
+                    </td>
+                    <td>
+                      {k.name}
+                      {k.description ? (
+                        <div className="fg-3 fs-11">{k.description}</div>
+                      ) : null}
+                      {revoked ? (
+                        <span
+                          className="tag-pill"
+                          style={{
+                            borderColor: "var(--danger)",
+                            color: "var(--danger)",
+                            marginLeft: 6,
+                          }}
+                        >
+                          {__t("apiKeys.revokedTag") || "revoked"}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td>
+                      <span
+                        className="tag-pill"
+                        style={{
+                          borderColor:
+                            scopes.length === 1 && scopes[0] === "read"
+                              ? "var(--info)"
+                              : "var(--accent)",
+                          color:
+                            scopes.length === 1 && scopes[0] === "read"
+                              ? "var(--info)"
+                              : "var(--accent-text)",
+                        }}
+                      >
+                        {scopes.length ? scopes.join("+") : "\u2014"}
+                      </span>
+                    </td>
+                    <td className="mono fg-3">
+                      {formatApiKeyDate(k.created_at)}
+                    </td>
+                    <td className="mono fg-3">
+                      {k.last_used_at
+                        ? formatApiKeyDate(k.last_used_at)
+                        : __t("apiKeys.neverUsed") || "Never"}
+                    </td>
+                    <td>
+                      <span className="inline-flex gap-2">
+                        <button
+                          className="icon-btn w-22 h-22"
+                          onClick={() =>
+                            toast(
+                              (__t("apiKeys.copied") || "Copied ") +
+                                (k.key_prefix || ""),
+                            )
+                          }
+                          title={
+                            __t("apiKeys.copyPrefix") || "Copy key prefix"
+                          }
+                          aria-label={
+                            __t("apiKeys.copyPrefix") || "Copy key prefix"
+                          }
+                        >
+                          <Icon.Link size={11} />
+                        </button>
+                        {!revoked && (
+                          <button
+                            className="icon-btn w-22 h-22 fg-danger"
+                            onClick={() => revoke(k.id)}
+                            disabled={revokingId === k.id}
+                            title={__t("apiKeys.revoke") || "Revoke"}
+                            aria-label={__t("apiKeys.revoke") || "Revoke"}
+                          >
+                            <Icon.Trash size={11} />
+                          </button>
+                        )}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
       <div style={{ marginTop: 18 }}>
         <div className="font-mono fs-10 uppercase letter-sp-6 fg-3 mb-6">
           {__t("apiKeys.quickStart") || "Quick start"}
@@ -434,7 +578,7 @@ function APIKeysModal({ open, onClose }) {
           className="bg-sunk rounded-r2 border-line font-mono fs-11 fg-2 overflow-x-a"
           style={{ padding: 12 }}
         >{`curl https://api.bbox.dev/v1/boms/atlas-mfr-a \
-  -H "Authorization: Bearer ak_live_aZ7\u202632fK"`}</pre>
+  -H "Authorization: Bearer YOUR_API_KEY"`}</pre>
       </div>
     </Modal>
   );
