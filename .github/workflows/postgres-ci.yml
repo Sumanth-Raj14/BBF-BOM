@@ -83,14 +83,14 @@ jobs:
       - name: Fresh install bootstrap against EMPTY Postgres (scripts/init_db)
         run: python -m scripts.init_db
 
-      - name: Verify alembic_version is stamped at head (041_zoho_books_sync_tables)
+      - name: Verify alembic_version is stamped at head (047_solidworks_integration)
         run: |
           python -c "
           import asyncio
           from sqlalchemy import text
           from sqlalchemy.ext.asyncio import create_async_engine
 
-          EXPECTED_HEAD = '041_zoho_books_sync_tables'
+          EXPECTED_HEAD = '047_solidworks_integration'
 
           async def main():
               engine = create_async_engine('${{ env.DATABASE_URL }}')
@@ -114,7 +114,7 @@ jobs:
           python -m alembic current
           CURRENT=$(python -m alembic current 2>/dev/null | head -n1)
           echo "alembic current: $CURRENT"
-          echo "$CURRENT" | grep -q '041_zoho_books_sync_tables' || (echo "::error::alembic current does not report head 041_zoho_books_sync_tables" && exit 1)
+          echo "$CURRENT" | grep -q '047_solidworks_integration' || (echo "::error::alembic current does not report head 047_solidworks_integration" && exit 1)
 
       - name: Re-run init_db against an already-migrated DB (idempotency check)
         run: python -m scripts.init_db
@@ -183,9 +183,12 @@ jobs:
       # The test_engine drop_all/create_all's this DB, so it must be a throwaway
       # (bom_test_db, not a bootstrapped one).
       TEST_DATABASE_URL: postgresql+asyncpg://bom_user:ci_postgres_pw_9f3a7c1e@127.0.0.1:5432/bom_test_db
-      SECRET_KEY: ci-pg-test-signkey-donotuse-9f3a7c1e4b2d5a8b6d4f2a0c8e7b
-      ENCRYPTION_KEY: ci-pg-test-encryption-key-do-not-use-in-prod-4b2d9f3a5a8b
-      S3_SECRET_KEY: ci-pg-test-s3key-donotuse-7c1e4b2d9f3a5a8b6d4f2a0c8e7b
+      # NB: values must NOT contain a substring in _WEAK_SECRET_VALUES (config.py) —
+      # e.g. "test"/"secret"/"admin" — or Settings rejects them as weak and conftest
+      # fails to import. Use "suite" (cf. the fresh-install/sqlite jobs' "track").
+      SECRET_KEY: ci-pg-suite-signkey-donotuse-9f3a7c1e4b2d5a8b6d4f2a0c8e7b
+      ENCRYPTION_KEY: ci-pg-suite-encryption-key-do-not-use-in-prod-4b2d9f3a5a8b
+      S3_SECRET_KEY: ci-pg-suite-s3key-donotuse-7c1e4b2d9f3a5a8b6d4f2a0c8e7b
       POSTGRES_PASSWORD: ci_postgres_pw_9f3a7c1e
       ADMIN_EMAIL: ci@blackbox-bom.com
     steps:
