@@ -98,7 +98,10 @@ FolderNode.propTypes = {
 function DocumentFolderTree({ folders = [], onSelect, selected }) {
   const [expanded, setExpanded] = React.useState(() => new Set(["/"]));
   const [activePath, setActivePath] = React.useState(
-    () => (selected && selected.path) || folders[0]?.path || null,
+    // folders?.[0] not folders[0]: the `= []` default only covers undefined,
+    // and callers pass null before the fetch resolves (cf. the `folders || []`
+    // guard in the render below).
+    () => (selected && selected.path) || folders?.[0]?.path || null,
   );
   const rootRef = React.useRef(null);
 

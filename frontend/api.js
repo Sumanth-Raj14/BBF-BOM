@@ -64,6 +64,16 @@ function getCSRFToken() {
   return match ? decodeURIComponent(match[1]).split('.')[0] : null;
 }
 
+// Multipart uploads can't go through apiRequest: it forces
+// 'Content-Type: application/json', which clobbers the FormData boundary. So
+// they call fetch() directly -- and must attach the CSRF header themselves or
+// the backend rejects them with 403 "CSRF token missing or invalid".
+// Deliberately sets no Content-Type: the browser must supply the boundary.
+function csrfHeaders() {
+  const token = getCSRFToken();
+  return token ? { 'X-CSRF-Token': token } : {};
+}
+
 // Silent, deduplicated session refresh. Access tokens are short-lived (~30 min)
 // while the refresh token lasts far longer, so a 401 usually just means the
 // access-token cookie expired. Concurrent 401s share one refresh. Returns:
@@ -378,6 +388,7 @@ export const documentsAPI = {
     const response = await fetch(API_BASE + '/documents/upload', {
       method: 'POST',
       credentials: 'include',
+      headers: csrfHeaders(),
       body: formData,
     });
     
@@ -635,6 +646,7 @@ export const ocrAPI = {
     const response = await fetch(API_BASE + '/ocr/extract-file', {
       method: 'POST',
       credentials: 'include',
+      headers: csrfHeaders(),
       body: formData,
     });
     if (!response.ok) {
@@ -898,6 +910,7 @@ export const bulkImportAPI = {
     const response = await fetch(API_BASE + '/import/upload', {
       method: 'POST',
       credentials: 'include',
+      headers: csrfHeaders(),
       body: formData,
     });
     if (!response.ok) throw new Error('Upload failed');
@@ -1310,6 +1323,7 @@ export const catalogsAPI = {
     const response = await fetch(API_BASE + '/catalogs/import', {
       method: 'POST',
       credentials: 'include',
+      headers: csrfHeaders(),
       body: formData,
     });
 
