@@ -31,7 +31,9 @@ test.describe('Accessibility', () => {
   test('topbar role indicator is present', async ({ page }) => {
     const topbar = page.locator('.topbar');
     await expect(topbar).toBeVisible();
-    const sub = topbar.locator('.sub');
+    // The topbar wordmark carries the "BOM" product label (.bbf-wordmark-bom);
+    // the old flat ".sub" element was refactored into the wordmark structure.
+    const sub = topbar.locator('.bbf-wordmark-bom');
     await expect(sub).toContainText('BOM');
   });
 });

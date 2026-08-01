@@ -5,8 +5,21 @@ const APP_URL = process.env.APP_URL || 'http://localhost:4173';
 test.describe('Blackbox BOM — Critical Path Smoke Tests', () => {
 
   test.beforeEach(async ({ page }) => {
-    await page.goto(APP_URL);
-    await page.evaluate(() => localStorage.clear());
+    // The app gates on auth (renders AuthScreen when no stored session), so
+    // seed a client-side session + completed-onboarding flag before every
+    // navigation, matching tests/smoke.spec.js. Individual tests still call
+    // page.goto() themselves. (The "unauthenticated" test below clears +
+    // reloads; its assertion accepts either the app or the login screen.)
+    await page.addInitScript(() => {
+      localStorage.setItem('__bbox_auth', JSON.stringify({
+        name: 'Elena Chen',
+        email: 'elena@blackbox-bom.com',
+        init: 'EC',
+        role: 'engineering',
+      }));
+      localStorage.setItem('__bbox_role', 'Admin');
+      localStorage.setItem('__bbox_onb', '1');
+    });
   });
 
   test('should render the app shell', async ({ page }) => {

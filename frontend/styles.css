@@ -4500,7 +4500,10 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
   color: var(--bbf-white);
 }
 .bbf-badge-orange {
-  background: var(--bbf-orange);
+  /* Darkened from --bbf-orange (#dc6621, only 3.52:1 with white) to meet WCAG
+     AA (>=4.5:1) for this small 10px bold badge text. The brand orange is
+     unchanged everywhere else. */
+  background: #b0500f;
   color: var(--bbf-white);
 }
 .bbf-badge-outline {
