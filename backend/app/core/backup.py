@@ -802,7 +802,14 @@ async def restore_physical_backup(
         # Extract base backup
         logger.info("Extracting physical backup %s to %s", path, data_dir)
         with tarfile.open(str(path), "r:gz") as tar:
-            tar.extractall(path=data_dir)
+            # Audit finding A7: a bare extractall() honours whatever paths the
+            # archive contains, so a crafted or corrupt backup with '../' or
+            # absolute members writes outside data_dir ("tar slip") -- during a
+            # RESTORE, which runs with the database's privileges.
+            # filter="data" is the stdlib's own hardening (Python 3.12+): it
+            # rejects absolute paths, parent-directory escapes, links pointing
+            # outside the destination, and device/special files.
+            tar.extractall(path=data_dir, filter="data")
 
         # Write recovery signal and config for PITR
         recovery_signal = data_path / "recovery.signal"
