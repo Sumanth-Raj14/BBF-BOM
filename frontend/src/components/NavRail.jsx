@@ -35,6 +35,7 @@ export const SECTIONS = [
     items: [
       { id: "diff", label: "Compare Revisions", icon: <Icon.Diff size={size} /> },
       { id: "pdm", label: "CAD Vault", icon: <Icon.Doc size={size} /> },
+      { id: "bom-variants", label: "BOM Variants", icon: <Icon.Bom size={size} /> },
       { id: "routing", label: "Routings & Processes", icon: <Icon.Activity size={size} /> },
     ],
   },
@@ -43,6 +44,8 @@ export const SECTIONS = [
     items: [
       { id: "qms", label: "QMS Dashboard", icon: <Icon.Activity size={size} /> },
       { id: "ncr", label: "Non-Conformance", icon: <Icon.Flag size={size} /> },
+      { id: "deviations", label: "Deviations & Waivers", icon: <Icon.Flag size={size} /> },
+      { id: "traceability", label: "Serial & Lot Traceability", icon: <Icon.Scan size={size} /> },
       { id: "compliance", label: "Compliance", icon: <Icon.Check size={size} /> },
     ],
   },

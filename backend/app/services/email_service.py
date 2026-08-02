@@ -71,7 +71,10 @@ async def process_notification_queue(db: AsyncSession, batch_size: int = 50):
         .join(User, NotificationQueue.user_id == User.id)
         .where(
             NotificationQueue.channel == "email",
-            not NotificationQueue.is_sent,
+            # NOT `not NotificationQueue.is_sent` — Python's `not` on a column
+            # evaluates to the literal False, so this WHERE was `AND false` and
+            # the dispatcher drained nothing, ever. is_not(True) also covers NULL.
+            NotificationQueue.is_sent.is_not(True),
         )
         .limit(batch_size)
     )

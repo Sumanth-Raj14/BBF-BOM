@@ -77,6 +77,26 @@ async def _check_api_key_rate_limit(key_prefix: str) -> bool:
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
 
+# API-key scopes. The only vocabulary this system issues is ["read", "write"]
+# (the default in app/api/endpoints/api_keys.py); no resource-specific scopes
+# exist. Anything else stored on a key is unrecognised and grants nothing.
+_METHOD_SCOPE = {
+    "GET": "read",
+    "HEAD": "read",
+    "OPTIONS": "read",
+    "POST": "write",
+    "PUT": "write",
+    "PATCH": "write",
+    "DELETE": "write",
+}
+
+
+def _required_api_key_scope(method: str) -> str:
+    # Default deny: an unlisted/exotic method is treated as a write, so a new
+    # method can never fall through the guard as an implicitly-readable one.
+    return _METHOD_SCOPE.get(method.upper(), "write")
+
+
 async def _authenticate_by_api_key(request: Request, db: AsyncSession) -> Optional[User]:
     api_key_header = request.headers.get("X-API-Key")
     if not api_key_header or "_" not in api_key_header:
@@ -108,6 +128,22 @@ async def _authenticate_by_api_key(request: Request, db: AsyncSession) -> Option
     if api_key.expires_at and api_key.expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
         await clear_rls_auth_bootstrap(db)
         return None
+
+    # Scope enforcement. Default deny by construction: a key with no scopes, a
+    # non-list `scopes` value, or only unrecognised values simply fails the
+    # membership test. The isinstance guard matters -- `"read" in "read,write"`
+    # is True for a str, which would hand a malformed row full access.
+    # 403 not 401: the key is valid, the caller is authenticated but not
+    # authorised. Raised (not returned as None) so it cannot silently fall
+    # through to the bearer-token path and surface as a 401.
+    required_scope = _required_api_key_scope(request.method)
+    granted = api_key.scopes if isinstance(api_key.scopes, list) else []
+    if required_scope not in granted:
+        await clear_rls_auth_bootstrap(db)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"API key does not have the required '{required_scope}' scope",
+        )
 
     # Per-API-key rate limiting
     if not await _check_api_key_rate_limit(key_prefix):

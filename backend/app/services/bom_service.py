@@ -25,6 +25,7 @@ from app.models.bom_variant import BomVariant, BomVariantItem
 from app.models.document import Document
 from app.models.enterprise_extensions import CustomAttributeDefinition
 from app.models.part import Part
+from app.services import webhook_service
 
 # Upload location comes from settings (env-configurable via UPLOAD_DIR), same as
 # documents.py, so a packaged / read-only install can point it at a writable
@@ -482,6 +483,12 @@ async def create_bom_item(
     if item.part_id is not None:
         pr = await db.execute(select(Part).where(Part.id == item.part_id))
         part = pr.scalar_one_or_none()
+    await webhook_service.emit_event(
+        db,
+        "bom.item.created",
+        {"bom_id": bom.id, "item_id": item.id, "part_id": item.part_id},
+        item.tenantId,
+    )
     return _serialize_bom_item(item, part)
 
 
@@ -531,6 +538,12 @@ async def update_bom_item(db: AsyncSession, bom_id: int, item_id: int, data: dic
         if tid is not None:
             pr_stmt = pr_stmt.where(Part.tenantId == tid)
         part = (await db.execute(pr_stmt)).scalar_one_or_none()
+    await webhook_service.emit_event(
+        db,
+        "bom.item.updated",
+        {"bom_id": bom_id, "item_id": item.id, "part_id": item.part_id},
+        item.tenantId,
+    )
     return _serialize_bom_item(item, part)
 
 
@@ -541,9 +554,13 @@ async def delete_bom_item(db: AsyncSession, bom_id: int, item_id: int) -> None:
     descendants pointing at a parent that no longer exists."""
     tid = get_tenant_id()
     item = await _get_bom_item_or_404(db, bom_id, item_id, tid)
+    item_tenant_id = item.tenantId  # read before the row goes away
     await _closure_remove_subtree(db, bom_id, tid, item.id)
     await db.commit()
     await _invalidate_bom_caches(bom_id)
+    await webhook_service.emit_event(
+        db, "bom.item.deleted", {"bom_id": bom_id, "item_id": item_id}, item_tenant_id
+    )
 
 
 async def reorder_bom_items(db: AsyncSession, bom_id: int, item_ids: list[int]) -> dict:

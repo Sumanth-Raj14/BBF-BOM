@@ -262,6 +262,10 @@ async def test_authenticate_by_api_key_bootstraps_before_lookups(monkeypatch):
     fake_api_key.key_hash = "hash"
     fake_api_key.expires_at = None
     fake_api_key.user_id = 1
+    # A bare MagicMock attribute is not a list, so the scope guard in
+    # _authenticate_by_api_key would (correctly) 403 before the RLS ordering
+    # this test is about ever runs. Give the key real scopes.
+    fake_api_key.scopes = ["read", "write"]
 
     fake_user = _FakeUser(id=1, tenantId=9, isSuperuser=False)
     execute_calls: list[int] = []
@@ -284,6 +288,7 @@ async def test_authenticate_by_api_key_bootstraps_before_lookups(monkeypatch):
 
     request = MagicMock()
     request.headers.get.return_value = "prefix_secret"
+    request.method = "GET"
 
     db = MagicMock()
     db.execute = AsyncMock(side_effect=fake_execute)
