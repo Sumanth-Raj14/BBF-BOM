@@ -2,17 +2,6 @@ import { test, expect } from '@playwright/test';
 
 test.describe('App smoke tests', () => {
   test.beforeEach(async ({ page }) => {
-    // Set auth & onboarding state before navigating to bypass login screen
-    await page.addInitScript(() => {
-      localStorage.setItem('__bbox_auth', JSON.stringify({
-        name: 'Elena Chen',
-        email: 'elena@blackbox-bom.com',
-        init: 'EC',
-        role: 'engineering',
-      }));
-      localStorage.setItem('__bbox_role', 'Admin');
-      localStorage.setItem('__bbox_onb', '1');
-    });
     await page.goto('/');
   });
 
@@ -43,16 +32,6 @@ test.describe('App smoke tests', () => {
 
 test.describe('Navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem('__bbox_auth', JSON.stringify({
-        name: 'Elena Chen',
-        email: 'elena@blackbox-bom.com',
-        init: 'EC',
-        role: 'engineering',
-      }));
-      localStorage.setItem('__bbox_role', 'Admin');
-      localStorage.setItem('__bbox_onb', '1');
-    });
     await page.goto('/');
   });
 

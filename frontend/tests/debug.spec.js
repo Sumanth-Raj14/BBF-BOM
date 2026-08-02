@@ -10,16 +10,6 @@ test('debug: capture errors and page state', async ({ page }) => {
   });
   page.on('pageerror', err => errors.push(err.message));
 
-  await page.addInitScript(() => {
-    localStorage.setItem('__bbox_auth', JSON.stringify({
-      name: 'Elena Chen',
-      email: 'elena@blackbox-bom.com',
-      init: 'EC',
-      role: 'engineering',
-    }));
-    localStorage.setItem('__bbox_role', 'Admin');
-    localStorage.setItem('__bbox_onb', '1');
-  });
 
   await page.goto('/');
   await page.waitForTimeout(5000);
