@@ -1,13 +1,18 @@
 import PropTypes from "prop-types";
+import { AppContext } from "../../context/AppCtx.jsx";
 import { navigateTo } from "../../services/navigation.js";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Icon, api, useAppStore } from "../../globals";
+import { Icon, api } from "../../globals";
 import { Modal, Button, Field, Input, Checkbox, Badge } from "../ui";
 
 function BOMDuplicationModal({ open, onClose }) {
-  const ctx = useAppStore();
+  // NOTE: useAppStore() from globals resolves root/overlays.jsx's AppCtx,
+  // which has NO Provider anywhere — the app mounts context/AppCtx.jsx's
+  // AppContext instead. So useAppStore() returns null and every ctx?.x read
+  // through it is silently undefined. Use the real context here.
+    const ctx = React.useContext(AppContext);
   const [name, setName] = React.useState("");
   const [includeRev, setIncludeRev] = React.useState(true);
   const [includeCosts, setIncludeCosts] = React.useState(false);
