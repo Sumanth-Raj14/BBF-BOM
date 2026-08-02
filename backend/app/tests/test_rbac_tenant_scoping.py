@@ -32,7 +32,7 @@ from app.models.user import User
 
 @pytest.mark.asyncio
 async def test_two_tenants_self_signup_each_get_own_admin_role(
-    client, test_tenant, db_session, monkeypatch
+    client, test_tenant, db_session, monkeypatch, no_tenant_context
 ):
     from app.core.config import settings
 

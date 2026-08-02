@@ -62,10 +62,13 @@ def _register_select_filter():
             )
             return
 
-        try:
-            mapper = execute_state.mapper_
-        except AttributeError:
-            return
+        # SECURITY: this must be `bind_mapper`. ORMExecuteState has never had a
+        # `mapper_` attribute in SQLAlchemy 2.x, so the previous code raised
+        # AttributeError on EVERY select and the swallowing try/except turned
+        # tenant isolation into a silent no-op (cross-tenant read leak).
+        # Deliberately NOT wrapped in try/except: if this attribute ever moves
+        # again, the app must fail loudly rather than quietly stop isolating.
+        mapper = execute_state.bind_mapper
         if mapper is None:
             return
 
