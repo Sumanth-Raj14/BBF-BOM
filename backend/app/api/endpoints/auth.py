@@ -156,7 +156,9 @@ async def plugin_login(
 
 
 @router.post("/refresh", response_model=Token)
-@limiter.limit(f"{auth_service.settings.RATE_LIMIT_AUTH_PER_MINUTE}/minute")
+# Refresh gets its own budget, not the login one — see
+# RATE_LIMIT_REFRESH_PER_MINUTE in core/config.py.
+@limiter.limit(f"{auth_service.settings.RATE_LIMIT_REFRESH_PER_MINUTE}/minute")
 async def refresh_token(
     request: Request,
     response: Response,
