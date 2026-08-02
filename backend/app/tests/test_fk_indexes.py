@@ -15,8 +15,19 @@ import app.models  # noqa: F401 — register every model on the metadata
 from app.db.base import Base
 
 
+# Constraint types that actually cause Postgres to build an index. A
+# ForeignKeyConstraint does NOT — this test originally counted every
+# constraint, so eight FK columns with no index at all were reported as
+# covered and the gap shipped. Keep this list exact.
+_INDEX_BACKED_CONSTRAINTS = ("PrimaryKeyConstraint", "UniqueConstraint")
+
+
 def _indexed_first_columns(table):
-    """Columns that lead an index (or a PK/unique constraint) on this table."""
+    """Columns that LEAD a real index on this table.
+
+    Only a leading column benefits: an index on (a, b) does not help a lookup
+    on b alone, which is exactly the FK-join and cascade-delete case here.
+    """
     leading = set()
     for ix in table.indexes:
         cols = list(ix.columns)
@@ -25,6 +36,8 @@ def _indexed_first_columns(table):
     for col in table.primary_key.columns:
         leading.add(col.name)
     for c in table.constraints:
+        if type(c).__name__ not in _INDEX_BACKED_CONSTRAINTS:
+            continue
         cols = list(getattr(c, "columns", []) or [])
         if cols:
             leading.add(cols[0].name)
