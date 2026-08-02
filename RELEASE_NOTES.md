@@ -1,5 +1,29 @@
 # Blackbox BOM Release Notes
 
+## [Unreleased] — on `master`, not yet tagged
+
+**Members & privileges UI, a real 3D CAD viewer, document downloads, and full foreign-key indexing.**
+
+Everything below is merged to `master` and unreleased. The dated release sections that follow are historical records and are not revised.
+
+### Added
+
+- **Members & Privileges screen** (`/members`). The RBAC API has been complete on the backend for some time but had no interface. The new screen (`frontend/src/components/screens/MembersScreen.jsx`, reachable from the nav rail) lists team members with their job title and role, changes a member's role, and enables or disables an account.
+- **Real 3D CAD viewer** (`frontend/src/components/cad/CadViewer.jsx`). STEP/STP/IGES/IGS files are tessellated in the browser by `occt-import-js`, a WebAssembly build of OpenCascade. STL, OBJ, GLTF/GLB, PLY and 3MF load directly through `three` loaders. Proprietary native CAD — `.sldprt`, `.sldasm`, `.ipt`, `.iam`, `.prt`, `.catpart` — cannot be rendered and the viewer says so plainly instead of failing quietly; export a neutral format such as STEP or STL.
+- **Document downloads**: `GET /api/v1/documents/{id}/download`. Until now the backend had no file-download endpoint whatsoever — uploads went in and file lists came out, but the stored bytes were unreachable, which is why previews and the 3D viewer had nothing to read. The endpoint serves both S3-backed and local documents, and resolves local paths through `os.path.realpath` with a containment check against the upload root so a tampered or legacy database row cannot be used to read arbitrary server files.
+- **End-to-end test fixtures and flows**: `backend/scripts/seed_e2e_fixture.py` seeds a multi-level BOM (`--clean` tears it down), and `frontend/e2e/real-flows.spec.js` drives a real backend — checking that the API is reachable through the app origin rather than the SPA fallback, that anonymous callers are rejected, that a wrong password does not get in, that a real login reaches the app shell, and that authenticated screens render without crashing. These run manually; CI has no Playwright job on this branch.
+
+### Changed
+
+- **Single Alembic head at `048_index_foreign_keys`** (48 migrations; fresh install builds 160 tables).
+- **Every foreign-key column is indexed.** 30 FK columns previously had no supporting index, so joins across them fell back to sequential scans — notably `bom_closures.ancestor_item_id` and `descendant_item_id`, which every BOM explosion and where-used lookup joins on — and because 28 of the 30 cascade on delete, removing a parent row scanned the entire child table. None remain unindexed.
+- **The CAD import modal no longer pretends to import.** It previously ran a progress animation and then displayed a hardcoded parts list. It now explains that `.sldasm`/`.sldprt` are proprietary SolidWorks formats and that the SolidWorks add-in is required; no file is uploaded and no import runs.
+- **Screens no longer silently fall back to the bundled demo BOM.** `AppCtx` used to resolve rows as `apiRows || data.rows`, so until the parts API answered — and permanently if it failed — Analytics, the BOM editor, search and sourcing rendered the demo assembly with no error and no empty state. Rows now default to an empty array, and screens show real data or an honest empty state.
+
+### Known limitations
+
+- The `window.*` app-global to ES-module migration (improvement #2) is **in progress, not complete**. `window.__nav`, `window.__poDraft` and `window.apiConnected` are retired in favour of `src/services/navigation.js`, `src/services/poDraft.js` and React context, and `window.INR_RATE` is superseded by `src/utils/currency.js` — but one live read of `window.INR_RATE` remains in `src/utils/download.ts`.
+
 ## [2.1.0] — 2026-07-19
 
 **Regulated compliance, Zoho Books sync, accessibility & mobile polish, desktop packaging with auto-update.**

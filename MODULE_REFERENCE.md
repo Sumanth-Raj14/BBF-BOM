@@ -510,7 +510,7 @@ class Base(DeclarativeBase):
 All models inherit from `Base` (SQLAlchemy 2.0 pattern). Provides `__tablename__`, primary keys, relationships.
 
 **Alembic Migrations**:
-- Schema head: **047_solidworks_integration** (47 migrations, 159 tables)
+- Schema head: **048_index_foreign_keys** (48 migrations, 160 tables)
 - Location: `alembic/versions/`
 - Versioning: Sequential numbering (001, 002, ..., 040)
 - Auto-migration: `alembic upgrade head` applies all pending migrations
@@ -1141,6 +1141,22 @@ Implements design system primitives (component-level, not business logic):
 | **Checkbox** / **Radio** | Input controls | checked, onChange, label |
 | **Textarea** | Multi-line text | rows, placeholder, disabled, onChange |
 
+### Members & Privileges (`src/components/screens/MembersScreen.jsx`)
+
+Default-exported screen mounted at `/members` in `src/screens/App.jsx`, with a nav-rail entry (`id: "members"`) in `NavRail.jsx`. Lists team members with name, email, job title, role and status; changes a member's role through a per-row select; and enables or disables an account. The RBAC API it calls has existed on the backend all along — this screen is the first interface to it.
+
+### 3D CAD Viewer (`src/components/cad/CadViewer.jsx`)
+
+Renders CAD geometry in the browser. Two paths:
+
+| Extensions | Loader | Notes |
+|---|---|---|
+| `step`, `stp`, `iges`, `igs` | `occt-import-js` (WASM OpenCascade) | B-rep tessellated client-side. The WASM binary is referenced with Vite's `?url` import so it is emitted as an asset — without that it 404s and STEP/IGES fail silently. |
+| `stl`, `obj`, `gltf`, `glb`, `ply`, `3mf` | `three` loaders (`STLLoader`, `OBJLoader`, `GLTFLoader`, `PLYLoader`, `ThreeMFLoader`) | Mesh formats loaded directly. |
+| `sldprt`, `sldasm`, `ipt`, `iam`, `prt`, `catpart` | none — unsupported by design | Proprietary binaries with no public format. The viewer reports this and suggests exporting STEP or STL rather than failing quietly. |
+
+Scene handling (camera, lighting, `OrbitControls`) comes from `three`. Geometry bytes are fetched from `GET /api/v1/documents/{id}/download`.
+
 ### State Management (`src/context/AppCtx.jsx`)
 
 **Global State**:
@@ -1357,9 +1373,9 @@ api.boms = {
 - **Status**: Documented, workaround in place
 
 ⚠️ **Test Coverage**:
-- Full test suite runs on SQLite, not Postgres
-- Postgres-only defects (VARCHAR enforcement, RLS behavior, dialect SQL) not covered
-- 0 remaining test failures — full suite green on the Postgres hard gate (634 passed / 0 failed)
+- The local/dev track runs on SQLite; CI runs the same suite on real Postgres as a hard gate
+- Postgres-only defects (VARCHAR enforcement, RLS behavior, dialect SQL) are only covered by the PG gate
+- Suite size is now 648 collected tests. A SQLite run gives 640 passed / 6 failed / 2 skipped, where all 6 failures are Postgres-only SQL in `test_analytics` and `test_search`
 - **Mitigation**: Production runs on Postgres; Postgres-specific bugs caught in staging/prod
 
 ### Features (Not Yet Merged)
