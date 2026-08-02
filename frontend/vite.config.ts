@@ -29,6 +29,19 @@ export default defineConfig({
       },
     },
   },
+  // `vite preview` (what the E2E suite runs against) does NOT inherit
+  // server.proxy. Without this the built app's /api/v1 calls hit the preview
+  // server, which returns index.html -- so every E2E test would exercise a
+  // frontend talking to nothing. Mirror the dev proxy.
+  preview: {
+    port: 4173,
+    proxy: {
+      '^/api/': {
+        target: process.env.VITE_API_TARGET || 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+    },
+  },
   define: {
     __MOCK_MODE__: 'false',
     'import.meta.env.VITE_MOCK_MODE': JSON.stringify('false'),
