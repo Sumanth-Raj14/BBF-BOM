@@ -263,3 +263,120 @@ jobs:
           # Postgres fresh-install job above.
           python -m pytest -p no:cacheprovider -q --tb=no || true
           echo "::warning::SQLite suite ran with known pre-existing failures (see TEST_FAILURES_TRIAGE.md). Non-blocking; Postgres fresh-install is the gating job."
+
+  e2e-playwright:
+    name: E2E (Playwright vs real backend)
+    runs-on: ubuntu-latest
+    # Improvement #7. The pre-existing smoke suite could not catch real bugs:
+    # it faked auth via localStorage and ran against `vite preview`, which has
+    # no route to the API — a frontend talking to nothing. This job stands up
+    # the REAL stack (Postgres -> init_db -> seed fixture -> uvicorn -> built
+    # SPA) and drives it through a browser, so login, the proxy, CSRF on
+    # writes, and every screen actually mounting are all exercised.
+    #
+    # NOT a hard gate yet: it is new, and browser suites need a few runs to
+    # prove they are not flaky. Promote it (remove continue-on-error) once it
+    # has been stable for a while.
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bom_user
+          POSTGRES_PASSWORD: ci_postgres_pw_9f3a7c1e
+          POSTGRES_DB: bom_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      POSTGRES_SERVER: 127.0.0.1
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: bom_user
+      POSTGRES_PASSWORD: ci_postgres_pw_9f3a7c1e
+      POSTGRES_DB: bom_db
+      DATABASE_URL: postgresql+asyncpg://bom_user:ci_postgres_pw_9f3a7c1e@127.0.0.1:5432/bom_db
+      # NB: must avoid _WEAK_SECRET_VALUES substrings ("test", "secret", ...)
+      # or Settings rejects the key and the app refuses to boot.
+      SECRET_KEY: ci-e2e-suite-signkey-donotuse-9f3a7c1e4b2d5a8b6d4f2a0c8e7b
+      ENCRYPTION_KEY: ci-e2e-suite-encryption-key-do-not-use-in-prod-4b2d9f3a5a8b
+      S3_SECRET_KEY: ci-e2e-suite-s3key-donotuse-7c1e4b2d9f3a5a8b6d4f2a0c8e7b
+      ADMIN_EMAIL: ci@blackbox-bom.com
+      E2E_EMAIL: admin@blackbox.com
+      E2E_PASSWORD: admin123
+      VITE_API_TARGET: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-test.txt
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h 127.0.0.1 -p 5432 -U bom_user && break
+            sleep 2
+          done
+
+      - name: Bootstrap schema and seed the E2E fixture
+        working-directory: backend
+        # --with-user mints the login the suite signs in as; CI has no seeded
+        # account (init_db provisions schema, not users).
+        run: |
+          python -m scripts.init_db
+          python -m scripts.seed_e2e_fixture --with-user
+
+      - name: Start the backend
+        working-directory: backend
+        run: |
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
+          for i in $(seq 1 40); do
+            curl -sf http://127.0.0.1:8000/health >/dev/null && echo "backend up" && exit 0
+            sleep 2
+          done
+          echo "::error::backend did not start"; cat uvicorn.log; exit 1
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright
+        working-directory: frontend
+        # playwright.config.js's webServer builds and previews the SPA; the
+        # preview proxy forwards /api to VITE_API_TARGET above.
+        run: npx playwright test --reporter=line
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      - name: Backend log on failure
+        if: failure()
+        working-directory: backend
+        run: tail -100 uvicorn.log || true
