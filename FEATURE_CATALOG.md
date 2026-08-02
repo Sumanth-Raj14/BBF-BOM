@@ -11,7 +11,7 @@
 Blackbox BOM is a production-grade Bill of Materials and Product Lifecycle Management platform competing with OpenBOM. The system provides ~500 REST API routes organized into 15+ feature domains, serving multi-tenant deployments with role-based access control, audit logging, and local-first storage with optional cloud sync. All shipped code assumes PostgreSQL; SQLite is test-only.
 
 **Key Stats:**
-- **Backend:** FastAPI + async SQLAlchemy 2.0 + PostgreSQL (47 migrations, head `047_solidworks_integration`, row-level security optional)
+- **Backend:** FastAPI + async SQLAlchemy 2.0 + PostgreSQL (48 migrations, head `048_index_foreign_keys`, row-level security optional)
 - **Frontend:** React + Vite with lazy-loaded screens, CSS design system (Geist type scale, two-tone olive/orange)
 - **Database:** PostgreSQL with app-layer tenant isolation + opt-in Row-Level Security
 - **Auth:** RS256 JWT + RBAC (10+ role types, 60+ permissions)
@@ -880,7 +880,7 @@ Data from tenantId=2 is invisible even if SQL injection attempted
 **Known Issues (from Postgres bring-up 2026-07-17):**
 1. **Migration 036 VARCHAR length** — alembic_version.version_num VARCHAR(32) by default, but some revision IDs are 33 chars (036_role_permission_tenant_scoped) → FRESH Postgres installs fail at migration 036. Workaround: widen alembic_version.version_num to VARCHAR(64) before running migrations. Permanent fix pending in alembic/env.py.
 2. **Alembic env.py DATABASE_URL requirement** — alembic/env.py reads only DATABASE_URL env var; falls back to hardcoded alembic.ini (bom_user:@localhost, often wrong password). Ignores .env. Workaround: export DATABASE_URL before running `alembic upgrade head`.
-3. **Postgres coverage in CI** — RESOLVED. The full suite runs against real PostgreSQL 16 as a hard gate (634 passed / 0 failed / 1 skipped / 1 xfailed), so Postgres-only behavior (VARCHAR/FK/NOT-NULL enforcement, RLS, identity sequences, dialect SQL) is exercised. SQLite remains the fast local/dev track.
+3. **Postgres coverage in CI** — RESOLVED. The full suite (now 648 collected tests) runs against real PostgreSQL 16 as a hard gate, so Postgres-only behavior (VARCHAR/FK/NOT-NULL enforcement, RLS, identity sequences, dialect SQL) is exercised. SQLite remains the fast local/dev track.
 
 ---
 
@@ -1117,15 +1117,67 @@ App continues with new code + preserved data
 
 ---
 
+#### 73. Members & Privileges Administration
+- **Category:** Administration & Settings
+- **Purpose:** Give administrators a UI for the RBAC model — see who is on the team, what role each person holds, and turn accounts on or off
+- **Business Value:** The RBAC API was complete on the backend but had no interface, so role changes required direct API calls. This closes that gap.
+- **User Roles:** Admin
+
+| Aspect | Details |
+|--------|---------|
+| **Frontend** | `frontend/src/components/screens/MembersScreen.jsx`, routed at `/members` in `src/screens/App.jsx`; nav-rail entry `{ id: "members", label: "Members" }` in `NavRail.jsx` |
+| **Listing** | Member name/username, email, job title, current role, active/disabled status; client-side search filter |
+| **Role Assignment** | Per-row select bound to the available roles; superusers are shown as holding all privileges rather than an editable role |
+| **Account Status** | Enable/disable toggle per member |
+| **Backend** | Existing RBAC/user endpoints — no new API surface was needed |
+| **Implementation Status** | ✅ Shipped (unreleased, on `master`) |
+
+---
+
+#### 74. 3D CAD Viewer (in-browser)
+- **Category:** Documents & CAD
+- **Purpose:** Render CAD geometry directly in the browser instead of only listing files
+- **Business Value:** Engineers and buyers can inspect geometry without a CAD seat; makes the document vault useful rather than a filing cabinet
+- **User Roles:** All users with document read access
+
+| Aspect | Details |
+|--------|---------|
+| **Frontend** | `frontend/src/components/cad/CadViewer.jsx` |
+| **STEP / IGES** | `step`, `stp`, `iges`, `igs` tessellated in-browser by `occt-import-js` — a WebAssembly build of OpenCascade. The WASM asset is imported with Vite's `?url` so it is emitted to the bundle; otherwise it 404s and these formats fail silently. |
+| **Mesh formats** | `stl`, `obj`, `gltf`, `glb`, `ply`, `3mf` via the corresponding `three` loaders |
+| **Not supported** | `.sldprt`, `.sldasm`, `.ipt`, `.iam`, `.prt`, `.catpart` — proprietary binaries with no public format. The viewer states this and points at exporting STEP or STL; it does not fail quietly. |
+| **Scene** | `three` with `OrbitControls`, camera framing and lighting |
+| **Data source** | `GET /api/v1/documents/{id}/download` |
+| **Implementation Status** | ✅ Shipped (unreleased, on `master`) |
+
+---
+
+#### 75. Document Download
+- **Category:** Documents & CAD
+- **Purpose:** Retrieve the stored bytes of an uploaded document
+- **Business Value:** Before this the backend had **no file-download endpoint at all** — files could be uploaded and listed but never read back, which left downloads, previews and the 3D viewer with no data source
+- **User Roles:** Authenticated users with document access
+
+| Aspect | Details |
+|--------|---------|
+| **Endpoint** | `GET /api/v1/documents/{document_id}/download` (`backend/app/api/endpoints/documents.py`) |
+| **S3 storage** | Fetches by key and returns the bytes with a `Content-Disposition` attachment header |
+| **Local storage** | Served via `FileResponse` |
+| **Path-traversal guard** | `filePath` comes from the database and is not trusted. The path is resolved with `os.path.realpath` (following symlinks and `..`) and rejected with a 404 unless it is inside the upload root, so a tampered or legacy row cannot read arbitrary server files such as `../../.env`. Refusals are logged. |
+| **Tenant scoping** | Not re-implemented in the endpoint — `Document` is `TenantAwareMixin`, so the SELECT auto-filter scopes the lookup and another tenant's id simply reads as 404 |
+| **Implementation Status** | ✅ Shipped (unreleased, on `master`) |
+
+---
+
 ## Pending Features
 
-### 73. Mobile Scanner & Field Operations (feat/polish)
+### 76. Mobile Scanner & Field Operations (feat/polish)
 - **Status** | ⏳ Planned (MobileScannerScreen exists; barcode scanning API exists; real-time sync pending)
 - **Scope** | PWA-compatible scanner for warehouse receiving, WO checklist, inventory counting
 - **Database** | Barcode scans already tracked; real-time sync to backend pending
 - **Implementation Status** | ⏳ PENDING (core API yes, mobile UI refinement and offline mode pending)
 
-### 74. Advanced Reporting & BI (Custom Reports)
+### 77. Advanced Reporting & BI (Custom Reports)
 - **Status** | ⏳ Backlog
 - **Scope** | Report builder (UI for selecting metrics, filters, grouping); scheduled report delivery (email); export to Tableau/Power BI
 - **Implementation Status** | ⏳ PENDING
@@ -1152,7 +1204,7 @@ App continues with new code + preserved data
 - **Permanent Fix:** Pending update to alembic/env.py to also read .env (python-dotenv integration)
 
 **Issue 3: Test Suite Uses SQLite, Not PostgreSQL (MEDIUM)**
-- **Symptom (RESOLVED):** formerly ~73 failures; the full suite now passes on real Postgres in CI (634 passed / 0 failed). Postgres-vs-SQLite divergences (VARCHAR enforcement, RLS behavior, dialect SQL) are covered by the hard gate.
+- **Symptom (RESOLVED):** formerly ~73 failures; the full suite (now 648 collected tests) runs on real Postgres in CI as a hard gate. Postgres-vs-SQLite divergences (VARCHAR enforcement, RLS behavior, dialect SQL) are covered there — a local SQLite run still shows 6 failures in `test_analytics`/`test_search`, all of them Postgres-only SQL rather than product defects.
 - **Root Cause:** backend/app/tests uses SQLite (in-memory) for speed; production uses PostgreSQL
 - **Impact:** Postgres-specific defects not caught until staging/production; schema drift risk
 - **Workaround:** CI now runs full tests on PostgreSQL (docker-compose.test.yml with Postgres + Redis)
@@ -1264,7 +1316,7 @@ Response returned; frontend refreshes BOM list
 
 **Current Release:** v2.1.0 (master)  
 **Released:** 2026-07-19  
-**Database Schema:** head `047_solidworks_integration` (latest migration) — includes compliance pack, Part 11 e-signatures, substance reference data, part composition declarations, compliance evaluations, Zoho Books sync, SolidWorks integration  
+**Database Schema:** head `048_index_foreign_keys` (latest migration) — includes compliance pack, Part 11 e-signatures, substance reference data, part composition declarations, compliance evaluations, Zoho Books sync, SolidWorks integration  
 **Breaking Changes:** None (backward-compatible from v1.48.0)  
 **Security Patches:** Account lockout (5 failed attempts), password policy (8+ chars, mixed case/digit/special)  
 **Deprecations:** SQLite test database (now PostgreSQL); Base.metadata.create_all() (now Alembic only)  
