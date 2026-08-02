@@ -175,9 +175,15 @@ async def upload_document(
     s3_result = await s3_storage.upload_file(content, s3_key, content_type)
 
     file_path = s3_result.get("localPath") or os.path.join(UPLOAD_DIR, safe_filename)
-    if s3_result.get("storage") == "local_fallback":
+    stored_locally = s3_result.get("storage") == "local_fallback"
+    if stored_locally:
         with open(file_path, "wb") as f:
             f.write(content)
+    # Record where the bytes ACTUALLY landed. This was never set, so every
+    # document inherited the model default and claimed to be in S3 even when it
+    # was written to local disk — which made downloads look in object storage
+    # and 404 on a file that was sitting in UPLOAD_DIR.
+    storage_backend = "local" if stored_locally else "s3"
 
     db_doc = Document(
         filename=safe_filename,
@@ -191,6 +197,7 @@ async def upload_document(
         partId=partId,
         projectId=projectId,
         accessLevel=accessLevel,
+        storage_type=storage_backend,
         uploadedBy=current_user.email,
         tenantId=current_user.tenantId,
     )
@@ -233,16 +240,26 @@ async def download_document(
     media_type = "application/octet-stream"
 
     # S3-backed: fetch by key and return the bytes directly.
+    #
+    # Falls through to the local path when object storage has nothing. Every
+    # document written before this was labelled storage_type='s3' regardless of
+    # where it actually went (the upload never set the column, so it took the
+    # model default), so on a local-first install — the supported default —
+    # those rows point at an S3 bucket that need not even exist while the file
+    # sits in UPLOAD_DIR. Trusting the label alone 404s a file that is present.
     if (document.storage_type or "").lower() == "s3":
         key = document.filePath or document.url
         data = await s3_storage.download_file(key) if key else None
-        if data is None:
+        if data is not None:
+            return Response(
+                content=data,
+                media_type=media_type,
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+        # Object storage had nothing. If the bytes are on local disk, serve
+        # them; only give up when neither backend has the file.
+        if not (document.filePath and os.path.isfile(document.filePath)):
             raise HTTPException(status_code=404, detail="Stored file is unavailable")
-        return Response(
-            content=data,
-            media_type=media_type,
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
 
     if not document.filePath:
         raise HTTPException(status_code=404, detail="Stored file is unavailable")
