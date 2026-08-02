@@ -1,6 +1,7 @@
 ﻿import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
+import { getInrRate } from "../../utils/currency.js";
 import { navigateTo } from "../../services/navigation.js";
 import { toast } from "../../utils/toast";
 import {
@@ -416,7 +417,7 @@ export default function AnalyticsScreen({ data }) {
                     ].forEach((v, i) => {
                       cx.fillText(
                         "\u20B9" +
-                          ((v * (window.INR_RATE || 83)) / 100000).toFixed(1) +
+                          ((v * getInrRate()) / 100000).toFixed(1) +
                           "L",
                         pad.l - 6,
                         pad.t + (i / 2) * h + 4,
@@ -578,7 +579,7 @@ export default function AnalyticsScreen({ data }) {
                   fontFamily="var(--font-mono)"
                   fill="var(--fg-3)"
                 >
-                  ₹{((v * (window.INR_RATE || 83)) / 100000).toFixed(1)}L
+                  ₹{((v * getInrRate()) / 100000).toFixed(1)}L
                 </text>
               ))}
               {(() => {
@@ -715,7 +716,7 @@ export default function AnalyticsScreen({ data }) {
                       fill="var(--fg)"
                     >
                       ₹
-                      {((totalCost * (window.INR_RATE || 83)) / 100000).toFixed(
+                      {((totalCost * getInrRate()) / 100000).toFixed(
                         1,
                       )}
                       L

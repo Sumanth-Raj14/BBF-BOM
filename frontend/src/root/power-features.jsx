@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { getInrRate } from "../utils/currency.js";
 import { navigateTo } from "../services/navigation.js";
 import { storage } from "../utils/storage.js";
 import { screenData } from "../services/screenDataBridge.js";
@@ -1258,7 +1259,7 @@ function LandedCostModal({ open, onClose, part }) {
             :{" "}
             <strong>
               {(
-                (per_unit / (unit * (window.INR_RATE || 83)) - 1) *
+                (per_unit / (unit * getInrRate()) - 1) *
                 100
               ).toFixed(1)}
               %

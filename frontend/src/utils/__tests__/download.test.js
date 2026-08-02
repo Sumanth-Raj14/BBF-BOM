@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { flattenForCSV, generateXLSX } from '../download.js';
+import { resetInrRate } from '../currency.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
-  window.INR_RATE = 83;
+  // Was `window.INR_RATE = 83` -- a no-op: nothing ever read that global as
+  // settable, and 83 was already the hardcoded fallback. The rate now lives
+  // in utils/currency.js; reset it so each test starts from the default.
+  resetInrRate();
   window.__t = vi.fn((k) => k);
   window.openPrintWindow = vi.fn();
   window.toast = vi.fn();

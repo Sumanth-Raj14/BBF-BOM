@@ -49,7 +49,8 @@ function AppCtxProvider({ children }) {
   const [syncStatus, setSyncStatus] = React.useState(
     dataService.getSyncStatus(),
   );
-  window.apiConnected = apiConnected;
+  // Improvement #2: apiConnected is on the context value below; it used to be
+  // mirrored onto window for modals that already hold ctx. Mirror removed.
 
   const [authed, setAuthed] = React.useState(() => storage.auth.get());
   const [onboardingDone, setOnboardingDone] = React.useState(() =>

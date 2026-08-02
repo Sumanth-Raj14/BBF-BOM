@@ -31,7 +31,7 @@ function BOMDuplicationModal({ open, onClose }) {
       }));
     const dupRows = relabel(newRows);
 
-    if (window.apiConnected) {
+    if (ctx?.apiConnected) {
       try {
         const newCode =
           (ctx.project?.code || "BOM") + "-V" + Math.floor(Math.random() * 100);
@@ -180,13 +180,13 @@ function BOMDuplicationModal({ open, onClose }) {
       </div>
 
       <div className="flex items-center gap-8 mt-14">
-        <Badge tone={window.apiConnected ? "success" : "neutral"}>
-          {window.apiConnected
+        <Badge tone={ctx?.apiConnected ? "success" : "neutral"}>
+          {ctx?.apiConnected
             ? __t("bomDuplication.connected") || "Connected"
             : __t("bomDuplication.offline") || "Offline"}
         </Badge>
         <span className="fs-11 fg-3">
-          {window.apiConnected
+          {ctx?.apiConnected
             ? __t("bomDuplication.apiConnectedInfo") ||
               "Will create a new project and save BOM to server"
             : __t("bomDuplication.offlineInfo") ||

@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { getInrRate } from "../../utils/currency.js";
 import { ANIM } from "../../utils/design-tokens.js";
 
 import { __t } from "../../i18n";
@@ -350,7 +351,7 @@ export default function BarcodeScanModal({ open, onClose, onFound }) {
             <span aria-hidden="true">·</span>
             <span>
               {foundPart.cost
-                ? `₹${(foundPart.cost * (window.INR_RATE || 83)).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
+                ? `₹${(foundPart.cost * getInrRate()).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
                 : "N/A"}
             </span>
             {foundPart.status && (

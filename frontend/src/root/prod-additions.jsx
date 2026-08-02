@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { getInrRate } from "../utils/currency.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import { api } from "../globals";
@@ -387,11 +388,11 @@ function InventoryScreen() {
         description={
           __t("inventory.subtitle", {
             count: inventory.length,
-            value: ((totals.value * (window.INR_RATE || 83)) / 100000).toFixed(
+            value: ((totals.value * getInrRate()) / 100000).toFixed(
               1,
             ),
           }) ||
-          `${inventory.length} SKUs \u00B7 \u20B9${(totals.value * (window.INR_RATE || 83)).toLocaleString("en-IN", { maximumFractionDigits: 0 })} on hand${warehousesLabel ? " \u00B7 " + warehousesLabel : ""}`
+          `${inventory.length} SKUs \u00B7 \u20B9${(totals.value * getInrRate()).toLocaleString("en-IN", { maximumFractionDigits: 0 })} on hand${warehousesLabel ? " \u00B7 " + warehousesLabel : ""}`
         }
         actions={
           <>
@@ -490,7 +491,7 @@ function InventoryScreen() {
             l: __t("inventory.inventoryValue") || "Inventory value",
             v:
               "\u20B9" +
-              ((totals.value * (window.INR_RATE || 83)) / 100000).toFixed(1) +
+              ((totals.value * getInrRate()) / 100000).toFixed(1) +
               "L",
             c: "var(--accent-text)",
           },
