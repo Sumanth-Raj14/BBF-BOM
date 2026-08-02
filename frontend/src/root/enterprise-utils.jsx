@@ -353,14 +353,16 @@ export function unregisterSaveHandler(fn) {
 window.registerSaveHandler = registerSaveHandler;
 window.unregisterSaveHandler = unregisterSaveHandler;
 
-// Register default shortcuts
-keyboardShortcuts.register(
-  "ctrl+k",
-  () => {
-    if (window.openModal) window.openModal("search");
-  },
-  __t("enterprise.shortcutGlobalSearch") || "Open global search",
-);
+// Register default shortcuts.
+//
+// Improvement #2: the ctrl+k and escape entries that used to live here were
+// removed. Both were gated on `window.openModal`, which nothing ever assigns
+// — openModal is a value on the app context, not a global — so neither
+// handler could ever run. Both shortcuts are in fact already implemented
+// where the state lives: ctrl+k in context/AppCtx.jsx (its own keydown
+// listener opens "global-search"), and escape-to-close inside each Modal
+// component. Nothing reads getShortcuts() for display, so removing the two
+// dead registrations changes no behaviour.
 keyboardShortcuts.register(
   "ctrl+s",
   async (e) => {
@@ -378,13 +380,6 @@ keyboardShortcuts.register(
     }
   },
   __t("enterprise.shortcutSaveBom") || "Save current BOM",
-);
-keyboardShortcuts.register(
-  "escape",
-  () => {
-    if (window.openModal) window.openModal(null);
-  },
-  __t("enterprise.shortcutCloseModal") || "Close modal",
 );
 
 // CSRF is handled cookie-based in api.js (X-CSRF-Token from the csrf_token

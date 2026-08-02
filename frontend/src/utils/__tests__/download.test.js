@@ -8,9 +8,8 @@ beforeEach(() => {
   // settable, and 83 was already the hardcoded fallback. The rate now lives
   // in utils/currency.js; reset it so each test starts from the default.
   resetInrRate();
-  window.__t = vi.fn((k) => k);
-  window.openPrintWindow = vi.fn();
-  window.toast = vi.fn();
+  // No window.__t / window.openPrintWindow / window.toast stubs: download.js
+  // imports all three as ES modules, so stubbing the globals did nothing.
 
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
@@ -90,15 +89,16 @@ describe('generateXLSX', () => {
 
   it('generated Blob contains XML with part data', () => {
     const origCreateObjectURL = URL.createObjectURL;
+    let capturedBlob = null;
     URL.createObjectURL = vi.fn((blob) => {
-      window.capturedBlob = blob;
+      capturedBlob = blob;
       return 'blob:mock';
     });
 
     generateXLSX(sampleBOM, 'test.xlsx');
 
-    expect(window.capturedBlob).not.toBeNull();
-    expect(window.capturedBlob.type).toBe('application/vnd.ms-excel');
+    expect(capturedBlob).not.toBeNull();
+    expect(capturedBlob.type).toBe('application/vnd.ms-excel');
 
     URL.createObjectURL = origCreateObjectURL;
   });

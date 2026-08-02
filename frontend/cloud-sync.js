@@ -2,6 +2,7 @@
 // Provides automatic sync on login, periodic sync, and manual sync triggers
 
 import config from './src/config.js';
+import { toast } from './src/utils/toast.js';
 
 // Same-origin by default (see src/config.js) so this goes through the same
 // reverse proxy as every other API call, instead of a hardcoded absolute
@@ -61,12 +62,12 @@ async function syncAllToServer() {
       console.log(`[CloudSync] Synced ${result.count} keys to server`);
     } else if (resp.status === 401) {
       console.warn('[CloudSync] Auth expired, stopping sync');
-      window.toast?.('Cloud sync stopped — session expired', { kind: 'warn' });
+      toast('Cloud sync stopped — session expired', { kind: 'warn' });
       stopSync();
     }
   } catch (e) {
     console.warn('[CloudSync] Sync failed (offline?):', e.message);
-    window.toast?.('Cloud sync failed — check your connection', { kind: 'error' });
+    toast('Cloud sync failed — check your connection', { kind: 'error' });
   } finally {
     syncInProgress = false;
   }
@@ -102,7 +103,7 @@ async function pullFromServer() {
     }
   } catch (e) {
     console.warn('[CloudSync] Pull failed:', e.message);
-    window.toast?.('Failed to pull latest data from server', { kind: 'warn' });
+    toast('Failed to pull latest data from server', { kind: 'warn' });
   }
 }
 

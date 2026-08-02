@@ -938,7 +938,7 @@ export function BomEditor({
             size="sm"
             onClick={() =>
               ctx?.openModal?.("barcode-scan", {
-                onFound: (pn) => window.__setBomSearch?.(pn),
+                onFound: (pn) => ctx?.setSearch?.(pn),
               })
             }
           >
