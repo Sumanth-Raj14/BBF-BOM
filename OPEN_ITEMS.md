@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-This document tracks outstanding work across the Blackbox BOM platform (backend + frontend + plugin). Current shipped release is v2.1.0 on master. All three feature branches have been merged to master: feat/regulated (FDA Part 11 + RoHS/REACH), feat/zoho-books (two-way Zoho Books sync), and feat/polish (WCAG-AA dark mode, a11y modes, mobile/scanner polish). Fresh PostgreSQL installs are fully supported; head is now `047_solidworks_integration` with **159 tables**.
+This document tracks outstanding work across the Blackbox BOM platform (backend + frontend + plugin). Current shipped release is v2.1.0 on master. All three feature branches have been merged to master: feat/regulated (FDA Part 11 + RoHS/REACH), feat/zoho-books (two-way Zoho Books sync), and feat/polish (WCAG-AA dark mode, a11y modes, mobile/scanner polish). Fresh PostgreSQL installs are fully supported; head is now `048_index_foreign_keys` (48 migrations) with **160 tables**.
 
 **Recently resolved (v2.1.0 release):**
 1. ✅ **Migration collision resolved** — feat/regulated `041_part11_esignatures` and feat/zoho-books `041_zoho_books_sync_tables` relinked into linear chain via Alembic rebase (041_compliance_pack -> 041_part11_esignatures -> 042_substance_reference_data -> 043_part_composition_declarations -> 044_compliance_evaluations -> 041_zoho_books_sync_tables)
@@ -20,8 +20,16 @@ This document tracks outstanding work across the Blackbox BOM platform (backend 
 5. ✅ **Full test-suite re-baseline DONE on real Postgres** — `Test Suite on Postgres` CI job is a green HARD GATE: **634 passed / 0 failed / 1 skipped / 1 xfailed** on PG16. No remaining test failures. (See CHANGELOG `[Unreleased]` and TEST_FAILURES_TRIAGE.md resolution banner.)
 6. ✅ **Migration-system tests fixed** — re-pinned to real head `047`; offline-SQL test `xfail`ed (documented); obsolete `sql_archive` test removed.
 
+**Recently resolved (2026-08-02 — post-v2.1.0 work on `master`):**
+7. ✅ **Foreign keys indexed (improvement #6)** — migration `048_index_foreign_keys` adds an index to each of the 30 FK columns that lacked one; 0 FK columns remain without index coverage.
+8. ✅ **Members & Privileges UI** — `frontend/src/components/screens/MembersScreen.jsx` at `/members`; the RBAC API finally has an interface.
+9. ✅ **Real 3D CAD viewer** — `frontend/src/components/cad/CadViewer.jsx` (STEP/IGES via `occt-import-js` WASM; STL/OBJ/GLTF/PLY/3MF via `three`). Proprietary `.sldprt`/`.sldasm` are explicitly unsupported.
+10. ✅ **Document download endpoint** — `GET /api/v1/documents/{id}/download`, previously absent entirely, with a `realpath` containment guard against path traversal.
+11. ✅ **Demo-data fallbacks removed** — `AppCtx` no longer substitutes the bundled demo BOM for real data, and the CAD import modal no longer fakes an import.
+
 **Current blocking issues:**
 - PITR/WAL end-to-end live verification in packaged desktop environment
+- E2E Playwright suite exists but **is not wired into CI on `master`** — see the status table
 
 ---
 
@@ -36,6 +44,9 @@ This document tracks outstanding work across the Blackbox BOM platform (backend 
 | **ALLOWED_HOSTS/testserver misconfig** | Bug | HIGH | Backend | ✅ RESOLVED | v2.1 | Fixed. pytest now allows 'testserver' in ALLOWED_HOSTS. Unblocked ~412 of 414 previously-failing tests. |
 | **Test suite RE-BASELINE (post-ALLOWED_HOSTS)** | Testing | HIGH | Backend | ✅ RESOLVED | v2.1 | Done on real Postgres: `Test Suite on Postgres` CI = **634 passed / 0 failed / 1 skipped / 1 xfailed** (PG16). This is now the authoritative hard gate. |
 | **Test suite SQLite-only (local)** | Infrastructure | MEDIUM | Backend | OPEN | v2.2 | Fast local/dev track is still SQLite. CI now runs the FULL suite on real Postgres (hard gate) + a fresh-install bootstrap job, so PG-only behavior is covered in CI. A local docker-compose.test.yml Postgres runner is still a nice-to-have for pre-push parity. |
+| **E2E Playwright not wired into CI** | Testing | HIGH | Frontend | OPEN | v2.2 | `frontend/e2e/real-flows.spec.js` + `smoke.spec.js` exist and pass against a live backend, and `backend/scripts/seed_e2e_fixture.py` seeds the data, but **no workflow in `.github/workflows/` runs Playwright on `master`** — so E2E is manual and non-gating. The CI job and an additional `write-flows.spec.js` suite are on the unmerged branch `test/e2e-ci-and-write-flows`; merging it closes this. |
+| **`window.*` app-globals → ES modules (improvement #2)** | Tech Debt | MEDIUM | Frontend | IN PROGRESS | v2.2 | `window.__nav` → `src/services/navigation.js`, `window.__poDraft` → `src/services/poDraft.js`, `window.INR_RATE` → `src/utils/currency.js`, and `apiConnected` moved onto React context. **One live `window.INR_RATE` read remains, at `frontend/src/utils/download.ts:137`.** Many app globals are still registered by the `src/root/*.jsx` shim layer; the migration is not finished and there is still no lint rule blocking new `window.<AppGlobal>` references. |
+| **Unindexed foreign keys (improvement #6)** | Performance | MEDIUM | Backend | ✅ RESOLVED | v2.2 | Migration `048_index_foreign_keys` indexes all 30 previously-unindexed FK columns (`ix_<table>_<column>`, matching SQLAlchemy defaults so migrated and fresh schemas agree). 0 remain. |
 | **~73 pre-existing test failures** | Testing | MEDIUM | Backend | ✅ RESOLVED | v2.1 | 0 failures on the Postgres hard gate. The prior "~73 stubs" were the ALLOWED_HOSTS-masked cascade plus a handful of stale test contracts, all fixed. |
 | **feat/regulated merged** | Integration | HIGH | Backend | ✅ RESOLVED | v2.1 | Merged to master. FDA 21 CFR Part 11 e-signatures + RoHS/REACH substance compliance. Live in v2.1.0. |
 | **feat/zoho-books merged** | Integration | HIGH | Backend | ✅ RESOLVED | v2.1 | Merged to master. Two-way Zoho Books sync (parts/items, vendors/contacts, POs, cost) with conflict resolution engine. Live in v2.1.0. |
@@ -87,7 +98,7 @@ Alembic's default `alembic_version.version_num` column is VARCHAR(32). Migration
 
 **References:**
 - `backend/alembic/env.py` (fixed version with widening logic)
-- Single Alembic head: `047_solidworks_integration`
+- Single Alembic head: `048_index_foreign_keys`
 
 ---
 
@@ -164,21 +175,21 @@ Alembic's default `alembic_version.version_num` column is VARCHAR(32). Migration
 
 ## Testing & Quality Assurance
 
-### Test Coverage (v2.1.0)
-**Backend:** full suite green on the **Postgres hard gate** — **634 passed / 0 failed / 1 skipped / 1 xfailed** (real PG16, `Test Suite on Postgres` CI job).  
+### Test Coverage (current, measured 2026-08-02)
+**Backend:** suite collects **648 tests** and runs on the **Postgres hard gate** (real PG16, `Test Suite on Postgres` CI job). On the fast SQLite track: **640 passed / 6 failed / 2 skipped**, where all 6 failures are Postgres-only SQL (`TO_CHAR`, `NOW() - INTERVAL`, `ILIKE`, `ts_rank`, `::date`) in `test_analytics`/`test_search` that SQLite cannot parse. The PG gate was not re-run in this documentation pass — the previously recorded 634 passed / 0 failed / 1 skipped / 1 xfailed predates the tests added since.  
 - **Database:** SQLite for fast local/dev; the FULL suite runs against real PostgreSQL 16 in CI (authoritative hard gate) plus a fresh-install `init_db` bootstrap job.
 - **Skipped (1):** `test_migration_up_down_cycle` (needs a live localhost PG). **xfailed (1):** `test_migration_offline_sql` (offline `--sql` generation unsupported by design).
 - **Pre-existing failures:** none remaining — the ALLOWED_HOSTS-masked cascade and the handful of stale test contracts are all fixed.
 
-**Frontend:** 96 unit tests (Vitest) + **0 E2E tests**  
-- **E2E:** app/tests/e2e/ exists but empty. Playwright configured; no scenarios.
+**Frontend:** **182 unit tests passing across 86 files** (Vitest), run by the `Test Frontend` job in `ci.yml`.  
+- **E2E:** `frontend/e2e/` holds `smoke.spec.js`, `real-flows.spec.js` and `auth.setup.js`, with `backend/scripts/seed_e2e_fixture.py` seeding a multi-level BOM. They pass against a live backend but **no CI workflow runs them**, so they are manual and non-gating. (`backend/app/tests/e2e/` is still an empty stub.)
 - **Load testing:** locustfile.py exists; no passing baseline.
 
 ### Test Infrastructure Issues — Priority Fix Needed
-1. ✅ **Test suite RE-BASELINE** — DONE. Full suite runs green on the real-Postgres hard gate (634 passed / 0 failed / 1 skipped / 1 xfailed).
+1. ✅ **Test suite RE-BASELINE** — DONE. Full suite runs on the real-Postgres hard gate. Suite size has since grown to 648 collected tests; re-measure the PG numbers from the latest CI run rather than trusting a figure recorded here.
 2. **SQLite vs. Postgres divergence** — Local dev uses SQLite (faster); the full suite + a fresh-install bootstrap now run on real Postgres in CI, so PG-only behavior is covered. A local docker-compose.test.yml runner is still a nice-to-have for pre-push parity.
 3. **Outer test suite not consolidated** — tests/ (function-scoped, slow, 10+ min) should merge with app/tests/ (session-scoped, fast, 4-5 min). Different conftest setups.
-4. **No E2E coverage** — Critical workflows (multi-tenant auth, BOM explosion, PO approval, signature workflows, Zoho sync conflict resolution) not tested end-to-end.
+4. **E2E coverage exists but does not gate** — `real-flows.spec.js` now covers auth reachability, anonymous rejection, wrong-password rejection, real login and per-screen crash checks against a live backend. Still uncovered end-to-end: BOM explosion, PO approval, signature workflows and Zoho sync conflict resolution. And because no CI job runs Playwright on `master`, none of it blocks a merge.
 5. **Load testing baseline missing** — locustfile.py exists; no evidence of passing benchmarks for 500 endpoints, 50 concurrent users, 5-min ramp.
 
 ### References

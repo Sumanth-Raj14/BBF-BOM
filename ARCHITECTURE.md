@@ -96,7 +96,7 @@ graph TB
     end
     
     subgraph "Data Layer"
-        POSTGRES["PostgreSQL 16<br/>Async + asyncpg<br/>Alembic (47 migrations)<br/>RLS + App-layer isolation"]
+        POSTGRES["PostgreSQL 16<br/>Async + asyncpg<br/>Alembic (48 migrations)<br/>RLS + App-layer isolation"]
         REDIS["Redis 7<br/>Session cache<br/>Rate limit counters"]
     end
     
@@ -280,7 +280,7 @@ src/
 | **Uvicorn** | ≥0.29 | ASGI server; async request handling. |
 | **SQLAlchemy** | ≥2.0 + asyncio | ORM; async query execution via asyncpg. |
 | **asyncpg** | ≥0.29 | PostgreSQL async driver; prepared statements. |
-| **Alembic** | ≥1.13 | Schema versioning; 47 migrations to current state (head `047_solidworks_integration`). |
+| **Alembic** | ≥1.13 | Schema versioning; 48 migrations to current state (head `048_index_foreign_keys`). |
 | **Pydantic** | ≥2.7 | Request/response validation; settings management. |
 | **PyJWT** | ≥2.8 | RS256 JWT token encoding/verification. |
 | **bcrypt** | ≥4.1 | Password hashing. |
@@ -333,7 +333,7 @@ src/
 
 ### Schema Overview
 
-**Current migration head:** `047_solidworks_integration` (47 total migrations; fresh install builds 159 tables)
+**Current migration head:** `048_index_foreign_keys` (48 total migrations; fresh install builds 160 tables)
 
 **Core entities:**
 
@@ -731,7 +731,7 @@ Docker Compose (3.9)
 3. Applies pending migrations in order.
 4. Updates `alembic_version` table with current revision.
 
-**Current state:** head `047_solidworks_integration` (47 migrations) applied.
+**Current state:** head `048_index_foreign_keys` (48 migrations) applied. `048` adds an index to each of the 30 foreign-key columns that had none — `bom_closures.ancestor_item_id`/`descendant_item_id` among them, which BOM explosion and where-used join on for every lookup — using SQLAlchemy's default `ix_<table>_<column>` naming so a migrated schema and a freshly created one match.
 
 **Known issue:**
 - Alembic's `alembic_version` table uses `VARCHAR(32)` for version_num.
@@ -1013,7 +1013,7 @@ DataError: value too long for type character varying(32)
 - RLS behavior (ENABLE_RLS not tested).
 - Dialect-specific SQL (e.g., `DISTINCT ON`, `ON CONFLICT`).
 
-**Impact:** none remaining — the full suite is green on the Postgres hard gate (634 passed / 0 failed). The former "~73 stubs" were the ALLOWED_HOSTS-masked cascade plus a few stale test contracts, all fixed.
+**Impact:** the gap is closed in CI — the full suite runs on the Postgres hard gate, and the former "~73 stubs" were the ALLOWED_HOSTS-masked cascade plus a few stale test contracts, all fixed. The gap is still real *locally*: a SQLite run of the current 648-test suite reports 6 failures in `test_analytics` and `test_search`, every one of them Postgres-only SQL (`TO_CHAR`, `NOW() - INTERVAL`, `ILIKE`, `ts_rank`, `::date`) that SQLite cannot parse. Those tests only genuinely execute on the PG gate.
 
 **Solution:** Parallel Postgres test track (future workstream).
 
