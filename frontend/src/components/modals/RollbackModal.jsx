@@ -7,10 +7,9 @@ import { Icon, api } from "../../globals";
 import { Modal, Button, Badge, Spinner, EmptyState } from "../ui";
 
 function RollbackModal({ open, onClose }) {
-  // NOTE: useAppStore() from globals resolves root/overlays.jsx's AppCtx,
-  // which has NO Provider anywhere — the app mounts context/AppCtx.jsx's
-  // AppContext instead. So useAppStore() returns null and every ctx?.x read
-  // through it is silently undefined. Use the real context here.
+  // Reads the app context directly. (useAppStore() is now equivalent — the
+  // two context objects were unified in context/appContext.js — but the
+  // explicit import keeps the dependency visible.)
     const ctx = React.useContext(AppContext);
   const [selectedRev, setSelectedRev] = React.useState(null);
   const [revs, setRevs] = React.useState([]);
