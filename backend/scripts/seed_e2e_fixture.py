@@ -48,13 +48,18 @@ PREFIX = "E2E-"
 BOM_NUMBER = f"{PREFIX}ASSY-001"
 
 # (pn, name, category, cost, vendor_index)
+# NB: category must satisfy the CHECK on parts.category — one of
+# Electrical, Mechanical, Software, Assembly, Raw Material, Hardware,
+# Consumable, Subcontract, Packaging, Tooling, Other. "Fabricated" is not a
+# member and was rejected only on a fresh create_all() schema in CI; the
+# long-lived dev database predates the constraint and accepted it.
 LEAF_PARTS = [
     (f"{PREFIX}RES-10K", "Resistor 10k 0603", "Electrical", 0.012, 0),
     (f"{PREFIX}CAP-100N", "Capacitor 100nF X7R", "Electrical", 0.019, 0),
     (f"{PREFIX}MCU-32", "MCU 32-bit 64LQFP", "Electrical", 4.85, 1),
-    (f"{PREFIX}PCB-4L", "PCB 4-layer FR4", "Fabricated", 12.40, 1),
+    (f"{PREFIX}PCB-4L", "PCB 4-layer FR4", "Mechanical", 12.40, 1),
     (f"{PREFIX}SCR-M3", "Screw M3x8 SS", "Hardware", 0.031, 2),
-    (f"{PREFIX}HSG-AL", "Housing, anodised AL", "Fabricated", 27.90, 2),
+    (f"{PREFIX}HSG-AL", "Housing, anodised AL", "Mechanical", 27.90, 2),
 ]
 SUB_ASSEMBLIES = [
     (f"{PREFIX}SUB-PCBA", "PCBA sub-assembly", [0, 1, 2, 3]),
