@@ -1,6 +1,7 @@
 import { Routes, Route, useLocation } from "react-router-dom";
 import MembersScreen from "../components/screens/MembersScreen.jsx";
 import { storage } from "../utils/storage.js";
+import { isOfflineCapableError } from "../utils/offlineAuth.js";
 import { ACCENT_PRESETS } from "../utils/constants.js";
 import { AppContext, AppCtxProvider } from "../context/AppCtx.jsx";
 import useKeyboardShortcuts from "../hooks/useKeyboardShortcuts.js";
@@ -315,22 +316,10 @@ function AppShell() {
               }
               toast(__t("auth.loginFailed"), { kind: "error" });
             } catch (e) {
-              const msg = e.message || "";
-              // Audit finding A10 -- AUTH BYPASS. The local-first offline path
-              // exists for genuine network loss: the server cannot be asked
-              // whether the credentials are valid, so a previously-known user
-              // is let into the shell. That reasoning only holds when the
-              // server is UNREACHABLE.
-              //
-              // "Internal server error" was in this list, so an HTTP 500 -- which
-              // proves the server answered -- opened the full app shell to
-              // ARBITRARY credentials. Removed: a reachable-but-erroring server
-              // is a failed login, not offline mode.
-              const isNetworkError =
-                msg.includes("Failed to fetch") ||
-                msg.includes("NetworkError") ||
-                msg.includes("Unable to connect") ||
-                msg.includes("temporarily unavailable");
+              // Audit finding A10 (auth bypass): the rule for when a failed
+              // login may fall back to the local-first offline path lives in
+              // utils/offlineAuth.js, where it is unit-tested.
+              const isNetworkError = isOfflineCapableError(e.message);
               if (isNetworkError) {
                 storage.auth.set(u);
                 ctx.setAuthed(u);
