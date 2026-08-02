@@ -79,11 +79,58 @@ told: verify the claim first, reuse what exists, leave a runnable test, do NOT c
 |---|---|---|---|
 | 1 | Make webhooks fire on real business events | `webhook_service.py` + emit call sites | **DONE** |
 | 2 | Create ECO notification rows (approvals are pull-only today) | `eco_service.py`, notification/queue | **DONE** |
-| 3 | Enforce API-key scopes — read-only keys can currently write | `core/deps.py` | running |
+| 3 | Enforce API-key scopes — read-only keys can currently write | `core/deps.py` | **DONE** |
 | 4 | Stop `/cad/apply-sync` + vendor-scorecards fabricating results | `endpoints/cad.py`, `endpoints/analytics.py` | **DONE** |
 | 5 | Stop `SourcingView` + `ECRScreen` fabricating data | those two components | running |
-| 6 | Build traceability / deviations / BOM-variants screens | `screens/`, `LazyScreens`, `NavRail`, `App.jsx` | running |
-| 7 | Fix the 93 WCAG contrast violations | `frontend/styles.css` | running |
+| 6 | Build traceability / deviations / BOM-variants screens | `screens/`, `LazyScreens`, `NavRail`, `App.jsx` | **DONE** |
+| 7 | Fix the 93 WCAG contrast violations | `frontend/styles.css` | **KILLED by session limit — HALF DONE** |
+
+### Agent 7 — INCOMPLETE, needs redoing
+Killed mid-task by the session limit. `frontend/styles.css` has **~51 lines of partial
+contrast edits** already committed in `b90988f`. Its last words were "now re-run the audit
+in both modes", so light/dark verification never happened. **Do not assume the contrast work
+is done.** Re-dispatch: write a WCAG relative-luminance script in the scratchpad, compute
+every fg/bg text pair in `styles.css`, fix to 4.5:1 (small text) / 3:1 (large), verify both
+light and dark themes, then confirm against the axe test in CI. Known failing pairs from the
+CI run: white `#ffffff` on olive `#b5bc38` = 2.05; amber `#eab308` on white = 1.91.
+
+### Agent 6 result — three screens shipped, 216/216 frontend tests pass
+- **`TraceabilityScreen`** (Quality → "Serial & Lot Traceability", `/traceability`) — tabs over
+  `/traceability/serial-numbers` and `/traceability/lots`, server-side filters, serial lookup,
+  genealogy card, status-history timeline.
+- **`DeviationsScreen`** (Quality → "Deviations & Waivers", `/deviations`) — list/create/submit/
+  approve against `/deviations*`.
+- **`BomVariantsScreen`** (Engineering → "BOM Variants", `/bom-variants`) — open-by-id + items.
+- Registered in `LazyScreens.jsx`, `NavRail.jsx`, `App.jsx`. `vite build` clean, own chunks.
+- **Backend bugs it found, out of its scope:** there is no variant *list* route (screen keeps a
+  session-local recents list); and `POST /bom/variants/items` is shadowed by
+  `POST /bom/{bom_id}/items` registered earlier, so `bom_id="variants"` 422s — **route-ordering
+  bug, worth fixing.**
+
+### Agent 3 result — API-key scopes enforced
+- Confirmed `_authenticate_by_api_key` never read `api_key.scopes`. Guard added in `core/deps.py`.
+- Enforced the existing `read`/`write` vocabulary only. GET/HEAD/OPTIONS→`read`, everything
+  else→`write`; an **unlisted method defaults to `write`** so nothing falls through as readable.
+- Default deny: empty, NULL, unknown-value and non-list scopes all 403. The `isinstance(list)`
+  guard is load-bearing — `"read" in "read,write"` is True for a `str`, which would hand a
+  malformed row full access. Raises rather than returning `None`, so it can't fall through to
+  the bearer path and surface as a 401.
+- **Red before the fix, verified:** with the guard neutered, `test_read_scoped_key_is_refused_a_write`
+  returned **200 with a real newly-minted API key** — a read-only key writing. 8 passed after.
+- Also fixed `test_rls_flag.py`, whose mocked ApiKey had a MagicMock `scopes`.
+
+**Two holes agent 3 did NOT close (outside its owned files) — do these next:**
+1. **`/api/v1/auth/plugin-login` (`auth.py:106`) exchanges any active API key for a full JWT
+   without reading scopes.** A read-only key can still mint an unrestricted token there, which
+   defeats the guard entirely. Highest-priority security follow-up.
+2. Every key has the literal prefix `bkb` and lookup uses `scalar_one_or_none()` on
+   `key_prefix` — **two active API keys anywhere break API-key auth with `MultipleResultsFound`.**
+
+**Correction to the gap report:** it claimed scopes are "shown in the `APIKeysScreen` UI".
+They are not — the create form (`enterprise-screens.jsx:1607`) offers only name/description/
+expires_in_days, and the table has no scopes column. Every key the UI makes gets the
+`["read","write"]` default; a scoped-down key is only reachable by POSTing `scopes` directly.
+The misrepresentation is real, but its channel is the API, not the UI.
 
 ### Agent 4 result (reported, not yet reviewed by me)
 - `/cad/apply-sync` now returns **501** instead of claiming success. Its rationale: the

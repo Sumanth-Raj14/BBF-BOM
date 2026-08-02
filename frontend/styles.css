@@ -30,6 +30,12 @@
   --bbf-dark-grey: #5D5D5D;
   --bbf-black: #000000;
   --bbf-white: #FFFFFF;
+  /* --bbf-olive is the brand mark hue: 2.06:1 against white, so it can never
+     carry text (as a fill under white text, or as text on a light surface).
+     These two are the same hue at AA lightness — use them wherever olive and
+     text meet; keep --bbf-olive itself for decorative marks/borders/bars. */
+  --bbf-olive-fill: #686E21;               /* white text on it: 5.47:1 (theme-stable, white is fixed) */
+  --bbf-olive-text: var(--bbf-olive-fill); /* olive AS text: 5.47:1 on white, 4.80:1 on --bg-app */
 
   /* Application Colors */
   --bg-app: #F0F0F0;
@@ -129,6 +135,14 @@
   --danger-text: #C62828;
   --info-text: #0369A1;
 
+  /* AA fill for warning chips/icons that paint fixed white text on top
+     (--warn/#ED6C02 is only 3.11:1 with white). Theme-stable, like
+     --accent-strong, because the foreground is a constant white. */
+  --warn-strong: #A14802;                  /* white on it: 6.1:1 */
+  /* Amber accent consumed by components/SyncStatus.jsx as var(--amber).
+     Was undefined, so its #eab308 literal fallback shipped: 1.91:1 on white. */
+  --amber: #856605;                        /* 5.38:1 on white, 4.72:1 on --bg-app */
+
   /* Spacing System (Strict Scale) */
   --sp-0: 0px;
   --sp-1: 4px;
@@ -183,7 +197,7 @@
   --fg: var(--text-primary);
   --fg-2: var(--text-secondary);
   --fg-3: var(--text-muted);
-  --fg-4: #AAAAAA;
+  --fg-4: var(--text-muted); /* was #AAAAAA — 2.32:1 on white, and it IS used as text (.fg-4, .bom-thumb-btn, …) */
   --accent: var(--accent-interactive);
   --accent-soft: var(--accent-subtle);
   --accent-fg: #FFFFFF;
@@ -267,6 +281,16 @@
      fills that stay constant across themes (--accent-strong/--status-danger/
      --accent), so they use the always-white --accent-fg instead. */
   --text-inverse: #141414;
+
+  /* Legacy .bbf-* components hard-wire these two brand greys as *text* colours
+     (never as fills — verified: 0 background uses), so they have to flip with
+     the theme or they render near-black on a near-black surface. */
+  --bbf-black: var(--text-primary);
+  --bbf-dark-grey: var(--text-secondary);
+  /* Olive AS text needs the light end of the hue here; --bbf-olive-fill stays
+     dark because the text painted on it is a constant white in both themes. */
+  --bbf-olive-text: #C5CE5A;   /* 10.11:1 on --bg-surface, 9.22:1 on --bg-subtle */
+  --amber: #EAB308;            /* 8.97:1 on --bg-surface — the light-mode value is too dark here */
 
   /* Two-tone accent — see file banner. Olive stays decorative-only (no AA
      requirement); orange interactive/focus keep their light hues (still
@@ -514,7 +538,7 @@ code, kbd, samp, pre { font-family: var(--font-mono); font-size: 0.9em; }
 b, strong { font-weight: var(--fw-semibold); }
 a { color: var(--accent-text); text-decoration: none; }
 a:hover { text-decoration: underline; }
-::selection { background: var(--accent); color: var(--accent-fg); }
+::selection { background: var(--accent-strong); color: var(--accent-fg); }
 
 /* AA focus baseline — visible, ≥3:1 focus indicator, keyboard-only.
    Component rules may tighten offset/color but must remain visible. */
@@ -614,7 +638,9 @@ a:hover { text-decoration: underline; }
 }
 
 .bbf-highlight {
-  color: var(--bbf-highlight);
+  /* --bbf-highlight (#DEE900) is a 1.15:1 neon on white — unusable as text.
+     Same family at AA lightness; keep the raw token for decorative fills. */
+  color: var(--bbf-olive-text);
 }
 
 /* Scrollbars */
@@ -1677,7 +1703,7 @@ a:hover { text-decoration: underline; }
   font-family: var(--font-mono);
   font-weight: 600;
   padding: 2px 8px;
-  background: var(--accent);
+  background: var(--accent-strong); /* --accent is 3.49:1 with white; --accent-strong is 5.29:1 */
   color: white;
   border-radius: 4px;
 }
@@ -1740,8 +1766,10 @@ a:hover { text-decoration: underline; }
   justify-content: center;
   font-family: var(--font-mono);
   font-size: 8px;
-  color: var(--fg-3);
-  background: rgba(253,252,250,0.7);
+  /* The overlay is a fixed near-white regardless of theme, so the label has to
+     be a fixed dark too — var(--fg-3) went light-grey in dark mode (1.48:1). */
+  color: #3A3A3A;
+  background: rgba(253,252,250,0.85);
 }
 .drawer-title { flex: 1; min-width: 0; }
 .drawer-title .pn {
@@ -1871,7 +1899,7 @@ a:hover { text-decoration: underline; }
   font-family: var(--font-mono);
   font-size: 9px;
   letter-spacing: 0.1em;
-  background: var(--accent);
+  background: var(--accent-strong);
   color: white;
   padding: 1px 6px;
   border-radius: 2px;
@@ -2092,7 +2120,7 @@ a:hover { text-decoration: underline; }
 }
 .diff-row.added .tag { background: var(--ok); color: white; border-color: var(--ok); }
 .diff-row.removed .tag { background: var(--danger); color: white; border-color: var(--danger); }
-.diff-row.changed .tag { background: var(--warn); color: white; border-color: var(--warn); }
+.diff-row.changed .tag { background: var(--warn-strong); color: white; border-color: var(--warn-strong); }
 .diff-row.unchanged { color: var(--fg-3); }
 
 /* OCR */
@@ -2139,7 +2167,7 @@ a:hover { text-decoration: underline; }
   position: absolute;
   top: -16px; left: 0;
   font-size: 8px;
-  background: var(--accent);
+  background: var(--accent-strong);
   color: white;
   padding: 0 4px;
   border-radius: 2px;
@@ -2274,7 +2302,7 @@ a:hover { text-decoration: underline; }
 .feed-item .ava {
   width: 28px; height: 28px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-strong);
   color: white;
   font-family: var(--font-mono);
   font-size: 10px;
@@ -2477,7 +2505,7 @@ a:hover { text-decoration: underline; }
   overflow: hidden;
   flex-shrink: 0;
 }
-.bom-thumb-btn:hover { border-color: var(--accent); color: var(--accent); }
+.bom-thumb-btn:hover { border-color: var(--accent); color: var(--accent-text); }
 .bom-thumb-btn.uploading { opacity: 0.5; cursor: wait; }
 .bom-thumb-btn:disabled { cursor: wait; }
 .bom-thumb {
@@ -2551,11 +2579,13 @@ a:hover { text-decoration: underline; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--accent);
+  color: var(--accent-text);
 }
-.toast.success .ico { color: var(--ok); }
-.toast.warn .ico { color: var(--warn); }
-.toast.error .ico { color: var(--danger); }
+/* The --ok/--warn/--danger *fills* are 3.7-4.4:1 as text; the paired
+   --*-text tokens are the AA-tuned, theme-aware variants. */
+.toast.success .ico { color: var(--ok-text); }
+.toast.warn .ico { color: var(--warn-text); }
+.toast.error .ico { color: var(--danger-text); }
 .toast .msg { flex: 1; }
 .toast .action {
   background: transparent;
@@ -2625,7 +2655,7 @@ a:hover { text-decoration: underline; }
   width: 32px; height: 32px;
   border-radius: var(--r-btn);
   background: var(--bg-selected);
-  color: var(--accent);
+  color: var(--accent-text);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2781,7 +2811,7 @@ textarea.input { height: auto; min-height: 72px; padding: var(--sp-2); resize: v
 .popover-item .ic { color: var(--fg-3); width: 14px; flex-shrink: 0; display: inline-flex; }
 .popover-item .lbl { flex: 1; }
 .popover-item .kbd { font-family: var(--font-mono); font-size: 9px; color: var(--fg-3); border: 1px solid var(--line); padding: 1px 4px; border-radius: 2px; }
-.popover-item.danger { color: var(--danger); }
+.popover-item.danger { color: var(--danger-text); }
 .popover-item.danger:hover { background: color-mix(in oklch, var(--danger) 10%, var(--bg-sunk)); }
 .popover-divider { height: 1px; background: var(--line); margin: 4px 0; }
 
@@ -3195,7 +3225,7 @@ body.file-dragover::after {
 .ms-action {
   flex: 1;
   height: 56px;
-  background: var(--accent);
+  background: var(--accent-strong);
   color: var(--accent-fg, #fff);
   border: none;
   border-radius: 12px;
@@ -3210,7 +3240,8 @@ body.file-dragover::after {
 .ms-action.ms-secondary {
   flex: 0 0 100px;
   background: transparent;
-  color: var(--accent-fg, #fff);
+  /* was --accent-fg (constant white) on a transparent fill = invisible text */
+  color: var(--accent-text);
   border: 1px solid var(--border);
 }
 .ms-action:disabled { opacity: 0.5; }
@@ -3251,8 +3282,8 @@ body.file-dragover::after {
   font-weight: 700;
   color: var(--accent-fg, #fff);
 }
-.ms-stock.low .ms-stock-num { color: var(--warn); }
-.ms-stock.out .ms-stock-num { color: var(--danger); }
+.ms-stock.low .ms-stock-num { color: var(--warn-text); }
+.ms-stock.out .ms-stock-num { color: var(--danger-text); }
 .ms-stock-lbl {
   font-family: var(--font-mono);
   font-size: 8px;
@@ -3260,8 +3291,8 @@ body.file-dragover::after {
   color: var(--fg-3);
   margin-top: 2px;
 }
-.ms-stock.low .ms-stock-lbl { color: var(--warn); }
-.ms-stock.out .ms-stock-lbl { color: var(--danger); }
+.ms-stock.low .ms-stock-lbl { color: var(--warn-text); }
+.ms-stock.out .ms-stock-lbl { color: var(--danger-text); }
 
 /* ============================================
    Empty-state, loading & error helpers
@@ -3548,7 +3579,7 @@ body.file-dragover::after {
 }
 .dup-banner .ico {
   width: 26px; height: 26px;
-  background: var(--warn);
+  background: var(--warn-strong);
   color: white;
   border-radius: 50%;
   display: inline-flex;
@@ -3670,7 +3701,7 @@ body.file-dragover::after {
   font-family: var(--font-mono);
   font-weight: 600;
   padding: 3px 8px;
-  background: var(--accent);
+  background: var(--accent-strong);
   color: white;
   border-radius: 4px;
 }
@@ -3863,7 +3894,7 @@ body.file-dragover::after {
   left: 8px;
   z-index: 500;
   padding: 8px 16px;
-  background: var(--accent);
+  background: var(--accent-strong);
   color: white;
   font-weight: 600;
   font-size: 14px;
@@ -4027,8 +4058,8 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
 .fg-3          { color: var(--fg-3); }
 .fg-4          { color: var(--fg-4); }
 .fg-accent     { color: var(--accent-text); }
-.fg-danger     { color: var(--danger); }
-.fg-ok         { color: var(--ok); }
+.fg-danger     { color: var(--danger-text); }
+.fg-ok         { color: var(--ok-text); }
 
 .p-0           { padding: 0; }
 .p-4           { padding: 4px; }
@@ -4317,8 +4348,8 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
 .border-solid   { border-style: solid; }
 .border-0       { border: 0; }
 
-.fg-warn       { color: var(--warn); }
-.fg-info       { color: var(--info); }
+.fg-warn       { color: var(--warn-text); }
+.fg-info       { color: var(--info-text); }
 
 .bg-2          { background: var(--bg-2); }
 .bg-3          { background: var(--bg-3); }
@@ -4406,7 +4437,7 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
   overflow: hidden;
 }
 .bbf-panel-header {
-  background: var(--bbf-olive);
+  background: var(--bbf-olive-fill);
   color: var(--bbf-white);
   font-family: var(--font-brand);
   font-weight: 700;
@@ -4426,7 +4457,7 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
   font-size: 12px;
 }
 .bbf-table thead th {
-  background: var(--bbf-olive);
+  background: var(--bbf-olive-fill);
   color: var(--bbf-white);
   font-family: var(--font-brand);
   font-weight: 700;
@@ -4496,7 +4527,10 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
   border-radius: 99px;
 }
 .bbf-badge-olive {
-  background: var(--bbf-olive);
+  /* Darkened from --bbf-olive (#B5BC38, only 2.06:1 with white) to meet WCAG
+     AA (>=4.5:1) for this small 10px bold badge text. Same hue, lower
+     lightness — the brand olive is unchanged everywhere it's decorative. */
+  background: var(--bbf-olive-fill);
   color: var(--bbf-white);
 }
 .bbf-badge-orange {
@@ -4509,7 +4543,7 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
 .bbf-badge-outline {
   background: transparent;
   border: 1px solid var(--bbf-olive);
-  color: var(--bbf-olive);
+  color: var(--bbf-olive-text);
 }
 
 /* BBF Input / Form */
@@ -4569,19 +4603,19 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
   transform: scale(0.97);
 }
 .bbf-btn-primary {
-  background: var(--bbf-olive);
+  background: var(--bbf-olive-fill);
   color: var(--bbf-white);
 }
 .bbf-btn-primary:hover {
-  background: var(--bbf-orange);
+  background: var(--accent-strong); /* was --bbf-orange (#DC6621): 3.52:1 with white */
 }
 .bbf-btn-secondary {
   background: transparent;
   border: 1px solid var(--bbf-olive);
-  color: var(--bbf-olive);
+  color: var(--bbf-olive-text);
 }
 .bbf-btn-secondary:hover {
-  background: var(--bbf-olive);
+  background: var(--bbf-olive-fill);
   color: var(--bbf-white);
 }
 
@@ -4602,7 +4636,7 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
   font-family: var(--font-brand);
   font-weight: 900;
   font-size: 10px;
-  color: var(--bbf-olive);
+  color: var(--bbf-olive-text);
   letter-spacing: -2px;
   background: var(--bg);
   padding: 0 12px;
@@ -4742,13 +4776,13 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
 .ent-modal-box { background: var(--card); border-radius: 12px; padding: 24px; min-width: 360px; max-width: 520px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
 .ent-btn { padding: 6px 14px; border-radius: 6px; border: none; background: var(--btn-bg, var(--accent)); color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
 .ent-btn-outline { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--fg); font-size: 12px; cursor: pointer; }
-.ent-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: var(--badge-bg, #3b82f620); color: var(--badge-fg, #3b82f6); }
+.ent-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: var(--badge-bg, var(--bg-subtle)); color: var(--badge-fg, var(--info-text)); }
 
 /* ====== Additional Utility Classes (from inline style migration) ====== */
 .fg { color: var(--fg); }
-.fg-ok { color: var(--ok); }
-.fg-warn { color: var(--warn); }
-.fg-info { color: var(--info); }
+.fg-ok { color: var(--ok-text); }
+.fg-warn { color: var(--warn-text); }
+.fg-info { color: var(--info-text); }
 .fg-white { color: var(--accent-fg); } /* constant white — used on fixed-dark/accent fills regardless of theme */
 .bg-accent { background: var(--accent); }
 .bg-white { background: white; }
@@ -4777,7 +4811,7 @@ button, a, [role="button"], .nav-item, .chip, .tab, .feed-item {
 .fg-2 { color: var(--fg-2); }
 .fg-3 { color: var(--fg-3); }
 .fg-4 { color: var(--fg-4); }
-.fg-danger { color: var(--danger); }
+.fg-danger { color: var(--danger-text); }
 .bg-canvas { background: var(--bg); }
 .bg-elev { background: var(--bg-elev); }
 .bg-sunk { background: var(--bg-sunk); }
