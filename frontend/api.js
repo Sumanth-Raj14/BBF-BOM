@@ -700,16 +700,11 @@ export const barcodesAPI = {
     return apiRequest(`/barcodes/lookup/${barcode}`);
   },
   
-  assign: async (partId) => {
-    return apiRequest(`/barcodes/assign/${partId}`, {
-      method: 'POST',
-    });
-  },
-  
-  batchGenerate: async (partIds) => {
-    const idsStr = partIds.join(',');
-    return apiRequest(`/barcodes/batch-generate?part_ids=${idsStr}`);
-  },
+  // Removed: assign() and batchGenerate() called /barcodes/assign/{id} and
+  // /barcodes/batch-generate, neither of which the backend serves (it has
+  // generate | image | lookup | qr). Nothing in the UI called them; they were
+  // guaranteed 404s. Re-add alongside the backend routes if the feature is
+  // wanted.
 };
 
 // OCR API
@@ -1183,7 +1178,10 @@ export const workOrdersAPI = {
   create: (data) => apiRequest('/work-orders', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => apiRequest(`/work-orders/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id) => apiRequest(`/work-orders/${id}`, { method: 'DELETE' }),
-  advance: (id) => apiRequest(`/work-orders/${id}/advance`, { method: 'POST' }),
+  // Removed: advance() hit /work-orders/{id}/advance, which does not exist —
+  // the backend advances a work order through /work-orders/{id}/action.
+  // Unused in the UI. Use action() with the intended transition instead of
+  // guessing a mapping here.
   materials: (id) => apiRequest(`/work-orders/${id}/materials`),
   operations: (id) => apiRequest(`/work-orders/${id}/operations`),
 };
@@ -1205,8 +1203,9 @@ export const ecoAPI = {
   // the backend rejects (401/403/409) without mutating state on failure.
   action: (id, data) => apiRequest(`/eco/${id}/action`, { method: 'POST', body: JSON.stringify(data) }),
   approve: (id, data) => apiRequest(`/eco/${id}/approve`, { method: 'POST', body: JSON.stringify(data) }),
-  reject: (id, reason) => apiRequest(`/eco/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
-  changes: (id) => apiRequest(`/eco/${id}/changes`),
+  // Removed: reject() and changes() hit /eco/{id}/reject and /eco/{id}/changes,
+  // neither of which the backend serves — rejection goes through
+  // /eco/{id}/action. Both were unused in the UI and always 404'd.
   notifications: (id) => apiRequest(`/eco/${id}/notifications`),
   impact: (id) => apiRequest(`/eco/${id}/impact`),
   addItem: (id, data) => apiRequest(`/eco/${id}/items`, { method: 'POST', body: JSON.stringify(data) }),
