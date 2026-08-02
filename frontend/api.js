@@ -2,6 +2,7 @@
 // ES module with named exports + backward-compatible window.* shims
 
 import config from './src/config.js';
+import { toast } from './src/utils/toast.js';
 
 export function escapeHtml(str) {
   if (str == null) return '';
@@ -17,7 +18,7 @@ export function openPrintWindow(title, bodyHtml, opts) {
   opts = opts || {};
   const w = window.open('', '_blank', opts.features || 'width=900,height=700');
   if (!w) {
-    if (window.toast) window.toast('Pop-up blocked — allow pop-ups to print', { kind: 'warn' });
+    toast('Pop-up blocked — allow pop-ups to print', { kind: 'warn' });
     return null;
   }
   w.document.open();

@@ -20,6 +20,7 @@ import {
 function BomEditorScreen({
   data,
   search,
+  setSearch,
   activeCats,
   setActiveCats,
   density,
@@ -339,7 +340,7 @@ function BomEditorScreen({
             <input
               placeholder={__t("bomShell.filterPlaceholder")}
               value={search}
-              onChange={(e) => window.__setBomSearch?.(e.target.value)}
+              onChange={(e) => setSearch?.(e.target.value)}
               aria-label="Filter BOM rows"
               className="fs-11"
             />
@@ -347,7 +348,7 @@ function BomEditorScreen({
               <button
                 className="icon-btn w-18 h-18 b-0 bg-transparent"
                 aria-label="Clear search"
-                onClick={() => window.__setBomSearch?.("")}
+                onClick={() => setSearch?.("")}
               >
                 <Icon.X size={10} />
               </button>
@@ -565,6 +566,7 @@ function BomEditorScreen({
 BomEditorScreen.propTypes = {
   data: PropTypes.object,
   search: PropTypes.any,
+  setSearch: PropTypes.func,
   activeCats: PropTypes.any,
   setActiveCats: PropTypes.any,
   density: PropTypes.any,

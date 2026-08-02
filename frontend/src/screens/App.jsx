@@ -96,6 +96,7 @@ function BomShellWrapper() {
       <BomShell
         data={ctx.data}
         search={ctx.search}
+        setSearch={ctx.setSearch}
         activeCats={ctx.activeCats}
         setActiveCats={ctx.setActiveCats}
         density={ctx.gridDensity}
@@ -152,7 +153,7 @@ function DiffScreenWrapper() {
   const ctx = React.useContext(AppContext);
   return (
     <ErrBD>
-      <DiffScreen data={ctx.data} />
+      <DiffScreen data={ctx.data} openModal={ctx.openModal} />
     </ErrBD>
   );
 }
