@@ -4,9 +4,9 @@
 
 ## 0. Snapshot
 - **Version:** 2.1.0
-- **Last updated:** 2026-08-01
-- **Alembic head:** `048_index_foreign_keys` (single, linear · 48 migrations) · fresh install builds **159 tables**
-- **Test status:** **Postgres CI is a green HARD GATE — 634 passed / 0 failed / 1 skipped / 1 xfailed** on real PG16 (`.github/workflows/postgres-ci.yml`). SQLite remains the fast local/dev track.
+- **Last updated:** 2026-08-02
+- **Alembic head:** `048_index_foreign_keys` (single, linear · 48 migrations) · fresh install builds **160 tables**
+- **Test status:** backend suite now collects **648 tests**; on the fast SQLite track **640 passed / 6 failed / 2 skipped**, where all 6 failures are Postgres-only SQL (`TO_CHAR`, `INTERVAL`, `ILIKE`, `ts_rank`, `::date`) that only executes correctly on the PG gate. Frontend: **182/182 vitest** across 86 files. `.github/workflows/postgres-ci.yml` (`Test Suite on Postgres`) remains the authoritative hard gate; it was **not re-run in this doc pass**, and its last recorded green result predates the tests added since — treat the CI run, not this line, as the source of truth.
 - **State:** feature-complete + published; remaining work is packaging/ops handoffs (see §12)
 
 ## 1. What it is
@@ -21,7 +21,7 @@ Blackbox BOM is a **local-first, on-prem enterprise BOM/PLM platform** (OpenBOM-
 Both hold **identical content**. BBF-BOM is produced by cloning blackbox's `master`, re-authoring every commit to you and stripping the AI co-author trailers (in an isolated clone `C:\Users\tsuma\Downloads\bbf-final.git`), then force-pushing. To make a GitHub contributor graph attribute commits to your profile, add+verify `sumanthraj@blackboxfactories.com` in GitHub → Settings → Emails.
 
 ## 3. Tech stack
-- **Backend:** Python (FastAPI) + async SQLAlchemy 2.0 + PostgreSQL + Alembic. Auth: RS256 JWT + RBAC. Async (asyncpg). ~527 API routes under `/api/v1`.
+- **Backend:** Python (FastAPI) + async SQLAlchemy 2.0 + PostgreSQL + Alembic. Auth: RS256 JWT + RBAC. Async (asyncpg). **562** API routes under `/api/v1`.
 - **Frontend:** React + Vite (build → `frontend/dist`).
 - **DB:** PostgreSQL 16 (bundled/portable for desktop) / 18 (dev machine). Multi-tenant.
 - **Packaging:** PyInstaller (backend + launcher) + Inno Setup installer + portable Postgres (Windows desktop bundle).
@@ -31,9 +31,9 @@ Both hold **identical content**. BBF-BOM is produced by cloning blackbox's `mast
 backend/
   app/main.py                 # FastAPI app + lifespan; serves SPA when SERVE_FRONTEND/dist present
   app/api/api_v1.py           # router aggregation
-  app/api/endpoints/*.py      # 67 endpoint modules (527 routes)
-  app/models/*.py             # 70 ORM models (Base + TenantAwareMixin)
-  app/services/*.py           # 18 business-logic services
+  app/api/endpoints/*.py      # 74 endpoint modules (562 routes)
+  app/models/*.py             # 74 model modules / 156 mapped classes (Base + TenantAwareMixin)
+  app/services/*.py           # 24 business-logic services
   app/core/                   # config.py (settings), deps.py, security, tenant_events.py (tenant isolation), backup.py
   app/db/                     # session.py (async engine), base.py (Base + model registry)
   alembic/                    # env.py + versions/*.py (48 migrations, head 048_index_foreign_keys); alembic.ini
@@ -42,8 +42,10 @@ backend/
   docker-compose.yml, Dockerfile(.prod), .env (gitignored — real secrets)
 frontend/
   src/root/*.jsx              # SHIM layer: register components on window.* (dashboard, mobile-scanner, overlays, bom-editor, tweaks-panel, ...)
-  src/components/**           # LIVE owners: screens/, modals/, ui/ (primitives), LazyScreens.jsx (registry), NavRail.jsx
+  src/components/**           # LIVE owners: screens/ (incl. MembersScreen.jsx), modals/, cad/CadViewer.jsx, ui/ (primitives), LazyScreens.jsx (registry), NavRail.jsx
+  src/services/*.js           # ES-module replacements for retired window globals (navigation.js, poDraft.js, screenDataBridge.js, dataService.js)
   src/screens/App.jsx         # routes; src/context/AppCtx.jsx (state); src/utils/storage.js; src/hooks/useAutosave.js; styles.css (design tokens)
+  e2e/                        # Playwright specs: smoke.spec.js, real-flows.spec.js, auth.setup.js (run manually — no CI job)
 desktop/                      # WS7 Windows packaging (see §8)
 docs/                         # design specs, runbooks, data dictionary, API reference
 solidworks-plugin/            # SolidWorks add-in (C#) + CI + build checklist
@@ -53,6 +55,15 @@ install.ps1 / install.bat / Makefile / docker-compose.yml   # deploy entry point
 
 ## 5. Feature catalog (status)
 **Shipped (v2.1.0):** canonical BOM + editor (instance lines, closure-table explosion/where-used), Parts/Items catalog, Procurement (POs `po_headers`, vendors, RFQs, receiving), Inventory/Warehouse, ECO/change management + approvals, Quality (CAPA, deviation, FAI), **FDA 21 CFR Part 11 e-signatures**, **RoHS/REACH substance compliance**, **Zoho Books two-way sync** (OAuth, outbound parts/vendors/POs, inbound poll + conflict engine, lifecycle cascade-clean, rate-limit token-bucket), ClickUp/Cliq integration + test-connection, Documents, Projects/Work-orders/Teams, **RBAC (5 roles: Admin/Engineering/Procurement/Finance/Viewer) + per-persona dashboards**, audit trail, **WCAG-AA dark mode + high-contrast + colorblind a11y**, autosave (Part + BOM editors), backup/retention/PITR, **desktop single-click packaging + auto-updater**.
+**Added since v2.1.0 (on `master`, unreleased):**
+- **Members & Privileges screen** (`frontend/src/components/screens/MembersScreen.jsx`, route `/members`, nav entry in `NavRail.jsx`) — role assignment and enable/disable over the RBAC API, which had existed backend-only with no UI.
+- **Real 3D CAD viewer** (`frontend/src/components/cad/CadViewer.jsx`) — STEP/STP/IGES/IGS tessellated in-browser by `occt-import-js` (WASM OpenCascade); STL/OBJ/GLTF/GLB/PLY/3MF loaded by `three`. Proprietary native CAD (`.sldprt`, `.sldasm`, `.ipt`, `.iam`, `.prt`, `.catpart`) is explicitly **not** supported and says so.
+- **Document download endpoint** `GET /api/v1/documents/{id}/download` — the vault could list and accept uploads but nothing could ever read the bytes back. Serves S3-backed and local files, with a `realpath`-containment guard so a tampered `filePath` row cannot escape the upload root.
+- **Honest CAD import modal** — `CADImportModal.jsx` no longer runs a fake progress bar and hardcoded parts list; it states the SolidWorks add-in is required.
+- **No demo-data fallback in `AppCtx`** — `rows` now defaults to `[]` instead of the bundled demo BOM, so screens show real data or an honest empty state (`[]` is truthy, which also neutralises the downstream `ctx?.rows || BOM_DATA.rows` fallbacks).
+- **`backend/scripts/seed_e2e_fixture.py`** — multi-level BOM fixture for end-to-end runs (`--clean` removes it).
+- **All FK columns indexed** — migration `048_index_foreign_keys` creates indexes on the 30 FK columns that had none; 0 FK columns remain without index coverage.
+
 **Prepared, needs external creds/hardware:** SolidWorks in-CAD add-in (needs a SolidWorks machine); ClickUp/Cliq (needs live tokens); Zoho Books (needs OAuth creds + sandbox to tune rate-limit).
 
 ## 6. Database
@@ -76,9 +87,11 @@ install.ps1 / install.bat / Makefile / docker-compose.yml   # deploy entry point
 - **To build the installer:** on a Windows box, install Inno Setup 6, then `python desktop/build.py --skip-frontend` → `desktop/dist/BlackboxBOM-Setup-2.1.0.exe`. Unsigned unless a code-signing cert is set (`CODE_SIGN_PFX`). Full steps: `desktop/DESKTOP_PACKAGING.md`.
 
 ## 9. Testing
-- **Postgres CI is the authoritative gate and is a HARD GATE that passes green:** `.github/workflows/postgres-ci.yml` runs (a) a fresh `init_db` bootstrap on a real Postgres 16 service and (b) the **full pytest suite against real PG16** — last result **634 passed / 0 failed / 1 skipped / 1 xfailed** (session-scoped asyncio loops via `-o`, required for asyncpg). A red here blocks merge. Uses inline throwaway CI creds (a disposable `bom_test_db`); **no repo secret required**.
+- **Postgres CI is the authoritative gate and is a HARD GATE that passes green:** `.github/workflows/postgres-ci.yml` runs (a) a fresh `init_db` bootstrap on a real Postgres 16 service and (b) the **full pytest suite against real PG16** (session-scoped asyncio loops via `-o`, required for asyncpg). A red here blocks merge. The suite currently collects **648 tests**; the last *recorded* green PG result (634 passed / 0 failed / 1 skipped / 1 xfailed) predates the tests added since and has not been re-run — read the latest CI run for the live number. Uses inline throwaway CI creds (a disposable `bom_test_db`); **no repo secret required**.
   - The 1 skip = `test_migration_up_down_cycle` (needs a live localhost PG). The 1 xfail = `test_migration_offline_sql` (offline `--sql` generation is unsupported by design — several migrations call runtime `inspect()` for conditional DDL; `init_db` is the supported bootstrap).
 - SQLite (`TEST_DATABASE_URL=sqlite+aiosqlite:///...`, `create_all`) is the **fast local/dev track** — same tests, function-scoped loops, no Postgres service needed. Postgres-only behavior (FK/NOT-NULL enforcement, identity sequences, full-text search, `::jsonb`, `RETURNING`, NUMERIC precision) only truly executes on the PG gate above.
+- **Frontend unit tests:** `cd frontend; npx vitest run` — **182 passed / 182** across 86 files (measured 2026-08-02).
+- **End-to-end (Playwright):** `frontend/e2e/` holds `smoke.spec.js`, `real-flows.spec.js` (auth reachability, anonymous rejection, wrong-password rejection, real login, per-screen crash checks) and `auth.setup.js`. `backend/scripts/seed_e2e_fixture.py` seeds a multi-level BOM to run them against. **These are run manually — there is no Playwright job in `.github/workflows/` on `master`**; the CI wiring and the `write-flows.spec.js` suite live on the unmerged branch `test/e2e-ci-and-write-flows`.
 - `app/core/config.py` `_is_weak_secret` **hard-rejects any SECRET_KEY containing a `_WEAK_SECRET_VALUES` substring** ("secret","test","admin",…, stripping `-_!`) regardless of entropy — so CI/test secret *values* must avoid those substrings (the CI jobs use "suite"/"track", not "test"). A violation makes conftest fail to import → pytest exits 4 (looks like a usage error, not a test failure).
 
 ## 10. How to build & run

@@ -314,6 +314,34 @@ superadmin (top) ──┬─→ admin ──┬─→ engineering ──┐
 - Can view/edit all tenant data (when `effective_tenant_id = None`)
 - Requires MFA in production (enforced at `get_current_superuser`)
 
+**Administering roles (UI):** the `Members & Privileges` screen (`/members`, `frontend/src/components/screens/MembersScreen.jsx`) is the interface to this model — it lists members with their current role, reassigns a role per member, and enables or disables accounts. Until it shipped, the RBAC API had no UI and role changes required direct API calls. Superusers are displayed as holding all privileges rather than an editable role, matching the bypass behaviour above.
+
+### Document Download Flow
+
+```
+GET /api/v1/documents/{document_id}/download   (authenticated)
+  → document_service.get_document(db, document_id)
+      Document is TenantAwareMixin, so the SELECT auto-filter scopes the
+      lookup — another tenant's id simply reads as 404. Tenant scoping is
+      deliberately NOT re-implemented in the endpoint.
+  → not found → 404
+  → storage_type == "s3":
+      s3_storage.download_file(key)  → bytes
+      → Response(..., Content-Disposition: attachment)
+  → local storage:
+      upload_root = os.path.realpath(UPLOAD_DIR)
+      real_path   = os.path.realpath(document.filePath)
+      → real_path must equal upload_root or start with upload_root + os.sep
+          → otherwise: log the refusal, return 404
+        (filePath comes from the database and is not trusted to stay inside
+         the upload root; without this a tampered or legacy row could read
+         arbitrary server files such as ../../.env)
+      → not a file → 404
+      → FileResponse(real_path, filename=originalName)
+```
+
+This endpoint is what makes the document vault readable at all — before it existed, files could be uploaded and listed but the stored bytes were unreachable, leaving downloads, previews and the 3D CAD viewer (`frontend/src/components/cad/CadViewer.jsx`) with no data source.
+
 ### API Key Authentication Flow (v1.33.0)
 
 ```
@@ -681,7 +709,7 @@ graph TD
 
 3. **Schema Bootstrap** (`init_db.py`):
    - Greenfield (no `alembic_version` table):
-     - `Base.metadata.create_all()` (creates 159 tables)
+     - `Base.metadata.create_all()` (creates 160 tables)
      - `alembic stamp head` (records current migration)
    - Existing:
      - `alembic upgrade head` (applies pending migrations)
@@ -1240,7 +1268,7 @@ ORDER BY ts_rank(...) DESC;
 - `alembic/versions/` — Numbered migration scripts
 - `alembic/env.py` — Migration environment config
 - `alembic/alembic.ini` — Fallback DB credentials
-- Current head: `047_solidworks_integration.py`
+- Current head: `048_index_foreign_keys.py` (48 migrations, single linear head)
 
 **Known Issues (documented from Postgres bring-up)**:
 
@@ -1263,8 +1291,8 @@ ORDER BY ts_rank(...) DESC;
    ```
 
 3. **Test Suite Runs on SQLite, Not PostgreSQL**
-   - 0 remaining test failures — full suite green on the Postgres hard gate (634 passed / 0 failed)
-   - Postgres-only defects (VARCHAR enforcement, RLS, dialect SQL) not tested
+   - CI closes this: the full suite runs on the Postgres hard gate. Locally on SQLite the current 648-test suite reports 6 failures (`test_analytics`, `test_search`), all of them Postgres-only SQL (`TO_CHAR`, `NOW() - INTERVAL`, `ILIKE`, `ts_rank`) that SQLite cannot parse
+   - Postgres-only defects (VARCHAR enforcement, RLS, dialect SQL) are therefore only exercised on the PG gate
    - **Risk**: Postgres-specific features may have bugs not caught in CI
    - **Mitigation**: Run integration tests on real Postgres before production deploy
 
