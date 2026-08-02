@@ -12,9 +12,13 @@ import "./i18n.js";
 // Named imports from globals.js demonstrate the new ES module pattern
 import { storage } from "./utils/storage.js";
 
-// Global i18n helper for existing code: window.__t('nav.dashboard') → localized string
-import i18n, { __t } from "./i18n.js";
-window.__t = __t;
+// Improvement #2: `window.__t = __t` is gone. Every module that calls __t()
+// imports it from ./i18n.js, so the shim had no readers left.
+//
+// window.__changeLang stays deliberately: there is no language-switcher UI,
+// so this console hook is the only way to change language at runtime. Remove
+// it when a real switcher lands.
+import i18n from "./i18n.js";
 window.__changeLang = (lng) => {
   i18n.changeLanguage(lng);
   storage.lang.set(lng);
@@ -62,16 +66,15 @@ import "./components/register-components.js";
 // Exposes window.UI for legacy window.* screens during migration.
 import "./components/ui/index.js";
 
-// Global error handler
+// Global error handler.
+// Improvement #2: these used to be gated on `window.toast`, a global nothing
+// ever assigned — so neither branch could run. Toasts now come from
+// utils/toast.js; here we just log.
 window.addEventListener("error", (e) => {
-  if (window.toast && !e.defaultPrevented) {
-    console.warn("Uncaught error:", e.error || e.message);
-  }
+  if (!e.defaultPrevented) console.warn("Uncaught error:", e.error || e.message);
 });
 window.addEventListener("unhandledrejection", (e) => {
-  if (window.toast) {
-    console.warn("Unhandled rejection:", e.reason);
-  }
+  console.warn("Unhandled rejection:", e.reason);
 });
 
 // Register service worker (production only)

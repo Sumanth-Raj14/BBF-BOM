@@ -2,7 +2,7 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { INR, Icon, api } from "../../globals";
+import { INR, Icon, api, printPO } from "../../globals";
 import { Modal, Button, StatusPill, Card, DataTable, EmptyState } from "../ui";
 // ============ PO DETAIL ============
 export default function PODetailModal({ open, onClose, item }) {
@@ -189,18 +189,7 @@ export default function PODetailModal({ open, onClose, item }) {
           </Button>
           <Button
             variant="secondary"
-            disabled={typeof window.printPO !== "function"}
-            title={
-              typeof window.printPO !== "function"
-                ? __t("modals.poDetail.printUnavailable") ||
-                  "Print is unavailable right now"
-                : undefined
-            }
-            onClick={() => {
-              if (typeof window.printPO === "function") {
-                window.printPO(item, vendorInfo || undefined);
-              }
-            }}
+            onClick={() => printPO(item, vendorInfo || undefined)}
           >
             <Icon.Doc size={12} />{" "}
             {__t("modals.poDetail.printPdf") || "Print PDF"}

@@ -41,8 +41,8 @@ import { AppCtxProvider } from "../context/AppCtx.jsx";
 window.React = React;
 
 beforeEach(() => {
-  window.__t = vi.fn((key) => key);
-  window.toast = vi.fn();
+  // __t and toast are ES-module imports in the code under test; stubbing the
+  // globals never had any effect. Only the ErrorBoundary shim is still read.
   window.ErrorBoundary = ({ children }) => children;
 });
 
