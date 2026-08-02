@@ -2,7 +2,7 @@
 
 **Project**: Blackbox BOM (Local-first enterprise PLM platform)  
 **Version**: 2.1.0  
-**Last Updated**: 2026-08-01  
+**Last Updated**: 2026-08-02  
 **Status**: Production release (v2.1.0 on branch `master`)
 
 ---
@@ -11,7 +11,9 @@
 
 > **2026-08-01 update — the SQLite–Postgres gap below is now closed in CI.** The full backend pytest suite runs against **real PostgreSQL 16** as a **hard gate** (`.github/workflows/postgres-ci.yml` → `Test Suite on Postgres`): **634 passed / 0 failed / 1 skipped / 1 xfailed**, alongside a fresh-install `init_db` bootstrap job on real Postgres. asyncpg requires session-scoped asyncio loops, passed via `-o asyncio_default_{fixture,test}_loop_scope=session` on the CI CLI (kept out of `pytest.ini` so the local SQLite track stays function-scoped). A red PG run blocks merge. The Postgres-only defects that SQLite masks (FK/NOT-NULL enforcement, identity-sequence advancement, full-text search, `::jsonb`, `RETURNING`, NUMERIC precision, RLS/session vars) now actually execute in CI. The 1 skip is `test_migration_up_down_cycle` (needs a live localhost PG); the 1 xfail is `test_migration_offline_sql` (offline `--sql` generation unsupported by design — migrations use runtime `inspect()` for conditional DDL). The narrative below is retained as the strategy/history that motivated the gate.
 
-The Blackbox BOM platform runs a **comprehensive backend unit and integration suite** (pytest — SQLite for fast local/dev, **real PostgreSQL 16 in CI as the authoritative gate**) with a **fully configured but dormant frontend test suite** (vitest + Playwright). Production database is PostgreSQL; head is `047_solidworks_integration` (47 migrations, 159 tables). **Original finding (2026-07-19)**: the SQLite-only local track masked Postgres-specific defects (VARCHAR(32) column truncation in Alembic version tracking, Row-Level Security behavior, dialect-specific SQL) — now covered by the Postgres hard gate described above.
+> **2026-08-02 update — measured locally on this branch.** The backend suite now collects **648 tests**. A SQLite run (`cd backend && python -m pytest -q --tb=no`) gives **640 passed / 6 failed / 2 skipped**; all 6 failures are in `test_analytics` and `test_search` and are Postgres-only SQL (`TO_CHAR`, `NOW() - INTERVAL`, `ILIKE`, `ts_rank`, `::date`) that SQLite cannot parse — they are expected to pass on the PG gate and are not product defects. The frontend suite is **no longer dormant**: `cd frontend && npx vitest run` gives **182 passed / 182** across 86 files. The Postgres CI gate was **not re-run in this pass**, so the 634-test figure recorded above predates the tests added since; read the latest CI run for the authoritative number.
+
+The Blackbox BOM platform runs a **comprehensive backend unit and integration suite** (pytest — SQLite for fast local/dev, **real PostgreSQL 16 in CI as the authoritative gate**) alongside a **live frontend unit suite** (vitest, 182 tests) and a **manually-run Playwright end-to-end suite**. Production database is PostgreSQL; head is `048_index_foreign_keys` (48 migrations, 160 tables). **Original finding (2026-07-19)**: the SQLite-only local track masked Postgres-specific defects (VARCHAR(32) column truncation in Alembic version tracking, Row-Level Security behavior, dialect-specific SQL) — now covered by the Postgres hard gate described above.
 
 ---
 
@@ -244,31 +246,38 @@ if not TEST_DATABASE_URL:
 
 ### Frontend Test Infrastructure
 
-**Status**: Configured but dormant (no active test files)
+**Status**: Active. Vitest is populated and green; Playwright specs exist but are run by hand.
 
 #### Vitest Setup
 - **Config**: `frontend/vitest.config.ts`
 - **Environment**: jsdom (browser simulation)
 - **Setup File**: `frontend/src/test-setup.ts` (testing-library/jest-dom initialization)
-- **Expected Glob**: `src/**/*.test.{ts,tsx,js,jsx}`
-- **Current Tests**: 0 (framework ready, awaiting component test implementation)
+- **Glob**: `src/**/*.test.{ts,tsx,js,jsx}`
+- **Current Tests**: **182 passing across 86 files** (measured 2026-08-02 via `npx vitest run`)
+- **CI Integration**: the `Test Frontend` job in `.github/workflows/ci.yml` runs `npx vitest run`
 
 #### Playwright Setup
 - **Config**: `frontend/playwright.config.js`
-- **Baseurl**: http://localhost:4173 (Vite preview server)
+- **Baseurl**: http://localhost:4173 (Vite preview server, started by the config's `webServer`)
 - **Browsers**: Chromium only (no multi-browser matrix yet)
 - **Test Pattern**: `tests/**/*.spec.js`, `e2e/**/*.spec.js`
-- **Current Tests**: 0 (framework ready, awaiting spec implementation)
-- **CI Integration**: Configured for retries=2 on CI, parallel workers=1 on CI
+- **Current specs**: `frontend/e2e/smoke.spec.js`, `frontend/e2e/real-flows.spec.js`, plus `auth.setup.js` / `storage-state.js`
+- **Auth strategy**: a `setup` project logs in once and stores the session, which every chromium test depends on. This is deliberate — `/auth/login` is limited to `RATE_LIMIT_AUTH_PER_MINUTE` (**5/minute**), so a suite that logs in per test rate-limits itself into 429s.
+- **`real-flows.spec.js` covers**: the API is reachable through the app origin rather than the SPA fallback; protected endpoints reject anonymous callers; a wrong password does not get in; a real login reaches the app shell; authenticated screens render without crashing.
+- **Fixture**: `backend/scripts/seed_e2e_fixture.py` seeds a multi-level BOM so these run against real data (`--clean` removes it).
+- **CI Integration**: retries=2 and workers=1 are configured *for* CI, but **no workflow currently runs Playwright** — see below.
 
 ### CI/CD Pipeline
 
-**Status**: No GitHub Actions workflow found as of 2026-07-19.
+**Status**: three workflows exist — `.github/workflows/ci.yml`, `postgres-ci.yml`, `solidworks-plugin.yml`. (The earlier "no GitHub Actions workflow found as of 2026-07-19" note is superseded.)
 
-**Recommended CI Track** (see "Recommendations" section):
-- Postgres-specific test runner (Docker-based test database)
-- Per-environment validation (dev/staging/prod)
-- Frontend vitest + Playwright E2E on each push
+- `postgres-ci.yml` — `Fresh Install on Postgres` (init_db bootstrap) and `Test Suite on Postgres` (full pytest against real PG16, the authoritative **hard gate**), plus a non-blocking `Existing Test Suite (SQLite track)` job.
+- `ci.yml` — backend lint/mypy, `Test Backend`, security scanning, dependency audit, `Build Frontend`, `Test Frontend` (vitest), Docker build/push, deploy stages.
+- **No Playwright/E2E job runs in CI on this branch.** The CI wiring for it, together with a `write-flows.spec.js` suite, lives on the unmerged branch `test/e2e-ci-and-write-flows`; until that merges, end-to-end coverage is manual and non-gating.
+
+**Still recommended**:
+- Wire the Playwright E2E job into CI (merge `test/e2e-ci-and-write-flows`).
+- Per-environment validation (dev/staging/prod).
 
 ---
 
@@ -354,17 +363,16 @@ if not TEST_DATABASE_URL:
 - **Consequence**: Postgres-specific schema features (RLS policies, custom indexes, constraints from later migrations) not present in test DB
 - **Mitigated by**: Critical features (tenant isolation, RLS conditional logic) tested via mocks and unit tests
 
-### 4. Frontend Tests Not Implemented
+### 4. Frontend E2E Coverage Is Manual — RESOLVED for unit tests, OPEN for E2E
 
-**Vitest & Playwright configured but no active test files**:
-- React component tests: 0
-- E2E tests: 0
+- React component/unit tests: **182 passing across 86 files** (vitest), run by the `Test Frontend` job in `ci.yml`. No longer a gap.
+- E2E tests: `smoke.spec.js` and `real-flows.spec.js` exist and pass against a live backend, but **nothing runs them in CI** on this branch, so they cannot catch a regression automatically.
 
-**Impact**: Frontend changes not validated by automated tests. Regression risk on UI/UX changes.
+**Impact**: UI regressions are caught at unit level; full-stack regressions are only caught if someone runs Playwright by hand. Closing this means merging `test/e2e-ci-and-write-flows`, which carries both the CI job and the write-flow specs.
 
-### 5. No Multi-Database CI Track
+### 5. No Multi-Database CI Track — RESOLVED
 
-**Missing**: GitHub Actions workflow to run tests against both SQLite (fast) and Postgres (correctness).
+`.github/workflows/postgres-ci.yml` runs the suite against real Postgres 16 as a hard gate and keeps a non-blocking SQLite track alongside it.
 
 ---
 
