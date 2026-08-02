@@ -1,26 +1,15 @@
 import { test, expect } from '@playwright/test';
+import { STORAGE_STATE } from "./storage-state.js";
+
+// Runs as a really-logged-in user. This spec used to fake that by writing
+// localStorage.__bbox_auth, which only worked because the app trusted that
+// blob -- the offline-login auth bypass. With that hole closed, the fake is
+// just a logged-out browser; the real session comes from auth.setup.js.
+test.use({ storageState: STORAGE_STATE });
 
 const APP_URL = process.env.APP_URL || 'http://localhost:4173';
 
 test.describe('Blackbox BOM — Critical Path Smoke Tests', () => {
-
-  test.beforeEach(async ({ page }) => {
-    // The app gates on auth (renders AuthScreen when no stored session), so
-    // seed a client-side session + completed-onboarding flag before every
-    // navigation, matching tests/smoke.spec.js. Individual tests still call
-    // page.goto() themselves. (The "unauthenticated" test below clears +
-    // reloads; its assertion accepts either the app or the login screen.)
-    await page.addInitScript(() => {
-      localStorage.setItem('__bbox_auth', JSON.stringify({
-        name: 'Elena Chen',
-        email: 'elena@blackbox-bom.com',
-        init: 'EC',
-        role: 'engineering',
-      }));
-      localStorage.setItem('__bbox_role', 'Admin');
-      localStorage.setItem('__bbox_onb', '1');
-    });
-  });
 
   test('should render the app shell', async ({ page }) => {
     await page.goto(APP_URL);

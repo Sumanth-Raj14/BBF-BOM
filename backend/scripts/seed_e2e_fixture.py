@@ -28,16 +28,19 @@ USAGE
 
 import argparse
 import asyncio
+import os
 import sys
 
 from sqlalchemy import delete, select
 
 from app.core.tenant_context import TenantContext
 from app.db.session import get_session_maker
+from app.core.security import get_password_hash
 from app.models.bom import BOM, BOMItem
 from app.models.bom_closure import BomClosure
 from app.models.part import Part
 from app.models.tenant import Tenant
+from app.models.user import User
 from app.models.vendor import Vendor
 from app.services import bom_service
 
@@ -45,13 +48,18 @@ PREFIX = "E2E-"
 BOM_NUMBER = f"{PREFIX}ASSY-001"
 
 # (pn, name, category, cost, vendor_index)
+# NB: category must satisfy the CHECK on parts.category — one of
+# Electrical, Mechanical, Software, Assembly, Raw Material, Hardware,
+# Consumable, Subcontract, Packaging, Tooling, Other. "Fabricated" is not a
+# member and was rejected only on a fresh create_all() schema in CI; the
+# long-lived dev database predates the constraint and accepted it.
 LEAF_PARTS = [
     (f"{PREFIX}RES-10K", "Resistor 10k 0603", "Electrical", 0.012, 0),
     (f"{PREFIX}CAP-100N", "Capacitor 100nF X7R", "Electrical", 0.019, 0),
     (f"{PREFIX}MCU-32", "MCU 32-bit 64LQFP", "Electrical", 4.85, 1),
-    (f"{PREFIX}PCB-4L", "PCB 4-layer FR4", "Fabricated", 12.40, 1),
+    (f"{PREFIX}PCB-4L", "PCB 4-layer FR4", "Mechanical", 12.40, 1),
     (f"{PREFIX}SCR-M3", "Screw M3x8 SS", "Hardware", 0.031, 2),
-    (f"{PREFIX}HSG-AL", "Housing, anodised AL", "Fabricated", 27.90, 2),
+    (f"{PREFIX}HSG-AL", "Housing, anodised AL", "Mechanical", 27.90, 2),
 ]
 SUB_ASSEMBLIES = [
     (f"{PREFIX}SUB-PCBA", "PCBA sub-assembly", [0, 1, 2, 3]),
@@ -65,11 +73,65 @@ VENDORS = [
 ]
 
 
-async def _tenant_id(db) -> int:
+async def ensure_user(email: str, password: str) -> None:
+    """Create (or reset) a login the E2E suite can use.
+
+    CI has no seeded account: init_db provisions the schema, not users. Kept
+    behind an explicit --with-user flag because it mints an ACTIVE SUPERUSER
+    with a known password — never run it against production.
+    """
+    Session = await get_session_maker()
+    async with Session() as db:
+        tid = await _tenant_id(db, create=True)
+        token = TenantContext.set(tenant_id=tid)
+        try:
+            user = (
+                await db.execute(select(User).where(User.email == email))
+            ).scalars().first()
+            if user is None:
+                user = User(
+                    email=email,
+                    username=email.split("@")[0],
+                    fullName="E2E Admin",
+                    hashedPassword=get_password_hash(password),
+                    isActive=True,
+                    isSuperuser=True,
+                    tenantId=tid,
+                )
+                db.add(user)
+                action = "created"
+            else:
+                user.hashedPassword = get_password_hash(password)
+                user.isActive = True
+                user.failedLoginAttempts = 0
+                user.lockedUntil = None
+                action = "reset"
+            await db.commit()
+            print(f"E2E user {action}: {email} (tenant {tid})")
+        finally:
+            TenantContext.reset(token)
+
+
+async def _tenant_id(db, create: bool = False) -> int:
+    """Id of the tenant to seed into.
+
+    `init_db` provisions the SCHEMA but no rows, so a freshly bootstrapped
+    database (exactly what CI builds) has no tenant at all. This originally
+    raised, and passed locally only because the dev database already had one
+    from earlier work — the failure appeared solely in CI. With create=True we
+    provision a default tenant so the fixture is self-sufficient.
+    """
     tid = (await db.execute(select(Tenant.id).order_by(Tenant.id))).scalars().first()
-    if tid is None:
+    if tid is not None:
+        return tid
+    if not create:
         raise SystemExit("No tenant exists — run scripts.init_db first.")
-    return tid
+    tenant = Tenant(tenant_name="Blackbox BOM", tenant_code="DEFAULT")
+    db.add(tenant)
+    await db.commit()
+    await db.refresh(tenant)
+    print(f"Created default tenant id={tenant.id} (database had none)")
+    return tenant.id
 
 
 async def _get_or_create_part(db, tid, pn, name, category, cost):
@@ -89,7 +151,7 @@ async def _get_or_create_part(db, tid, pn, name, category, cost):
 async def seed() -> None:
     Session = await get_session_maker()
     async with Session() as db:
-        tid = await _tenant_id(db)
+        tid = await _tenant_id(db, create=True)
         token = TenantContext.set(tenant_id=tid)
         try:
             for name, country, lead in VENDORS:
@@ -207,8 +269,26 @@ async def clean() -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--clean", action="store_true", help="remove the fixture")
+    ap.add_argument(
+        "--with-user",
+        action="store_true",
+        help="also create/reset an active superuser login for the E2E suite "
+        "(E2E_EMAIL / E2E_PASSWORD env, defaults admin@blackbox.com/admin123). "
+        "Dev and CI only.",
+    )
     args = ap.parse_args()
+    async def _run():
+        if args.clean:
+            await clean()
+            return
+        await seed()
+        if args.with_user:
+            await ensure_user(
+                os.environ.get("E2E_EMAIL", "admin@blackbox.com"),
+                os.environ.get("E2E_PASSWORD", "admin123"),
+            )
+
     try:
-        asyncio.run(clean() if args.clean else seed())
+        asyncio.run(_run())
     except SystemExit as e:
         sys.exit(str(e))

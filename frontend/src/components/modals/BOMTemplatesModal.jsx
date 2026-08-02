@@ -1,9 +1,10 @@
 import PropTypes from "prop-types";
+import { AppContext } from "../../context/AppCtx.jsx";
 import { storage } from "../../utils/storage.js";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Icon, api, useAppStore } from "../../globals";
+import { Icon, api } from "../../globals";
 import {
   Modal,
   Button,
@@ -24,7 +25,10 @@ function BOMTemplatesModal({ open, onClose }) {
   const [templates, setTemplates] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
-  const ctx = useAppStore();
+  // Reads the app context directly. (useAppStore() is now equivalent — the
+  // two context objects were unified in context/appContext.js — but the
+  // explicit import keeps the dependency visible.)
+    const ctx = React.useContext(AppContext);
 
   React.useEffect(() => {
     if (open && ctx?.apiConnected) {

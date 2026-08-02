@@ -121,7 +121,7 @@ class RestrictedSubstanceEntry(Base):
         Integer, ForeignKey("regulation_versions.id", ondelete="CASCADE"), nullable=False, index=True
     )
     substance_id = Column(Integer, ForeignKey("substances.id", ondelete="CASCADE"), index=True)
-    substance_group_id = Column(Integer, ForeignKey("substance_groups.id", ondelete="CASCADE"))
+    substance_group_id = Column(Integer, ForeignKey("substance_groups.id", ondelete="CASCADE"), index=True)
     threshold_ppm = Column(Numeric(12, 4), nullable=False)  # RoHS 1000, Cd 100, SVHC 1000
     threshold_basis = Column(String, nullable=False)  # HOMOGENEOUS_MATERIAL / ARTICLE / MIXTURE / PRODUCT
     applicability = Column(JSON)  # Annex XVII per-use conditions (unused this build)
@@ -161,8 +161,8 @@ class RohsExemption(Base):
     id = Column(Integer, primary_key=True)
     code = Column(String, nullable=False)  # e.g. "6(c)"
     annex = Column(String, nullable=False)  # ANNEX_III / ANNEX_IV
-    substance_id = Column(Integer, ForeignKey("substances.id", ondelete="SET NULL"))
-    substance_group_id = Column(Integer, ForeignKey("substance_groups.id", ondelete="SET NULL"))
+    substance_id = Column(Integer, ForeignKey("substances.id", ondelete="SET NULL"), index=True)
+    substance_group_id = Column(Integer, ForeignKey("substance_groups.id", ondelete="SET NULL"), index=True)
     application_scope = Column(Text)
     applicable_eee_categories = Column(JSON)  # int[] of RoHS categories 1-11
     valid_until = Column(Date)  # scalar fallback expiry

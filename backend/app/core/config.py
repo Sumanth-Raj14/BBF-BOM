@@ -226,6 +226,16 @@ class Settings(BaseSettings):
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 60
     RATE_LIMIT_AUTH_PER_MINUTE: int = 5
+    # Token refresh is NOT a login. /auth/refresh shared the 5/minute login
+    # budget, but it is authenticated session upkeep that the client fires
+    # automatically whenever an access token expires — so two tabs, a few
+    # reloads, or several concurrent calls each meeting a 401 exhausted the
+    # allowance and the 429 surfaced to users as
+    # "Save failed — not synced to server ... Session temporarily unavailable".
+    # It still needs a ceiling (a stolen refresh cookie should not be
+    # infinitely replayable), just one sized for normal use rather than for
+    # brute-force password guessing.
+    RATE_LIMIT_REFRESH_PER_MINUTE: int = 30
     # Outbound Zoho Books API calls (client-side token bucket in
     # app.integrations.zoho_client.ZohoBooksClient) — conservative default
     # well under Zoho's server-side limit so the tool throttles itself first.

@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { STORAGE_STATE } from './e2e/storage-state.js';
 
 export default defineConfig({
   testDir: '.',
@@ -21,6 +22,11 @@ export default defineConfig({
     },
     {
       name: 'chromium',
+      // Deliberately NOT storageState here. Some specs must start logged OUT --
+      // real-flows.spec.js asserts that anonymous callers are rejected and that
+      // a wrong password does not get in. A project-wide session silently
+      // defeats exactly the tests whose job is to prove auth works.
+      // Specs that need a session opt in with `test.use({ storageState })`.
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['setup'],
     },
