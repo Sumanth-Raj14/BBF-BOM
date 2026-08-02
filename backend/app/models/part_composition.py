@@ -79,8 +79,7 @@ class PartMaterialSubstance(Base, TenantAwareMixin):
     concentration_ppm = Column(Numeric(12, 4), nullable=False)  # within the homogeneous material
     mass_g = Column(Numeric(10, 4))
     source_declaration_id = Column(
-        Integer, ForeignKey("substance_declarations.id", ondelete="SET NULL")
-    )
+        Integer, ForeignKey("substance_declarations.id", ondelete="SET NULL"), index=True)
 
     __table_args__ = (
         UniqueConstraint(
@@ -103,7 +102,7 @@ class SubstanceDeclaration(Base, TenantAwareMixin):
 
     id = Column(Integer, primary_key=True)
     part_id = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True)
-    supplier_id = Column(Integer, ForeignKey("vendors.id", ondelete="SET NULL"))
+    supplier_id = Column(Integer, ForeignKey("vendors.id", ondelete="SET NULL"), index=True)
     standard = Column(String)  # IPC_1752A/IPC_1754/IEC_62474/MANUFACTURER_STATEMENT/PDF_UNSTRUCTURED
     disclosure_class = Column(String)  # CLASS_A..CLASS_F (C=summary, D=FMD)
     data_fidelity = Column(String)  # COMPUTED_FROM_FMD/ASSERTED_FROM_SUMMARY/NO_DATA
@@ -114,12 +113,11 @@ class SubstanceDeclaration(Base, TenantAwareMixin):
     valid_until = Column(Date)
     revision_of_part = Column(String)
     assessed_regulation_version_id = Column(
-        Integer, ForeignKey("regulation_versions.id", ondelete="SET NULL")
-    )
+        Integer, ForeignKey("regulation_versions.id", ondelete="SET NULL"), index=True)
     document_uri = Column(String)  # local file store path (spec 5, 10.6), not cloud
     content_hash = Column(String(64))  # SHA-256, computed server-side on ingest (P10)
     status = Column(String, nullable=False, default="RECEIVED")  # RECEIVED/VALIDATED/REJECTED/EXPIRED/SUPERSEDED
-    approved_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    approved_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), index=True)
     approved_at = Column(DateTime(timezone=True))
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -155,7 +153,7 @@ class ExemptionClaim(Base, TenantAwareMixin):
         Integer, ForeignKey("rohs_exemptions.id", ondelete="CASCADE"), nullable=False, index=True
     )
     substance_id = Column(Integer, ForeignKey("substances.id", ondelete="CASCADE"))
-    substance_group_id = Column(Integer, ForeignKey("substance_groups.id", ondelete="CASCADE"))
+    substance_group_id = Column(Integer, ForeignKey("substance_groups.id", ondelete="CASCADE"), index=True)
     justification = Column(Text)
     source_declaration_id = Column(
         Integer, ForeignKey("substance_declarations.id", ondelete="SET NULL")

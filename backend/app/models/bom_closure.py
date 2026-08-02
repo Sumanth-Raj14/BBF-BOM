@@ -30,11 +30,9 @@ class BomClosure(Base, TenantAwareMixin):
     id = Column(Integer, primary_key=True)
     bom_id = Column(Integer, ForeignKey("boms.id", ondelete="CASCADE"), nullable=False, index=True)
     ancestor_item_id = Column(
-        Integer, ForeignKey("bom_items_master.id", ondelete="CASCADE"), nullable=False
-    )
+        Integer, ForeignKey("bom_items_master.id", ondelete="CASCADE"), nullable=False, index=True)
     descendant_item_id = Column(
-        Integer, ForeignKey("bom_items_master.id", ondelete="CASCADE"), nullable=False
-    )
+        Integer, ForeignKey("bom_items_master.id", ondelete="CASCADE"), nullable=False, index=True)
     depth = Column(Integer, nullable=False, default=0)
 
     bom = relationship("BOM")

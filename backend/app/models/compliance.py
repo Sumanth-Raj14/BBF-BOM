@@ -46,7 +46,7 @@ class CompliancePack(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
-    standard_id = Column(Integer, ForeignKey("compliance.id", ondelete="SET NULL"))
+    standard_id = Column(Integer, ForeignKey("compliance.id", ondelete="SET NULL"), index=True)
     description = Column(Text)
     createdAt = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -58,7 +58,7 @@ class CompliancePackItem(Base):
     __tablename__ = "compliance_pack_items"
 
     id = Column(Integer, primary_key=True)
-    pack_id = Column(Integer, ForeignKey("compliance_packs.id", ondelete="CASCADE"))
+    pack_id = Column(Integer, ForeignKey("compliance_packs.id", ondelete="CASCADE"), index=True)
     requirement = Column(Text, nullable=False)
     sort_order = Column(Integer, server_default=text("0"))
 
@@ -70,8 +70,8 @@ class PartCertification(Base):
     __tablename__ = "part_certifications"
 
     id = Column(Integer, primary_key=True)
-    part_id = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"))
-    compliance_id = Column(Integer, ForeignKey("compliance.id", ondelete="CASCADE"))
+    part_id = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), index=True)
+    compliance_id = Column(Integer, ForeignKey("compliance.id", ondelete="CASCADE"), index=True)
     certified_by = Column(String)
     certification_date = Column(Date)
     expiry_date = Column(Date)
