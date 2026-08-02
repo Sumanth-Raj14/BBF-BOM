@@ -1,4 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { STORAGE_STATE } from "../e2e/storage-state.js";
+
+// Runs as a really-logged-in user. This spec used to fake that by writing
+// localStorage.__bbox_auth, which only worked because the app trusted that
+// blob -- the offline-login auth bypass. With that hole closed, the fake is
+// just a logged-out browser; the real session comes from auth.setup.js.
+test.use({ storageState: STORAGE_STATE });
 
 test.describe('Accessibility', () => {
   test.beforeEach(async ({ page }) => {

@@ -22,13 +22,12 @@ export default defineConfig({
     },
     {
       name: 'chromium',
-      // Every spec runs as a really-logged-in user. Specs used to fake this by
-      // writing localStorage.__bbox_auth directly, which worked only because
-      // the app trusted that blob -- the offline-login auth bypass. Closing
-      // that hole (see offlineAuth.js) correctly stopped honouring the fake
-      // session, so the fake is no longer a shortcut to the app shell, it's
-      // just a logged-out browser. The real session from auth.setup.js is.
-      use: { ...devices['Desktop Chrome'], storageState: STORAGE_STATE },
+      // Deliberately NOT storageState here. Some specs must start logged OUT --
+      // real-flows.spec.js asserts that anonymous callers are rejected and that
+      // a wrong password does not get in. A project-wide session silently
+      // defeats exactly the tests whose job is to prove auth works.
+      // Specs that need a session opt in with `test.use({ storageState })`.
+      use: { ...devices['Desktop Chrome'] },
       dependencies: ['setup'],
     },
   ],
