@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { navigateTo } from "../../services/navigation.js";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
@@ -83,7 +84,7 @@ export default function ImportRFQsModal({ open, onClose }) {
           kind: "success",
           action: {
             label: __t("common.view") || "View",
-            onClick: () => window.__nav?.("procurement"),
+            onClick: () => navigateTo("procurement"),
           },
         },
       );

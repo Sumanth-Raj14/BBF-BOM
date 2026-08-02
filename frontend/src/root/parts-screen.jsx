@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { getPoDraft, setPoDraft } from "../services/poDraft.js";
 import { storage } from "../utils/storage.js";
 import { convertApiPartsToTree } from "../utils/bom.js";
 import { __t } from "../i18n";
@@ -1182,14 +1183,14 @@ function PartsGrid({
                     icon: <Icon.Cart size={11} />,
                     label: __t("parts.addToPoDraft") || "Add to PO draft",
                     onClick: () => {
-                      const poDraft = window.__poDraft || [];
+                      const poDraft = getPoDraft();
                       poDraft.push({
                         pn: p.pn,
                         name: p.name,
                         cost: p.cost,
                         vendor: p.vendor,
                       });
-                      window.__poDraft = poDraft;
+                      setPoDraft(poDraft);
                       toast(
                         p.pn +
                           " " +
@@ -1416,14 +1417,14 @@ function PartsList({
                 icon: <Icon.Cart size={11} />,
                 label: __t("parts.addToPoDraft") || "Add to PO draft",
                 onClick: () => {
-                  const poDraft = window.__poDraft || [];
+                  const poDraft = getPoDraft();
                   poDraft.push({
                     pn: p.pn,
                     name: p.name,
                     cost: p.cost,
                     vendor: p.vendor,
                   });
-                  window.__poDraft = poDraft;
+                  setPoDraft(poDraft);
                   toast(
                     p.pn +
                       " " +

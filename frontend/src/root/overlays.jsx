@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { navigateTo } from "../services/navigation.js";
 import { useAutosave } from "../hooks/useAutosave.js";
 import { __t } from "../i18n";
 import { toast, subscribe } from "../utils/toast";
@@ -371,7 +372,7 @@ function NewPOModal({ open, onClose }) {
         kind: "success",
         action: {
           label: __t("common.view") || "View",
-          onClick: () => window.__nav?.("procurement"),
+          onClick: () => navigateTo("procurement"),
         },
       });
     } catch (err) {
@@ -1786,7 +1787,7 @@ function SendRFQModal({ open, onClose, row }) {
           kind: "success",
           action: {
             label: __t("overlays.sendRfq.viewRfq") || "View RFQ",
-            onClick: () => window.__nav?.("procurement"),
+            onClick: () => navigateTo("procurement"),
           },
         },
       );

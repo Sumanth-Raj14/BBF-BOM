@@ -1,3 +1,4 @@
+import { getInrRate } from "../utils/currency.js";
 export const KEYS = {
   AUTH: "__bbox_auth",
   ONBOARDING: "__bbox_onb",
@@ -160,8 +161,8 @@ export const storage = {
 
   inrRate: {
     get: () => {
-      try { return parseFloat(get(KEYS.INR_RATE)) || (window.INR_RATE || 83); }
-      catch { return window.INR_RATE || 83; }
+      try { return parseFloat(get(KEYS.INR_RATE)) || getInrRate(); }
+      catch { return getInrRate(); }
     },
     set: (r) => set(KEYS.INR_RATE, String(r)),
   },

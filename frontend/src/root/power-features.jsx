@@ -1,4 +1,6 @@
 import PropTypes from "prop-types";
+import { getInrRate } from "../utils/currency.js";
+import { navigateTo } from "../services/navigation.js";
 import { storage } from "../utils/storage.js";
 import { screenData } from "../services/screenDataBridge.js";
 import { __t } from "../i18n";
@@ -70,7 +72,7 @@ function CommandPalette({ open, onClose }) {
       c: "> new ecr",
       label: __t("power.cmd.newEcr") || "Create change request",
       run: () => {
-        window.__nav?.("ecr");
+        navigateTo("ecr");
         toast(__t("power.cmd.clickNewEcr") || "Click 'New ECR' to start");
       },
     },
@@ -92,12 +94,12 @@ function CommandPalette({ open, onClose }) {
     {
       c: "> compare",
       label: __t("power.cmd.compare") || "Compare BOM revisions",
-      run: () => window.__nav?.("diff"),
+      run: () => navigateTo("diff"),
     },
     {
       c: "> dashboard",
       label: __t("power.cmd.dashboard") || "Go to Dashboard",
-      run: () => window.__nav?.("dashboard"),
+      run: () => navigateTo("dashboard"),
     },
     {
       c: "> ai",
@@ -112,22 +114,22 @@ function CommandPalette({ open, onClose }) {
     {
       c: "> approvals",
       label: __t("power.cmd.approvals") || "Open approvals inbox",
-      run: () => window.__nav?.("approvals"),
+      run: () => navigateTo("approvals"),
     },
     {
       c: "> calendar",
       label: __t("power.cmd.calendar") || "Open calendar & timeline",
-      run: () => window.__nav?.("calendar"),
+      run: () => navigateTo("calendar"),
     },
     {
       c: "> compliance",
       label: __t("power.cmd.compliance") || "Open compliance tracker",
-      run: () => window.__nav?.("compliance"),
+      run: () => navigateTo("compliance"),
     },
     {
       c: "> inventory",
       label: __t("power.cmd.inventory") || "Open inventory",
-      run: () => window.__nav?.("inventory"),
+      run: () => navigateTo("inventory"),
     },
   ];
   const results = React.useMemo(() => {
@@ -1009,7 +1011,7 @@ function NCRScreen() {
             action: {
               label: __t("power.ncr.viewWorkOrder") || "View work order",
               onClick: () => {
-                window.__nav?.("work-orders");
+                navigateTo("work-orders");
               },
             },
           })
@@ -1257,7 +1259,7 @@ function LandedCostModal({ open, onClose, part }) {
             :{" "}
             <strong>
               {(
-                (per_unit / (unit * (window.INR_RATE || 83)) - 1) *
+                (per_unit / (unit * getInrRate()) - 1) *
                 100
               ).toFixed(1)}
               %
@@ -1797,7 +1799,7 @@ function EmailParseModal({ open, onClose }) {
                   kind: "success",
                   action: {
                     label: __t("common.view") || "View",
-                    onClick: () => window.__nav?.("procurement"),
+                    onClick: () => navigateTo("procurement"),
                   },
                 },
               );

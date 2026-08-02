@@ -27,7 +27,7 @@ function BOMTemplatesModal({ open, onClose }) {
   const ctx = useAppStore();
 
   React.useEffect(() => {
-    if (open && window.apiConnected) {
+    if (open && ctx?.apiConnected) {
       setLoading(true);
       api.bomTemplates
         .list()
@@ -50,7 +50,7 @@ function BOMTemplatesModal({ open, onClose }) {
           setLoading(false);
         });
     }
-  }, [open, window.apiConnected]);
+  }, [open, ctx?.apiConnected]);
 
   const saveTemplate = async () => {
     if (!templateName.trim() || !ctx) return;
@@ -64,7 +64,7 @@ function BOMTemplatesModal({ open, onClose }) {
       ),
       projectCode: ctx.project?.code || null,
     };
-    if (window.apiConnected) {
+    if (ctx?.apiConnected) {
       try {
         const saved = await api.bomTemplates.create(templateData);
         setTemplates((prev) => [
@@ -119,7 +119,7 @@ function BOMTemplatesModal({ open, onClose }) {
   const loadTemplate = async (tmpl) => {
     if (!ctx) return;
     let bomData = tmpl.bomData || tmpl.rows;
-    if (tmpl.id && !bomData && window.apiConnected) {
+    if (tmpl.id && !bomData && ctx?.apiConnected) {
       try {
         const loaded = await api.bomTemplates.load(tmpl.id);
         bomData = loaded.bomData;
@@ -151,7 +151,7 @@ function BOMTemplatesModal({ open, onClose }) {
   };
 
   const deleteTemplate = async (id) => {
-    if (window.apiConnected) {
+    if (ctx?.apiConnected) {
       try {
         await api.bomTemplates.delete(id);
         setTemplates((prev) => prev.filter((t) => t.id !== id));
@@ -223,7 +223,7 @@ function BOMTemplatesModal({ open, onClose }) {
           ariaLabel={__t("bomTemplates.title") || "BOM Templates"}
         />
         <span style={{ marginLeft: "auto" }}>
-          {window.apiConnected ? (
+          {ctx?.apiConnected ? (
             <Badge tone="success">
               {__t("bomTemplates.connectedToApi") || "Connected to API"}
             </Badge>

@@ -1,4 +1,6 @@
 import PropTypes from "prop-types";
+import { getPoDraft, setPoDraft } from "../services/poDraft.js";
+import { navigateTo } from "../services/navigation.js";
 import { storage } from "../utils/storage.js";
 import { useAutosave } from "../hooks/useAutosave.js";
 import { __t } from "../i18n";
@@ -1297,7 +1299,7 @@ export function BomEditor({
                                 icon: <Icon.Cart size={11} />,
                                 label: __t("bom.addToPo") || "Add to PO",
                                 onClick: () => {
-                                  const poDraft = window.__poDraft || [];
+                                  const poDraft = getPoDraft();
                                   poDraft.push({
                                     pn: row.pn,
                                     name: row.name,
@@ -1305,7 +1307,7 @@ export function BomEditor({
                                     cost: row.cost,
                                     vendor: row.vendor,
                                   });
-                                  window.__poDraft = poDraft;
+                                  setPoDraft(poDraft);
                                   toast(
                                     row.pn +
                                       " " +
@@ -1321,7 +1323,7 @@ export function BomEditor({
                                       action: {
                                         label: __t("common.view") || "View",
                                         onClick: () =>
-                                          window.__nav?.("procurement"),
+                                          navigateTo("procurement"),
                                       },
                                     },
                                   );
@@ -1545,7 +1547,7 @@ export function BomEditor({
                 const selectedRows = flat.filter(
                   (r) => selected.has(r.id) && !r.assembly,
                 );
-                const poDraft = window.__poDraft || [];
+                const poDraft = getPoDraft();
                 selectedRows.forEach((r) =>
                   poDraft.push({
                     pn: r.pn,
@@ -1555,14 +1557,14 @@ export function BomEditor({
                     vendor: r.vendor,
                   }),
                 );
-                window.__poDraft = poDraft;
+                setPoDraft(poDraft);
                 toast(
                   `${selectedRows.length} ${__t("bom.partsAddedToPoDraft") || "parts added to PO draft"} (${poDraft.length} ${__t("bom.total") || "total"})`,
                   {
                     kind: "success",
                     action: {
                       label: __t("common.view") || "View",
-                      onClick: () => window.__nav?.("procurement"),
+                      onClick: () => navigateTo("procurement"),
                     },
                   },
                 );

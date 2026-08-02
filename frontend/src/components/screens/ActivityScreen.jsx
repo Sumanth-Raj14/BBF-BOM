@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { navigateTo } from "../../services/navigation.js";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
@@ -329,19 +330,19 @@ export default function ActivityScreen({ data }) {
                   onClick={() => {
                     const route = ENTITY_ROUTE[a.entityType];
                     if (route) {
-                      window.__nav?.(route);
+                      navigateTo(route);
                       return;
                     }
                     // Fall back to guessing from the label text when the
                     // entityType isn't one we have a route mapping for.
                     const obj = (a.obj || "").toLowerCase();
-                    if (/po-/.test(obj)) window.__nav?.("procurement");
-                    else if (/v\d/.test(obj)) window.__nav?.("diff");
-                    else if (/^[A-Z]+-/.test(a.obj || "")) window.__nav?.("bom");
+                    if (/po-/.test(obj)) navigateTo("procurement");
+                    else if (/v\d/.test(obj)) navigateTo("diff");
+                    else if (/^[A-Z]+-/.test(a.obj || "")) navigateTo("bom");
                     else if (/duplicate|part/.test(obj))
-                      window.__nav?.("parts");
+                      navigateTo("parts");
                     else if (/\.pdf|\.dwg|\.xlsx/.test(obj))
-                      window.__nav?.("docs");
+                      navigateTo("docs");
                     else toast((__t("activity.opening") || "Opening ") + a.obj);
                   }}
                 >

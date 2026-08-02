@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { navigateTo } from "../../services/navigation.js";
 
 import { __t } from "../../i18n";
 import { BOM_DATA, Icon, useAppStore } from "../../globals";
@@ -241,7 +242,7 @@ export default function GlobalSearchModal({ open, onClose }) {
   const choose = (r) => {
     onClose();
     if (r.action === "new-po") {
-      window.__nav?.("procurement");
+      navigateTo("procurement");
       setTimeout(
         () =>
           window.dispatchEvent(
@@ -251,7 +252,7 @@ export default function GlobalSearchModal({ open, onClose }) {
       );
       return;
     }
-    if (r.route) window.__nav?.(r.route);
+    if (r.route) navigateTo(r.route);
   };
 
   React.useEffect(() => {
@@ -411,7 +412,7 @@ export default function GlobalSearchModal({ open, onClose }) {
                 style={{ padding: "10px 14px" }}
                 onClick={() => {
                   onClose();
-                  window.__nav?.(r.route);
+                  navigateTo(r.route);
                 }}
               >
                 <span className="ic" aria-hidden="true">
