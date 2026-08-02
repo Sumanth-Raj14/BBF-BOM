@@ -7,23 +7,34 @@ import { describe, it, expect } from "vitest";
  * backend's actual OpenAPI contract.
  *
  * `api.js` writes every path as a string literal, so a route that does not
- * exist — or a renamed one — is only discovered at runtime, usually as a 404
- * or a 422 that the UI swallows. Audit finding A8 was precisely this:
+ * exist — or one that was renamed — is only discovered at runtime, usually as
+ * a 404 or a 422 the UI swallows. Audit finding A8 was exactly that:
  * `erpConnectorsAPI.logs("latest")` fed a string into an `int` path parameter
  * and 422'd on every call.
  *
- * Regenerate the spec with `cd backend && python -m scripts.export_openapi`
- * after adding or renaming routes.
+ * Regenerate the spec after adding or renaming routes:
+ *     cd backend && python -m scripts.export_openapi
  */
 const ROOT = path.resolve(__dirname, "../..");
 const SPEC = path.join(ROOT, "openapi.json");
 const API_JS = path.join(ROOT, "api.js");
 
+/**
+ * Paths api.js requests that the backend does NOT serve.
+ *
+ * The list must only ever SHRINK — a new mismatch fails the test below, and a
+ * second test fails if one of these starts working, so the allowlist cannot
+ * silently hide a route that now exists.
+ *
+ * Currently empty: all five known dead calls were deleted rather than
+ * allowlisted, because nothing in the UI called them.
+ */
+const KNOWN_BROKEN = [];
+
 /** Spec paths, minus the /api/v1 prefix api.js omits, as matchable regexes. */
 function specMatchers(spec) {
   return Object.keys(spec.paths).map((p) => {
     const rel = p.replace(/^\/api\/v1/, "");
-    // {param} matches any single non-slash segment, including a template hole.
     const rx = rel
       .replace(/[.*+?^$()|[\]\\]/g, "\\$&")
       .replace(/\{[^}]+\}/g, "[^/]+");
@@ -32,64 +43,42 @@ function specMatchers(spec) {
 }
 
 /**
- * Paths api.js requests. Template holes (${...}) become a placeholder segment,
- * and any query string is dropped — neither affects which route is hit.
+ * Paths api.js requests, with template holes resolved to a placeholder segment
+ * and query strings dropped — neither affects which route is hit.
  */
 function requestedPaths(src) {
   const found = new Set();
-  // Each quote style is matched separately. A single character class like
-  // [^`'"]+ truncates at the first quote INSIDE a template expression --
-  // `/inventory/stock${q ? '?' + q : ''}` was captured as "/inventory/stock${q "
-  // and then reported as a missing backend route. The test's own parser was
-  // the bug; a backtick cannot appear unescaped inside a template literal, so
-  // [^`]* is safe there.
+  // Each quote style is matched separately. A single class like [^`'"]+
+  // truncates at the first quote INSIDE a template expression, so
+  // `/inventory/stock${q ? "?" + q : ""}` was captured as "/inventory/stock${q "
+  // and reported as a missing route. A backtick cannot appear unescaped inside
+  // a template literal, so [^`]* is safe there.
   const patterns = [
     /apiRequest\(\s*`([^`]*)`/g,
     /apiRequest\(\s*'([^']*)'/g,
     /apiRequest\(\s*"([^"]*)"/g,
   ];
   for (const re of patterns) {
-  let m;
-  while ((m = re.exec(src)) !== null) {
-    let p = m[1];
-    if (!p.startsWith("/")) continue;
-    // Substitute template holes BEFORE splitting on "?": an interpolation such
-    // as `/parts${query ? "?" + query : ""}` contains a literal "?", so
-    // splitting first truncated the path to "/parts${query ".
-    // A hole preceded by "/" is a path SEGMENT (/parts/${id}); one appended
-    // directly is a query string (`/parts${query ? "?" + query : ""}`) and is
-    // not part of the route at all. Treating both as segments produced
-    // phantom paths like "/partsX".
-    p = p.replace(/\/\$\{[^}]*\}/g, "/X");
-    p = p.replace(/\$\{[^}]*\}/g, "");
-    p = p.split("?")[0];
-    p = p.replace(/\/+$/, "") || "/";
-    found.add(p);
-  }
+    let m;
+    while ((m = re.exec(src)) !== null) {
+      let p = m[1];
+      if (!p.startsWith("/")) continue;
+      // A hole whose expression builds a QUERY (it contains a quoted "?") is
+      // not part of the route even when it follows a slash:
+      // `/esignatures/${q ? "?" + q : ""}` is the path /esignatures/ plus a
+      // query. Strip these first or they masquerade as a path segment.
+      p = p.replace(/\$\{[^}]*['"`]\?['"`][^}]*\}/g, "");
+      // A remaining hole after a slash is a real path segment (/parts/${id}).
+      p = p.replace(/\/\$\{[^}]*\}/g, "/X");
+      // Anything still left is appended directly — a bare query interpolation.
+      p = p.replace(/\$\{[^}]*\}/g, "");
+      p = p.split("?")[0];
+      p = p.replace(/\/+$/, "") || "/";
+      found.add(p);
+    }
   }
   return [...found];
 }
-
-/**
- * Paths api.js requests that the backend does NOT serve — every one of these
- * 404s or 405s at runtime today. Found by this test on its first real run.
- *
- * They are listed rather than fixed because each needs a decision this test
- * cannot make: whether the frontend should call a different existing route, or
- * the backend should grow the missing one. Guessing a mapping (e.g. that
- * "advance" means "/action") would paper over a product question.
- *
- * The list must only ever SHRINK. A new mismatch fails the test.
- */
-const KNOWN_BROKEN = [
-  "/barcodes/assign/X",     // backend: generate | image | lookup | qr — no assign
-  "/barcodes/batch-generate", // no such route
-  "/work-orders/X/advance", // backend exposes /work-orders/{id}/action
-  "/eco/X/reject",          // backend exposes /eco/{id}/action and /approve
-  "/eco/X/changes",         // no such route
-  "/esignatures/X",         // backend exposes only /esignatures/
-  "/bom/X",                 // /bom/{id} is not a route; /bom/ and /bom/compare are
-];
 
 const specExists = fs.existsSync(SPEC);
 
@@ -105,8 +94,7 @@ describe("frontend/backend API contract", () => {
     if (!specExists) return;
     const spec = JSON.parse(fs.readFileSync(SPEC, "utf-8"));
     const matchers = specMatchers(spec);
-    const src = fs.readFileSync(API_JS, "utf-8");
-    const requested = requestedPaths(src);
+    const requested = requestedPaths(fs.readFileSync(API_JS, "utf-8"));
 
     // Guard against a silently broken parser reporting a vacuous pass.
     expect(requested.length, "parsed no paths out of api.js").toBeGreaterThan(50);
@@ -123,12 +111,10 @@ describe("frontend/backend API contract", () => {
     ).toEqual([]);
   });
 
-  it("the known-broken list has not grown stale", () => {
+  it("the known-broken list has not gone stale", () => {
     if (!specExists) return;
     const spec = JSON.parse(fs.readFileSync(SPEC, "utf-8"));
     const matchers = specMatchers(spec);
-    // If the backend grew one of these routes, delete the entry — otherwise
-    // the allowlist silently hides a path that now works.
     const nowValid = KNOWN_BROKEN.filter((p) =>
       matchers.some((m) => m.rx.test(p) || m.rx.test(p + "/")),
     );
