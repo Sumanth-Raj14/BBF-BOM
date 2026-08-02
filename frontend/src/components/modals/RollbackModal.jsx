@@ -1,12 +1,17 @@
 import PropTypes from "prop-types";
+import { AppContext } from "../../context/AppCtx.jsx";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Icon, api, useAppStore } from "../../globals";
+import { Icon, api } from "../../globals";
 import { Modal, Button, Badge, Spinner, EmptyState } from "../ui";
 
 function RollbackModal({ open, onClose }) {
-  const ctx = useAppStore();
+  // NOTE: useAppStore() from globals resolves root/overlays.jsx's AppCtx,
+  // which has NO Provider anywhere — the app mounts context/AppCtx.jsx's
+  // AppContext instead. So useAppStore() returns null and every ctx?.x read
+  // through it is silently undefined. Use the real context here.
+    const ctx = React.useContext(AppContext);
   const [selectedRev, setSelectedRev] = React.useState(null);
   const [revs, setRevs] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
