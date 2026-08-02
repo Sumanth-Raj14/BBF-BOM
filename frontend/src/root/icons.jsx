@@ -277,6 +277,46 @@ export const Icon = {
   Check: (p) => <ICO {...p} d={<path d="M3 8l3 3 7-7" />} />,
   Up: (p) => <ICO {...p} d={<path d="M4 10l4-4 4 4" />} />,
   Down: (p) => <ICO {...p} d={<path d="M4 6l4 4 4-4" />} />,
+  // Audit finding A3: GlobalSearchModal referenced Icon.Package, Icon.Shield
+  // and Icon.Alert, none of which existed. React renders an undefined
+  // component as "Element type is invalid", crashing the whole modal. Added as
+  // real icons rather than aliased to unrelated glyphs, so the search result
+  // types stay distinguishable.
+  Package: (p) => (
+    <ICO
+      {...p}
+      d={
+        <>
+          <path d="M8 1.5l5.5 3v7L8 14.5l-5.5-3v-7z" />
+          <path d="M2.5 4.5L8 7.5l5.5-3" />
+          <path d="M8 7.5v7" />
+        </>
+      }
+    />
+  ),
+  Shield: (p) => (
+    <ICO
+      {...p}
+      d={
+        <>
+          <path d="M8 1.5l5 2v4.5c0 3-2.1 5.6-5 6.5-2.9-.9-5-3.5-5-6.5V3.5z" />
+          <path d="M5.8 8l1.6 1.6L10.4 6.6" />
+        </>
+      }
+    />
+  ),
+  Alert: (p) => (
+    <ICO
+      {...p}
+      d={
+        <>
+          <path d="M8 2.2l6 10.3H2z" />
+          <path d="M8 6.4v3.1" />
+          <path d="M8 11.4h.01" />
+        </>
+      }
+    />
+  ),
   Bell: (p) => (
     <ICO
       {...p}

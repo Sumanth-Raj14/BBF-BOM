@@ -52,6 +52,22 @@ function riskBucket(rating) {
 }
 
 // ============ ANALYTICS ============
+// Audit finding A1. Every analytics panel did:
+//     (ctx?.rows || BOM_DATA.rows)[0].children.flatMap((s) => s.children || [])
+// which assumes rows is the demo TREE (root -> subassemblies -> parts). Once
+// real data hydrates, ctx.rows is the FLAT Parts-API array, so rows[0].children
+// is undefined and .flatMap throws -- the screen crashed precisely when the app
+// was genuinely connected. Handle both shapes (and empty) in one place.
+function bomLeafParts(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (list.length === 0) return [];
+  const root = list[0];
+  if (root && Array.isArray(root.children)) {
+    return root.children.flatMap((s) => (s && s.children) || []);
+  }
+  return list; // already a flat parts list
+}
+
 export default function AnalyticsScreen({ data }) {
   const ctx = useAppStore();
   const [range, setRange] = React.useState("6 mo");
@@ -130,9 +146,7 @@ export default function AnalyticsScreen({ data }) {
   // Derived KPI inputs \u2014 all sourced from apiData/vendorList/vendorScorecards
   // (real API responses) or the live BOM store; "\u2014" when there isn't enough
   // data yet rather than a fabricated number.
-  const bomParts = (ctx?.rows || BOM_DATA.rows)[0].children.flatMap(
-    (s) => s.children || [],
-  );
+  const bomParts = bomLeafParts(ctx?.rows || BOM_DATA.rows);
   const duplicatesCount = bomParts.filter((p) => p.dupOf).length;
 
   const vendorsWithLead = (vendorList || []).filter(
@@ -997,9 +1011,7 @@ export default function AnalyticsScreen({ data }) {
           </div>
           <div className="ox-auto" style={{ padding: 12 }}>
             {(() => {
-              const bomParts2 = (ctx?.rows || BOM_DATA.rows)[0].children.flatMap(
-                (s) => s.children || [],
-              );
+              const bomParts2 = bomLeafParts(ctx?.rows || BOM_DATA.rows);
               const byVendor = {};
               bomParts2.forEach((p) => {
                 if (!p.vendor) return;
@@ -1254,9 +1266,7 @@ export default function AnalyticsScreen({ data }) {
           </div>
           <div style={{ padding: 16 }}>
             {(() => {
-              const parts = (ctx?.rows || BOM_DATA.rows)[0].children.flatMap(
-                (s) => s.children || [],
-              );
+              const parts = bomLeafParts(ctx?.rows || BOM_DATA.rows);
               const counts = {};
               parts.forEach((p) => {
                 const c = p.origin || "Unknown";
@@ -1474,9 +1484,7 @@ export default function AnalyticsScreen({ data }) {
                   project: ctx?.project || BOM_DATA.project,
                   rows: ctx?.rows || BOM_DATA.rows,
                 };
-                const parts = bomData.rows[0].children.flatMap(
-                  (s) => s.children || [],
-                );
+                const parts = bomLeafParts(bomData.rows);
                 const totalCost = parts.reduce(
                   (s, p) => s + (p.cost || 0) * (p.qty || 0),
                   0,
@@ -1547,9 +1555,7 @@ export default function AnalyticsScreen({ data }) {
           </div>
           <div style={{ padding: "12px 16px" }}>
             {(() => {
-              const parts = (ctx?.rows || BOM_DATA.rows)[0].children.flatMap(
-                (s) => s.children || [],
-              );
+              const parts = bomLeafParts(ctx?.rows || BOM_DATA.rows);
               const totalCost = parts.reduce(
                 (s, p) => s + (p.cost || 0) * (p.qty || 0),
                 0,
@@ -1742,8 +1748,7 @@ export default function AnalyticsScreen({ data }) {
                     ": " +
                     new Date().toISOString().slice(0, 10),
                   "",
-                  ...(ctx?.rows || BOM_DATA.rows)[0].children
-                    .flatMap((s) => s.children || [])
+                  ...bomLeafParts(ctx?.rows || BOM_DATA.rows)
                     .filter((p) => p.vendorPrices)
                     .map((p) => {
                       return (
@@ -1800,9 +1805,9 @@ export default function AnalyticsScreen({ data }) {
           </div>
           <div className="ox-auto" data-density="dense" style={{ padding: 12 }}>
             {(() => {
-              const parts = (ctx?.rows || BOM_DATA.rows)[0].children
-                .flatMap((s) => s.children || [])
-                .filter((p) => p.vendorPrices);
+              const parts = bomLeafParts(ctx?.rows || BOM_DATA.rows).filter(
+                (p) => p.vendorPrices,
+              );
               return parts.length === 0 ? (
                 <div
                   style={{ padding: 24 }}
@@ -1883,9 +1888,7 @@ export default function AnalyticsScreen({ data }) {
           </div>
           <div style={{ padding: 16 }}>
             {(() => {
-              const parts = (ctx?.rows || BOM_DATA.rows)[0].children.flatMap(
-                (s) => s.children || [],
-              );
+              const parts = bomLeafParts(ctx?.rows || BOM_DATA.rows);
               const dupCount = parts.filter((p) => p.dupOf).length;
               const obsCount = parts.filter(
                 (p) => p.status === "Deprecated" || p.status === "Obsolete",

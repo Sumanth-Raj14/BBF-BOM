@@ -5,42 +5,24 @@ import { toast } from "../../utils/toast";
 import { Modal } from "../ui/Modal.jsx";
 import { Button } from "../ui/Button.jsx";
 import { Input } from "../ui/Field.jsx";
-import { Checkbox } from "../ui/Choice.jsx";
-import { Badge, StatusPill } from "../ui/Badge.jsx";
-import { DataTable } from "../ui/DataTable.jsx";
+import { Badge } from "../ui/Badge.jsx";
 
 // ============ CAD IMPORT (SolidWorks-style sync) ============
 export default function CADImportModal({ open, onClose }) {
-  const [step, setStep] = React.useState("upload"); // upload | scanning | review
-  const [progress, setProgress] = React.useState(0);
-  const [foundParts, setFoundParts] = React.useState([]);
-  const [selected, setSelected] = React.useState(new Set());
+  const [step, setStep] = React.useState("upload"); // upload | addin-required
   const [importSource, setImportSource] = React.useState("");
   const [pdmUrl, setPdmUrl] = React.useState("");
   const [selectedFile, setSelectedFile] = React.useState(null);
   const fileInputRef = React.useRef(null);
-  const intervalRef = React.useRef(null);
 
   React.useEffect(() => {
     if (!open) {
       setStep("upload");
-      setProgress(0);
-      setFoundParts([]);
-      setSelected(new Set());
       setImportSource("");
       setPdmUrl("");
       setSelectedFile(null);
     }
   }, [open]);
-
-  React.useEffect(() => {
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    };
-  }, []);
 
   const handleFileSelect = (e) => {
     const file = e.target.files?.[0];
@@ -74,165 +56,22 @@ export default function CADImportModal({ open, onClose }) {
         sizeMB +
         " MB) — " +
         (__t("modals.cadImport.willBeProcessed") ||
-          "will be processed when backend is available"),
+          "not uploaded; CAD import requires the SolidWorks add-in"),
       { kind: "success" },
     );
   };
 
+  // CAD import is NOT implemented in the web app, and cannot be: .sldasm /
+  // .sldprt are proprietary SolidWorks binaries that only SolidWorks itself can
+  // open, which is exactly why this product ships a SolidWorks add-in. This
+  // used to run a fake progress bar and then display a hardcoded parts list,
+  // reporting "Imported N new parts" without uploading the file or calling any
+  // API. Telling the user the truth is the only honest behaviour until either
+  // the add-in is installed or a real STEP import endpoint exists.
   const startScan = (sourceName) => {
-    setStep("scanning");
-    setProgress(0);
-    intervalRef.current = setInterval(() => {
-      setProgress((p) => {
-        const next = p + Math.random() * 18 + 6;
-        if (next >= 100) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
-          const _baseName = (sourceName || "assembly").replace(/\.[^.]+$/, "");
-          const fakeParts = [
-            {
-              pn: "MEC-PL-040A",
-              name: "Side Panel (Anodized)",
-              qty: 2,
-              status: "matched",
-            },
-            {
-              pn: "MEC-PL-041A",
-              name: "Top Plate (Vented)",
-              qty: 1,
-              status: "matched",
-            },
-            {
-              pn: "MEC-BR-013",
-              name: "Mounting Bracket, Type B (NEW)",
-              qty: 6,
-              status: "new",
-            },
-            {
-              pn: "HW-FAS-M3-08",
-              name: "Screw, M3×8",
-              qty: 32,
-              status: "matched",
-            },
-            {
-              pn: "HW-FAS-M4-12",
-              name: "Screw, M4×12 (NEW)",
-              qty: 8,
-              status: "new",
-            },
-            {
-              pn: "EL-CON-RJ45",
-              name: "Connector, RJ45",
-              qty: 2,
-              status: "matched",
-            },
-            {
-              pn: "MEC-GSK-A",
-              name: "Gasket, EPDM (NEW)",
-              qty: 1,
-              status: "new",
-            },
-          ];
-          setFoundParts(fakeParts);
-          setSelected(new Set(fakeParts.map((p) => p.pn)));
-          setStep("review");
-          return 100;
-        }
-        return next;
-      });
-    }, 250);
+    setImportSource(sourceName || "");
+    setStep("addin-required");
   };
-
-  const apply = () => {
-    onClose();
-    const newCount = foundParts.filter(
-      (p) => p.status === "new" && selected.has(p.pn),
-    ).length;
-    const matchedCount = foundParts.filter(
-      (p) => p.status === "matched" && selected.has(p.pn),
-    ).length;
-    toast(
-      (__t("modals.cadImport.imported") || "Imported") +
-        " · " +
-        newCount +
-        " " +
-        (__t("modals.cadImport.newParts") || "new parts") +
-        ", " +
-        matchedCount +
-        " " +
-        (__t("modals.cadImport.matched") || "matched"),
-      { kind: "success" },
-    );
-  };
-
-  const toggleRow = (pn) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      next.has(pn) ? next.delete(pn) : next.add(pn);
-      return next;
-    });
-  };
-
-  const allSelected =
-    foundParts.length > 0 && selected.size === foundParts.length;
-
-  const reviewColumns = [
-    {
-      key: "sel",
-      header: (
-        <Checkbox
-          checked={allSelected}
-          onChange={(e) =>
-            setSelected(
-              e.target.checked ? new Set(foundParts.map((p) => p.pn)) : new Set(),
-            )
-          }
-          aria-label={
-            __t("modals.cadImport.selectAll") || "Select all found parts"
-          }
-        />
-      ),
-      render: (row) => (
-        <Checkbox
-          checked={selected.has(row.pn)}
-          onChange={() => toggleRow(row.pn)}
-          aria-label={
-            (__t("modals.cadImport.selectPart") || "Select") + " " + row.pn
-          }
-        />
-      ),
-    },
-    {
-      key: "pn",
-      header: __t("part.partNumber") || "Part No.",
-      render: (row) => (
-        <span className="cad-import__mono">{row.pn}</span>
-      ),
-    },
-    { key: "name", header: __t("part.name") || "Name" },
-    {
-      key: "qty",
-      header: __t("part.quantity") || "Qty",
-      align: "num",
-      render: (row) => row.qty,
-    },
-    {
-      key: "status",
-      header: __t("part.status") || "Status",
-      render: (row) =>
-        row.status === "matched" ? (
-          <StatusPill
-            status={row.status}
-            tone="success"
-            label={__t("modals.cadImport.matched") || "Matched"}
-          />
-        ) : (
-          <Badge tone="accent" pill>
-            {__t("modals.cadImport.new") || "New"}
-          </Badge>
-        ),
-    },
-  ];
 
   return (
     <Modal
@@ -246,27 +85,10 @@ export default function CADImportModal({ open, onClose }) {
       }
       size="lg"
       footer={
-        step === "review" ? (
-          <>
-            <span className="cad-import__footer-count">
-              {selected.size} {__t("modals.cadImport.of") || "of"}{" "}
-              {foundParts.length}{" "}
-              {__t("modals.cadImport.partsWillBeImported") ||
-                "parts will be imported"}
-            </span>
-            <Button variant="secondary" onClick={onClose}>
-              {__t("common.cancel") || "Cancel"}
-            </Button>
-            <Button
-              variant="primary"
-              onClick={apply}
-              disabled={selected.size === 0}
-            >
-              <Icon.Check size={12} />{" "}
-              {__t("modals.cadImport.import") || "Import"} {selected.size}{" "}
-              {__t("modals.cadImport.parts") || "parts"}
-            </Button>
-          </>
+        step === "addin-required" ? (
+          <Button variant="secondary" onClick={onClose}>
+            {__t("common.close") || "Close"}
+          </Button>
         ) : null
       }
     >
@@ -348,7 +170,7 @@ export default function CADImportModal({ open, onClose }) {
                 <span aria-hidden="true">{"✓"}</span>
                 <span>
                   {__t("modals.cadImport.fileSelected") ||
-                    "File selected — will be processed when backend is available"}
+                    "File selected — not uploaded; CAD import requires the SolidWorks add-in"}
                 </span>
               </div>
               <Button
@@ -411,90 +233,84 @@ export default function CADImportModal({ open, onClose }) {
         </>
       )}
 
-      {step === "scanning" && (
-        <div
-          className="cad-import__scan"
-          role="status"
-          aria-live="polite"
-        >
-          <div className="cad-import__scan-icon" aria-hidden="true">
-            {"⬬"}
+      {step === "addin-required" && (
+        <div className="cad-import__addin" role="status" aria-live="polite">
+          <div className="cad-import__addin-icon" aria-hidden="true">{"⛏"}</div>
+          <div className="cad-import__addin-title">
+            {__t("modals.cadImport.addinRequiredTitle") ||
+              "CAD import needs the SolidWorks add-in"}
           </div>
-          <div className="cad-import__scan-title">
-            {__t("modals.cadImport.scanning") || "Scanning assembly…"}
-          </div>
-          <div className="cad-import__scan-desc">
-            {__t("modals.cadImport.scanningDesc") ||
-              "Walking tree · extracting parts · matching against library"}
-          </div>
-          <div className="cad-import__progress-wrap">
-            <div className="cad-import__progress-track">
-              <div
-                className="cad-import__progress-fill"
-                style={{ width: Math.min(100, progress) + "%" }}
-              />
-            </div>
-            <div className="cad-import__progress-meta">
-              <span>
-                {progress >= 30
-                  ? __t("modals.cadImport.walkingSub") ||
-                    "Walking subassemblies"
-                  : __t("modals.cadImport.loadingAssembly") ||
-                    "Loading assembly"}
-              </span>
-              <span>{Math.round(Math.min(100, progress))}%</span>
-            </div>
-          </div>
-          <div className="cad-import__log">
-            {progress > 10 && <div>{"✓"} Loaded ATL-MFR-A_v3.2.sldasm</div>}
-            {progress > 30 && (
-              <div>{"✓"} Walked 4 subassemblies {"·"} 87 part references</div>
-            )}
-            {progress > 55 && (
-              <div>{"✓"} Captured isometric thumbnails (S3 {"→"} /atlas/v3.2/)</div>
-            )}
-            {progress > 75 && <div>{"✓"} Matched 64 parts to library</div>}
-            {progress > 90 && (
-              <div>{"✓"} Identified 3 new parts requiring review</div>
-            )}
-          </div>
+          <p className="cad-import__addin-desc">
+            {__t("modals.cadImport.addinRequiredDesc") ||
+              "Assembly files (.sldasm / .sldprt) are proprietary SolidWorks formats that only SolidWorks itself can open, so Blackbox BOM cannot read them in the browser. The SolidWorks add-in runs inside SolidWorks on your workstation and pushes the assembly BOM here directly."}
+          </p>
+          {importSource && (
+            <p className="cad-import__addin-file">
+              {(__t("modals.cadImport.notImported") || "Not imported") +
+                ": " +
+                importSource}
+            </p>
+          )}
+          <ol className="cad-import__addin-steps">
+            <li>
+              {__t("modals.cadImport.addinStep1") ||
+                "Install the Blackbox BOM add-in on a Windows machine with SolidWorks 2018 or newer."}
+            </li>
+            <li>
+              {__t("modals.cadImport.addinStep2") ||
+                "Open the assembly in SolidWorks and sign in to this server from the add-in panel."}
+            </li>
+            <li>
+              {__t("modals.cadImport.addinStep3") ||
+                "Choose “Push BOM” — parts appear in your library automatically."}
+            </li>
+          </ol>
+          <p className="cad-import__addin-note">
+            {__t("modals.cadImport.addinNote") ||
+              "Neutral formats (.step / .iges) are not supported yet either — no import runs, and nothing is uploaded."}
+          </p>
         </div>
       )}
 
-      {step === "review" && (
-        <>
-          <div className="cad-import__summary">
-            <div className="fs-13">
-              <strong className="cad-import__summary-ok">
-                {foundParts.filter((p) => p.status === "matched").length}{" "}
-                {__t("modals.cadImport.matched") || "matched"}
-              </strong>{" "}
-              {"·"}{" "}
-              <strong className="cad-import__summary-new">
-                {foundParts.filter((p) => p.status === "new").length}{" "}
-                {__t("modals.cadImport.new") || "new"}
-              </strong>
-            </div>
-            <div className="cad-import__meta">
-              {foundParts.length} {__t("modals.cadImport.total") || "total"}{" "}
-              {"·"} 8.4 MB
-            </div>
-          </div>
-          <DataTable
-            columns={reviewColumns}
-            rows={foundParts}
-            getRowKey={(row) => row.pn}
-            isRowSelected={(row) => selected.has(row.pn)}
-            ariaLabel={
-              __t("modals.cadImport.reviewTableLabel") ||
-              "Parts found in assembly"
-            }
-            dense
-          />
-        </>
-      )}
-
       <style>{`
+        .cad-import__addin {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          text-align: center;
+          gap: var(--sp-3);
+          padding: var(--sp-6) var(--sp-4);
+        }
+        .cad-import__addin-icon { font-size: 28px; opacity: .75; }
+        .cad-import__addin-title {
+          font-size: var(--fs-200);
+          font-weight: var(--fw-medium);
+          color: var(--text-primary);
+        }
+        .cad-import__addin-desc,
+        .cad-import__addin-note {
+          margin: 0;
+          max-width: 52ch;
+          font-size: var(--fs-100);
+          color: var(--text-secondary);
+          line-height: 1.55;
+        }
+        .cad-import__addin-note { color: var(--text-muted); }
+        .cad-import__addin-file {
+          margin: 0;
+          font-size: var(--fs-100);
+          color: var(--text-muted);
+          font-family: var(--font-mono, monospace);
+        }
+        .cad-import__addin-steps {
+          margin: 0;
+          padding-left: var(--sp-5);
+          text-align: left;
+          max-width: 52ch;
+          font-size: var(--fs-100);
+          color: var(--text-secondary);
+          line-height: 1.7;
+        }
         .cad-import__intro {
           margin: 0 0 var(--sp-4);
           font-size: var(--fs-200);
