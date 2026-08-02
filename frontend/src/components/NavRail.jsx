@@ -3,6 +3,7 @@ import { AppContext } from "../context/AppCtx.jsx";
 import { storage } from "../utils/storage.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import { toggleOfflineSim } from "../services/offlineSim.js";
 import { Popover, api } from "../globals";
 
 // ── Information architecture ───────────────────────────────────────────────
@@ -516,8 +517,7 @@ export default function NavRail() {
             className="popover-item"
             onClick={() => {
               setAvaOpen(false);
-              if (window.__toggleOffline) window.__toggleOffline();
-              else toast("Offline simulation unavailable");
+              if (!toggleOfflineSim()) toast("Offline simulation unavailable");
             }}
           >
             <span className="ic">{"⌥"}</span>

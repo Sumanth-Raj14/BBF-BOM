@@ -1,6 +1,7 @@
 import PropTypes from "prop-types";
 import { getInrRate } from "../utils/currency.js";
 import { storage } from "../utils/storage.js";
+import { setOfflineSimToggle } from "../services/offlineSim.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import { api } from "../globals";
@@ -762,13 +763,11 @@ function NetworkBadge() {
     };
   }, []);
   const effective = !simulate && online;
-  // Expose toggle for demo
-  React.useEffect(() => {
-    window.__toggleOffline = () => setSimulate((s) => !s);
-    return () => {
-      delete window.__toggleOffline;
-    };
-  }, []);
+  // Expose the toggle for the nav rail's "Simulate offline" item.
+  React.useEffect(
+    () => setOfflineSimToggle(() => setSimulate((s) => !s)),
+    [],
+  );
   if (effective) return null;
   return (
     <div
@@ -819,7 +818,10 @@ function NetworkBadge() {
   );
 }
 // ============ PO PDF (templated, professional layout) ============
-window.printPO = async function (item, vendorHint) {
+// Improvement #2: a named export instead of window.printPO. PODetailModal
+// imports it through globals.js, so the button no longer has to guard on
+// whether this file happened to load first.
+export async function printPO(item, vendorHint) {
   if (!item) return;
   const lineCost = (item.qty || 0) * (item.cost || 12);
   const tax = lineCost * 0.08;
@@ -1010,7 +1012,7 @@ window.printPO = async function (item, vendorHint) {
   toast(__t("printPo.previewOpened") || "PO PDF preview opened", {
     kind: "success",
   });
-};
+}
 // ============ URL FILTER SYNC HOOK ============
 export function useURLState(key, initial) {
   const [val, setVal] = React.useState(() => {

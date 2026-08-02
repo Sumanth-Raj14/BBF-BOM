@@ -5,7 +5,7 @@ import { toast } from "../../utils/toast";
 import { Icon, api, escapeHtml, openPrintWindow } from "../../globals";
 import { Button, EmptyState, Menu, ScreenHeader } from "../ui";
 // ============ DIFF ============
-export default function DiffScreen({ data }) {
+export default function DiffScreen({ data, openModal }) {
   const [swapped, setSwapped] = React.useState(false);
   const [versionA, setVersionA] = React.useState("current");
   const [bom1Id] = React.useState(1);
@@ -237,7 +237,7 @@ export default function DiffScreen({ data }) {
             <Button
               variant="primary"
               size="sm"
-              onClick={() => window.__open_approve_b?.()}
+              onClick={() => openModal?.("approve-b")}
             >
               <Icon.Check size={12} /> {__t("diff.approveB") || "Approve B"}
             </Button>
@@ -370,4 +370,5 @@ export default function DiffScreen({ data }) {
 }
 DiffScreen.propTypes = {
   data: PropTypes.object,
+  openModal: PropTypes.func,
 };
