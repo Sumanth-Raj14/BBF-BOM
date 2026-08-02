@@ -396,6 +396,23 @@ export const documentsAPI = {
     const query = new URLSearchParams(params).toString();
     return apiRequest(`/documents${query ? '?' + query : ''}`);
   },
+
+  // Raw bytes for a stored document (GET /documents/{id}/download).
+  // Not via apiRequest: that parses every response as JSON, which would
+  // corrupt binary. GET needs no CSRF token; auth rides on the cookie.
+  downloadBuffer: async (id) => {
+    const response = await fetch(`${API_BASE}/documents/${id}/download`, {
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error(
+        response.status === 404
+          ? 'This file is not available on the server'
+          : `HTTP ${response.status}`,
+      );
+    }
+    return response.arrayBuffer();
+  },
   
   folders: () => apiRequest('/documents/folders'),
   

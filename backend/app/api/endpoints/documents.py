@@ -10,9 +10,11 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Response,
     UploadFile,
     status,
 )
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -205,6 +207,65 @@ async def get_document(
     current_user: User = Depends(get_current_user),
 ):
     return await document_service.get_document(db, document_id)
+
+
+@router.get("/{document_id}/download")
+async def download_document(
+    document_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Stream a stored document's bytes back to the caller.
+
+    The vault could list files and accept uploads, but nothing could ever fetch
+    the stored bytes again — so downloads, previews and the 3D viewer all had
+    no source of data. This is that endpoint.
+
+    Tenant scoping is NOT re-implemented here: Document is TenantAwareMixin, so
+    the SELECT auto-filter scopes the lookup and another tenant's id simply
+    reads as 404.
+    """
+    document = await document_service.get_document(db, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    filename = document.originalName or document.filename or f"document-{document_id}"
+    media_type = "application/octet-stream"
+
+    # S3-backed: fetch by key and return the bytes directly.
+    if (document.storage_type or "").lower() == "s3":
+        key = document.filePath or document.url
+        data = await s3_storage.download_file(key) if key else None
+        if data is None:
+            raise HTTPException(status_code=404, detail="Stored file is unavailable")
+        return Response(
+            content=data,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    if not document.filePath:
+        raise HTTPException(status_code=404, detail="Stored file is unavailable")
+
+    # SECURITY: filePath is read from the database, so it must never be trusted
+    # to stay inside the upload root. Resolve symlinks/.. and confirm
+    # containment before opening, or a tampered/legacy row could read arbitrary
+    # files off the server (e.g. ../../.env).
+    upload_root = os.path.realpath(UPLOAD_DIR)
+    real_path = os.path.realpath(document.filePath)
+    if not (real_path == upload_root or real_path.startswith(upload_root + os.sep)):
+        logger.error(
+            "Refusing to serve document %s: path %s escapes upload root %s",
+            document_id,
+            real_path,
+            upload_root,
+        )
+        raise HTTPException(status_code=404, detail="Stored file is unavailable")
+
+    if not os.path.isfile(real_path):
+        raise HTTPException(status_code=404, detail="Stored file is unavailable")
+
+    return FileResponse(real_path, media_type=media_type, filename=filename)
 
 
 @router.get("/{document_id}/versions", response_model=list[DocumentResponse])

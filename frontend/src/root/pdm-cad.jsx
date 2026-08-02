@@ -16,7 +16,7 @@ import {
   EmptyState,
   Spinner,
 } from "../components/ui";
-import CadViewer from "../components/cad/CadViewer.jsx";
+import CadViewer, { isViewable } from "../components/cad/CadViewer.jsx";
 // PDM / CAD Vault feature set: vault tree, check-in/out, CAD revision history,
 // 3D viewer, drawing markup, CAD attribute extraction, bidirectional sync,
 // drawing release workflow, watermarking.
@@ -593,15 +593,41 @@ function PDMVaultScreen() {
 // same shape for every file and had nothing to do with its contents. Now a real
 // three.js viewer (see components/cad/CadViewer.jsx).
 //
-// It reads bytes from a file the user picks, because the backend currently has
-// NO document-download endpoint -- the vault can list files and accept uploads,
-// but nothing can fetch the stored bytes back. Once such an endpoint exists,
-// pass its ArrayBuffer straight into <CadViewer buffer=... /> and the picker
-// becomes optional.
+// Selecting a vault row fetches that document's bytes from
+// GET /documents/{id}/download and renders them. The local file picker remains
+// as a fallback for models that are not in the vault yet.
 function CADPreview({ file, onClose }) {
   const [buffer, setBuffer] = React.useState(null);
   const [loadedName, setLoadedName] = React.useState("");
+  const [fetchError, setFetchError] = React.useState("");
   const inputRef = React.useRef(null);
+
+  // Pull the selected vault file's bytes from the server. Only attempt it for
+  // formats the viewer can actually render, so selecting a .sldasm row doesn't
+  // download megabytes just to report that it is unviewable.
+  const vaultName = file?.originalName || file?.name || file?.fileName || "";
+  const vaultId = file?.id;
+  React.useEffect(() => {
+    let cancelled = false;
+    setBuffer(null);
+    setLoadedName("");
+    setFetchError("");
+    if (!vaultId || !isViewable(vaultName)) return undefined;
+    api.documents
+      .downloadBuffer(vaultId)
+      .then((buf) => {
+        if (cancelled) return;
+        setBuffer(buf);
+        setLoadedName(vaultName);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setFetchError(e?.message || String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [vaultId, vaultName]);
 
   const onPick = async (e) => {
     const picked = e.target.files?.[0];
@@ -641,6 +667,14 @@ function CADPreview({ file, onClose }) {
         </Button>
       </div>
 
+      {fetchError && (
+        <p className="cadprev__error" role="alert">
+          {(__t("pdm.viewerFetchFailed") || "Could not load this file from the server") +
+            ": " +
+            fetchError}
+        </p>
+      )}
+
       <p className="cadprev__note">
         {__t("pdm.viewerFormats") ||
           "Renders STEP, IGES, STL, OBJ, GLTF/GLB, PLY and 3MF. SolidWorks .sldprt/.sldasm are proprietary and cannot be read directly — export STEP or STL first."}
@@ -657,6 +691,12 @@ function CADPreview({ file, onClose }) {
           font-weight: var(--fw-medium); color: var(--text-primary);
         }
         .cadprev__actions { margin-top: var(--sp-3); }
+        .cadprev__error {
+          margin-top: var(--sp-2);
+          font-size: var(--fs-075);
+          color: #b42318;
+          line-height: 1.5;
+        }
         .cadprev__note {
           margin-top: var(--sp-2);
           font-size: var(--fs-075);
