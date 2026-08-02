@@ -25,7 +25,8 @@ import pytest_asyncio
 from sqlalchemy import select
 
 from app.core.security import get_password_hash
-from app.models.eco import EcoApproval
+from app.models.eco import EcoApproval, EcoNotification
+from app.models.notification_queue import NotificationQueue
 from app.models.role import Role, user_roles
 from app.models.user import User
 
@@ -233,3 +234,123 @@ async def test_authorized_user_can_approve_submitted_eco(
     assert approval.approver_id == approver.id
     assert approval.status == "approved"
     assert approval.approval_order == 1
+
+
+# ---------------------------------------------------------------------------
+# Change notifications: ECO transitions must actually tell the humans waiting
+# on them. Before this, eco_notifications / notifications_queue rows were never
+# constructed anywhere, so approvals were pull-only and the email dispatcher
+# drained an empty queue forever.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_submit_notifies_designated_approver(
+    client, creator_headers, creator, approver, db_session
+):
+    """Submitting an ECO notifies the designated approver — and only them."""
+    eco_id = await _create_eco(client, creator_headers)
+    await _submit_eco(client, creator_headers, eco_id)
+
+    result = await db_session.execute(
+        select(EcoNotification).where(EcoNotification.eco_id == eco_id)
+    )
+    notes = result.scalars().all()
+    assert [n.user_id for n in notes] == [approver.id]
+    assert notes[0].notification_type == "approval_requested"
+    assert notes[0].tenantId == creator.tenantId
+    # The submitter is not told about their own submission.
+    assert creator.id not in [n.user_id for n in notes]
+
+    # Queued for the existing email dispatcher, not sent inline.
+    queued = await db_session.execute(
+        select(NotificationQueue).where(
+            NotificationQueue.reference_type == "eco", NotificationQueue.reference_id == eco_id
+        )
+    )
+    rows = queued.scalars().all()
+    assert [q.user_id for q in rows] == [approver.id]
+    assert rows[0].channel == "email"
+    assert rows[0].is_sent is False
+
+
+@pytest.mark.asyncio
+async def test_approve_notifies_requester(
+    client, creator_headers, approver_headers, creator, db_session
+):
+    """Approval tells the person who asked for the change."""
+    eco_id = await _create_eco(client, creator_headers)
+    await _submit_eco(client, creator_headers, eco_id)
+    resp = await client.post(
+        f"/api/v1/eco/{eco_id}/action",
+        headers=approver_headers,
+        json={"action": "approve", "comments": "ok", "password": "testpass123"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    result = await db_session.execute(
+        select(EcoNotification).where(
+            EcoNotification.eco_id == eco_id,
+            EcoNotification.notification_type == "approved",
+        )
+    )
+    assert [n.user_id for n in result.scalars().all()] == [creator.id]
+
+
+@pytest.mark.asyncio
+async def test_implement_notifies_requester_and_approver(
+    client, creator_headers, approver_headers, creator, approver, db_session
+):
+    """Implementation tells the requester and everyone who signed off."""
+    eco_id = await _create_eco(client, creator_headers)
+    await _submit_eco(client, creator_headers, eco_id)
+    await client.post(
+        f"/api/v1/eco/{eco_id}/action",
+        headers=approver_headers,
+        json={"action": "approve", "password": "testpass123"},
+    )
+    resp = await client.post(
+        f"/api/v1/eco/{eco_id}/action",
+        headers=creator_headers,
+        json={"action": "implement", "password": "testpass123"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    result = await db_session.execute(
+        select(EcoNotification).where(
+            EcoNotification.eco_id == eco_id,
+            EcoNotification.notification_type == "implemented",
+        )
+    )
+    # creator is the actor here, so only the approver is told.
+    assert {n.user_id for n in result.scalars().all()} == {approver.id}
+
+
+@pytest.mark.asyncio
+async def test_notification_failure_does_not_fail_eco_action(
+    client, creator_headers, approver, db_session, monkeypatch
+):
+    """A broken notification path must never roll back or 500 the ECO action."""
+    from app.services import eco_service
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("notification backend exploded")
+
+    monkeypatch.setattr(eco_service, "_eco_recipients", boom)
+
+    eco_id = await _create_eco(client, creator_headers)
+    resp = await client.post(
+        f"/api/v1/eco/{eco_id}/action",
+        headers=creator_headers,
+        json={"action": "submit"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "review"
+
+    # The transition survived; only the notification was lost.
+    detail = await client.get(f"/api/v1/eco/{eco_id}", headers=creator_headers)
+    assert detail.json()["status"] == "review"
+    result = await db_session.execute(
+        select(EcoNotification).where(EcoNotification.eco_id == eco_id)
+    )
+    assert result.scalars().all() == []

@@ -206,3 +206,16 @@ export const ZohoBooksScreen = createLazyScreen(function () {
 export const CatalogsScreen = createLazyScreen(function () {
   return import("./screens/CatalogsScreen.jsx");
 }, "CatalogsScreen");
+
+// Regulated features — serial/lot genealogy (GET /traceability/*).
+export const TraceabilityScreen = createLazyScreen(function () {
+  return import("./screens/TraceabilityScreen.jsx");
+}, "TraceabilityScreen");
+// Regulated features — deviation / waiver requests (/deviations).
+export const DeviationsScreen = createLazyScreen(function () {
+  return import("./screens/DeviationsScreen.jsx");
+}, "DeviationsScreen");
+// Configurable BOM variants (/bom/variants).
+export const BomVariantsScreen = createLazyScreen(function () {
+  return import("./screens/BomVariantsScreen.jsx");
+}, "BomVariantsScreen");

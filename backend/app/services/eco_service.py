@@ -1,5 +1,6 @@
 """ECO service layer — business logic extracted from endpoint file."""
 
+import logging
 from datetime import UTC, datetime
 from typing import Optional
 
@@ -14,8 +15,13 @@ from app.core.tenant_context import get_tenant_id
 from app.integrations.events import emit_integration_event
 from app.models.audit_log import AuditLog
 from app.models.eco import EcoApproval, EcoHeader, EcoItem, EcoItemAttributeChange, EcoNotification
+from app.models.notification_queue import NotificationQueue
+from app.models.role import Role
 from app.models.user import User
+from app.services import webhook_service
 from app.services.part11_service import sign_action
+
+logger = logging.getLogger(__name__)
 
 # ECO change-control state machine (R8, surgical): the source status(es) an
 # ECO must be in for a given action to be legal. Full multi-approver
@@ -35,6 +41,109 @@ async def _next_approval_order(db: AsyncSession, eco_id: int) -> int:
         select(func.count()).select_from(EcoApproval).where(EcoApproval.eco_id == eco_id)
     )
     return (count_result.scalar() or 0) + 1
+
+
+# What each ECO transition says, keyed by action:
+#   (EcoNotification.notification_type, email subject prefix, message phrase)
+# "close" is deliberately absent — nobody is waiting on a closed ECO.
+_ECO_NOTIFY: dict[str, tuple[str, str, str]] = {
+    "submit": ("approval_requested", "Approval requested", "is awaiting your approval."),
+    "approve": ("approved", "ECO approved", "was approved."),
+    "reject": ("rejected", "ECO rejected", "was rejected and returned to draft."),
+    "implement": ("implemented", "ECO implemented", "has been implemented."),
+}
+
+
+async def _eco_recipients(db: AsyncSession, eco: EcoHeader, action: str) -> set[int]:
+    """The humans who actually need to know about this transition.
+
+    Derived from real relationships on the ECO (requester, eco_approvals rows),
+    never a broadcast to every user. Scoped to the ECO's own tenant.
+    """
+    if action == "submit":
+        # Whoever is on the hook to approve. Prefer an explicit approver chain
+        # (pending eco_approvals rows); nothing writes those yet, so fall back
+        # to the tenant's designated ECO approvers — the same role gate that
+        # `approve` below actually enforces, so these are exactly the people
+        # who *can* act on it.
+        pending = await db.execute(
+            select(EcoApproval.approver_id).where(
+                EcoApproval.eco_id == eco.id, EcoApproval.status == "pending"
+            )
+        )
+        ids = set(pending.scalars().all())
+        if ids:
+            return ids
+        approvers = await db.execute(
+            select(User.id)
+            .join(User.roles)
+            .where(
+                Role.name.in_(ECO_APPROVER_ROLES),
+                User.isActive.is_(True),
+                User.tenantId == eco.tenantId,
+            )
+        )
+        return set(approvers.scalars().all())
+
+    ids = {eco.requested_by}
+    if action == "implement":
+        # Everyone who signed off also wants to know it actually shipped.
+        signed = await db.execute(
+            select(EcoApproval.approver_id).where(
+                EcoApproval.eco_id == eco.id, EcoApproval.status == "approved"
+            )
+        )
+        ids |= set(signed.scalars().all())
+    return ids
+
+
+async def _notify_eco_transition(
+    db: AsyncSession, eco: EcoHeader, action: str, actor_id: int
+) -> None:
+    """Record in-app notifications and enqueue email for an ECO transition.
+
+    MUST be called AFTER the transition has committed. Every failure is
+    swallowed and logged: a notification problem must never roll back or 500
+    the ECO operation the user actually asked for. No mail is sent inline —
+    rows go on notifications_queue for email_service.process_notification_queue.
+    """
+    meta = _ECO_NOTIFY.get(action)
+    if not meta:
+        return
+    ntype, subject_prefix, phrase = meta
+    try:
+        recipients = await _eco_recipients(db, eco, action) - {None, actor_id}
+        if not recipients:
+            return
+        subject = f"{subject_prefix}: {eco.eco_number} — {eco.title}"
+        message = f"ECO {eco.eco_number} ({eco.title}) {phrase}"
+        for user_id in recipients:
+            db.add(
+                EcoNotification(
+                    eco_id=eco.id,
+                    user_id=user_id,
+                    notification_type=ntype,
+                    message=message,
+                    tenantId=eco.tenantId,
+                )
+            )
+            db.add(
+                NotificationQueue(
+                    user_id=user_id,
+                    notification_type="info",
+                    subject=subject,
+                    body=message,
+                    channel="email",
+                    priority="high" if action == "submit" else "normal",
+                    reference_type="eco",
+                    reference_id=eco.id,
+                    tenantId=eco.tenantId,
+                )
+            )
+        await db.commit()
+    except Exception:
+        logger.exception("ECO %s: %s notification dispatch failed", eco.id, action)
+        await db.rollback()
 
 
 async def _log_audit(
@@ -113,7 +222,7 @@ async def get_eco_detail(db: AsyncSession, eco_id: int) -> dict:
     )
     notifications = await db.execute(
         select(EcoNotification).where(
-            EcoNotification.eco_id == eco_id, not EcoNotification.is_read
+            EcoNotification.eco_id == eco_id, EcoNotification.is_read.is_not(True)
         )
     )
     result = {
@@ -299,6 +408,17 @@ async def perform_eco_action(
     await db.commit()
     await _log_audit(db, current_user, f"ECO_{action.upper()}", eco_id, {"status": eco.status})
     await db.commit()
+    if action in ("approve", "implement"):
+        # eco.status is exactly "approved"/"implemented" here -> eco.approved / eco.implemented
+        await webhook_service.emit_event(
+            db,
+            f"eco.{eco.status}",
+            {"eco_id": eco.id, "eco_number": eco.eco_number, "status": eco.status},
+            current_user.tenantId,
+        )
+    # State change is already committed above — notifications are best-effort
+    # and can never roll it back (see _notify_eco_transition).
+    await _notify_eco_transition(db, eco, action, current_user.id)
     return {"eco_id": eco_id, "action": action, "status": eco.status, "timestamp": now.isoformat()}
 
 

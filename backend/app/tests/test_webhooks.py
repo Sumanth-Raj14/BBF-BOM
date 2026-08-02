@@ -1,5 +1,17 @@
 import pytest
 
+from app.services import webhook_service
+
+
+async def _subscribe(client, auth_headers, events):
+    resp = await client.post(
+        "/api/v1/webhooks",
+        headers=auth_headers,
+        json={"url": "https://example.com/hook", "events": events, "active": True},
+    )
+    assert resp.status_code == 200
+    return resp.json()["id"]
+
 
 @pytest.mark.asyncio
 async def test_list_webhook_subscriptions(client, auth_headers):
@@ -85,3 +97,61 @@ async def test_list_webhook_deliveries(client, auth_headers):
     data = resp.json()
     assert "total" in data
     assert "items" in data
+
+
+@pytest.mark.asyncio
+async def test_business_mutation_dispatches_to_matching_subscription(
+    client, auth_headers, monkeypatch
+):
+    """Creating a part actually delivers to a subscription for part.created."""
+    sub_id = await _subscribe(client, auth_headers, "part.created,part.updated")
+    await _subscribe(client, auth_headers, "eco.approved")  # non-matching: must NOT fire
+
+    sent = []
+
+    async def fake_send(sub, payload):
+        sent.append((sub.id, payload))
+        return 200, "ok", "delivered"
+
+    monkeypatch.setattr(webhook_service, "_send_webhook", fake_send)
+
+    resp = await client.post(
+        "/api/v1/parts/",
+        headers=auth_headers,
+        json={"pn": "WH-EMIT-001", "name": "Webhook Emit Part"},
+    )
+    assert resp.status_code == 201
+
+    assert len(sent) == 1, "exactly the matching subscription should be dispatched to"
+    assert sent[0][0] == sub_id
+    assert '"event": "part.created"' in sent[0][1]
+
+    deliveries = await client.get("/api/v1/webhooks/deliveries", headers=auth_headers)
+    recorded = [d for d in deliveries.json()["items"] if d["event"] == "part.created"]
+    assert len(recorded) == 1
+    assert recorded[0]["status"] == "delivered"
+    assert recorded[0]["subscriptionId"] == sub_id
+
+
+@pytest.mark.asyncio
+async def test_failing_webhook_does_not_fail_the_mutation(client, auth_headers, monkeypatch):
+    """A blown-up delivery must not roll back or 500 the business operation."""
+    await _subscribe(client, auth_headers, "part.created")
+
+    async def exploding_send(sub, payload):
+        raise RuntimeError("subscriber is on fire")
+
+    monkeypatch.setattr(webhook_service, "_send_webhook", exploding_send)
+
+    resp = await client.post(
+        "/api/v1/parts/",
+        headers=auth_headers,
+        json={"pn": "WH-FAIL-001", "name": "Survives Bad Webhook"},
+    )
+    assert resp.status_code == 201
+    part_id = resp.json()["id"]
+
+    # and the part is really committed, not rolled back with the webhook
+    get_resp = await client.get(f"/api/v1/parts/{part_id}", headers=auth_headers)
+    assert get_resp.status_code == 200
+    assert get_resp.json()["pn"] == "WH-FAIL-001"

@@ -243,7 +243,39 @@ async def vendor_scorecards(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    Vendor scorecards for the Analytics screen.
+
+    Spend figures come from po_headers. On-time and quality come from the
+    part_vendors links (app/models/part_vendor.py: onTimeRate 0-100,
+    qualityScore 0-5) averaged over the vendor's parts - the same stored
+    performance data /analytics/at-risk-parts already treats as authoritative.
+    A vendor with no part links has no measurement, so those fields are null
+    rather than a plausible-looking constant.
+
+    responseTime has no source in this schema: nothing records a vendor
+    enquiry/response timestamp pair. supplier_scorecards.avgResponseTimeHours
+    exists but belongs to the periodic-scorecard subsystem and is not populated
+    from anything, so it is reported as null.
+    """
     tf, tf_params = _tenant_filter_params(current_user, "v")
+
+    # Queried separately: joining part_vendors into the PO aggregate below
+    # would fan out the rows and inflate totalSpend / avgPOValue.
+    perf_rows = await db.execute(
+        text(f"""
+            SELECT v.name,
+                   AVG(pv."onTimeRate") as on_time_rate,
+                   AVG(pv."qualityScore") as quality_score
+            FROM part_vendors pv
+            JOIN vendors v ON v.id = pv."vendorId"
+            WHERE {tf}
+            GROUP BY v.name
+        """),
+        tf_params,
+    )
+    perf = {row[0]: (row[1], row[2]) for row in perf_rows.fetchall()}
+
     result = await db.execute(
         text(f"""
             SELECT
@@ -262,6 +294,7 @@ async def vendor_scorecards(
     )
     scorecards = []
     for row in result.fetchall():
+        on_time, quality = perf.get(row[0], (None, None))
         scorecards.append(
             {
                 "vendor": row[0],
@@ -269,9 +302,9 @@ async def vendor_scorecards(
                 "poCount": row[2],
                 "totalSpend": float(row[3] or 0),
                 "avgPOValue": float(row[4] or 0),
-                "onTimeRate": 94.5,
-                "qualityScore": 4.2,
-                "responseTime": "2.3 days",
+                "onTimeRate": float(on_time) if on_time is not None else None,
+                "qualityScore": float(quality) if quality is not None else None,
+                "responseTime": None,
             }
         )
     return scorecards
