@@ -25,10 +25,9 @@ function BOMTemplatesModal({ open, onClose }) {
   const [templates, setTemplates] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
-  // NOTE: useAppStore() from globals resolves root/overlays.jsx's AppCtx,
-  // which has NO Provider anywhere — the app mounts context/AppCtx.jsx's
-  // AppContext instead. So useAppStore() returns null and every ctx?.x read
-  // through it is silently undefined. Use the real context here.
+  // Reads the app context directly. (useAppStore() is now equivalent — the
+  // two context objects were unified in context/appContext.js — but the
+  // explicit import keeps the dependency visible.)
     const ctx = React.useContext(AppContext);
 
   React.useEffect(() => {

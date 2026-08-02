@@ -15,7 +15,7 @@ import { accentTokensFor } from "../utils/accent.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import { BOM_DATA, PROJECTS, ROLES, api } from "../globals";
-const AppContext = React.createContext(null);
+import { AppContext } from "./appContext.js";
 
 function AppCtxProvider({ children }) {
   const navigate = useNavigate();
