@@ -22,12 +22,12 @@ const PASSWORD = process.env.E2E_PASSWORD || "admin123";
 
 /** Screens to walk. `path` is the SPA route; `expect` a string that must appear. */
 const SCREENS = [
-  { path: "/parts", name: "Components" },
-  { path: "/vendors", name: "Suppliers" },
-  { path: "/procurement", name: "Procurement" },
-  { path: "/members", name: "Members" },
-  { path: "/docs", name: "Documents" },
-  { path: "/analytics", name: "Analytics" },
+  { path: "/parts", name: "Components", heading: /components|parts/i },
+  { path: "/vendors", name: "Suppliers", heading: /vendors|suppliers/i },
+  { path: "/procurement", name: "Procurement", heading: /purchase orders|procurement/i },
+  { path: "/members", name: "Members", heading: /members & privileges/i },
+  { path: "/docs", name: "Documents", heading: /documents/i },
+  { path: "/analytics", name: "Analytics", heading: /analytics/i },
 ];
 
 async function backendUp(request) {
@@ -116,6 +116,16 @@ test.describe("Real backend flows", () => {
       await expect(
         page.getByText(/Screen failed to load|An error occurred while loading/i),
       ).toHaveCount(0);
+
+      // POSITIVE assertion. Without this the test is vacuous: a screen that
+      // never mounts throws nothing and renders no error boundary, so an
+      // absence-only check passes on a blank page. Proven the hard way -- an
+      // earlier version of this suite passed while a real crash was
+      // deliberately re-introduced.
+      await expect(
+        page.getByText(screen.heading).first(),
+        `${screen.name} did not render its heading -- screen never mounted`,
+      ).toBeVisible({ timeout: 15000 });
 
       // The specific crash classes found by hand this cycle.
       const fatal = errors.filter((e) =>

@@ -42,6 +42,16 @@ setup("authenticate once", async ({ page, request }) => {
 
   await expect(page.locator("#auth-password")).toBeHidden({ timeout: 20000 });
 
+  // A freshly-authenticated account lands in the 5-step onboarding wizard,
+  // which covers the whole app -- every screen test would otherwise assert
+  // against "Name your workspace". Mark onboarding done, as it would be for
+  // any established user. (storage.js KEYS.ONBOARDING)
+  await page.evaluate(() => {
+    localStorage.setItem("__bbox_onb", "1");
+  });
+  await page.reload();
+  await page.waitForTimeout(1500);
+
   fs.mkdirSync(path.dirname(STORAGE_STATE), { recursive: true });
   await page.context().storageState({ path: STORAGE_STATE });
 });
