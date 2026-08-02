@@ -1,13 +1,15 @@
 import { test, expect } from '@playwright/test';
+import { STORAGE_STATE } from "./storage-state.js";
+
+// Runs as a really-logged-in user. This spec used to fake that by writing
+// localStorage.__bbox_auth, which only worked because the app trusted that
+// blob -- the offline-login auth bypass. With that hole closed, the fake is
+// just a logged-out browser; the real session comes from auth.setup.js.
+test.use({ storageState: STORAGE_STATE });
 
 const APP_URL = process.env.APP_URL || 'http://localhost:4173';
 
 test.describe('Blackbox BOM — Critical Path Smoke Tests', () => {
-
-  // The session comes from auth.setup.js via the project-level storageState:
-  // a real login, not a hand-written localStorage blob. Seeding __bbox_auth
-  // directly used to be enough, which was the offline-login auth bypass; now
-  // that it's closed, a faked blob just leaves the browser logged out.
 
   test('should render the app shell', async ({ page }) => {
     await page.goto(APP_URL);
