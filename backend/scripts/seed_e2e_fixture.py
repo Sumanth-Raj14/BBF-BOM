@@ -77,7 +77,7 @@ async def ensure_user(email: str, password: str) -> None:
     """
     Session = await get_session_maker()
     async with Session() as db:
-        tid = await _tenant_id(db)
+        tid = await _tenant_id(db, create=True)
         token = TenantContext.set(tenant_id=tid)
         try:
             user = (
@@ -107,11 +107,26 @@ async def ensure_user(email: str, password: str) -> None:
             TenantContext.reset(token)
 
 
-async def _tenant_id(db) -> int:
+async def _tenant_id(db, create: bool = False) -> int:
+    """Id of the tenant to seed into.
+
+    `init_db` provisions the SCHEMA but no rows, so a freshly bootstrapped
+    database (exactly what CI builds) has no tenant at all. This originally
+    raised, and passed locally only because the dev database already had one
+    from earlier work — the failure appeared solely in CI. With create=True we
+    provision a default tenant so the fixture is self-sufficient.
+    """
     tid = (await db.execute(select(Tenant.id).order_by(Tenant.id))).scalars().first()
-    if tid is None:
+    if tid is not None:
+        return tid
+    if not create:
         raise SystemExit("No tenant exists — run scripts.init_db first.")
-    return tid
+    tenant = Tenant(tenant_name="Blackbox BOM", tenant_code="DEFAULT")
+    db.add(tenant)
+    await db.commit()
+    await db.refresh(tenant)
+    print(f"Created default tenant id={tenant.id} (database had none)")
+    return tenant.id
 
 
 async def _get_or_create_part(db, tid, pn, name, category, cost):
@@ -131,7 +146,7 @@ async def _get_or_create_part(db, tid, pn, name, category, cost):
 async def seed() -> None:
     Session = await get_session_maker()
     async with Session() as db:
-        tid = await _tenant_id(db)
+        tid = await _tenant_id(db, create=True)
         token = TenantContext.set(tenant_id=tid)
         try:
             for name, country, lead in VENDORS:
