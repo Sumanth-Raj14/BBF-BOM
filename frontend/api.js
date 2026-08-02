@@ -175,7 +175,14 @@ export async function apiRequest(endpoint, options = {}, retries = 2, delay = 50
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-        throw new Error(error.detail || `HTTP ${response.status}`);
+        const err = new Error(error.detail || `HTTP ${response.status}`);
+        // Audit finding A4: tag the status so the handler below can tell a
+        // DETERMINISTIC client error (404/400/403...) from a transport or
+        // server failure. Retrying a 404 never succeeds, and counting it as a
+        // circuit failure took a whole resource offline for 30s after five of
+        // them -- e.g. a screen probing for optional records.
+        err.status = response.status;
+        throw err;
       }
 
       _circuitBreaker.recordSuccess(circuitName);
@@ -189,7 +196,27 @@ export async function apiRequest(endpoint, options = {}, retries = 2, delay = 50
       if (e.message === 'Session expired — please sign in again') throw e;
       if (e.message === 'Session temporarily unavailable — try again') throw e;
 
+      // A4: 4xx means the server answered correctly and the request was wrong.
+      // It is neither a health signal nor retryable. 408/429 are excluded --
+      // those genuinely are "try again".
+      const _status = e && e.status;
+      const _isClientError =
+        typeof _status === 'number' &&
+        _status >= 400 &&
+        _status < 500 &&
+        _status !== 408 &&
+        _status !== 429;
+      if (_isClientError) throw e;
+
       _circuitBreaker.recordFailure(circuitName);
+
+      // A4: never auto-retry a non-idempotent request that failed in transit --
+      // the server may have applied it already, so a retry can duplicate the
+      // record. Idempotent verbs stay retryable.
+      const _method = (config.method || 'GET').toUpperCase();
+      if (_method !== 'GET' && _method !== 'HEAD' && _method !== 'OPTIONS') {
+        throw e;
+      }
 
       if (attempt === retries) {
         if (e.message === 'Failed to fetch') {
