@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { STORAGE_STATE } from './e2e/storage-state.js';
 
 export default defineConfig({
   testDir: '.',
@@ -21,7 +22,13 @@ export default defineConfig({
     },
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      // Every spec runs as a really-logged-in user. Specs used to fake this by
+      // writing localStorage.__bbox_auth directly, which worked only because
+      // the app trusted that blob -- the offline-login auth bypass. Closing
+      // that hole (see offlineAuth.js) correctly stopped honouring the fake
+      // session, so the fake is no longer a shortcut to the app shell, it's
+      // just a logged-out browser. The real session from auth.setup.js is.
+      use: { ...devices['Desktop Chrome'], storageState: STORAGE_STATE },
       dependencies: ['setup'],
     },
   ],
