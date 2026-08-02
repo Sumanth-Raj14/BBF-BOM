@@ -46,7 +46,7 @@ function RollbackModal({ open, onClose }) {
   React.useEffect(() => {
     if (open) {
       setSelectedRev(null);
-      if (window.apiConnected) {
+      if (ctx?.apiConnected) {
         setLoading(true);
         api.revisions
           .list({ limit: 20 })
@@ -83,7 +83,7 @@ function RollbackModal({ open, onClose }) {
         setRevs(defaultRevs);
       }
     }
-  }, [open, window.apiConnected]);
+  }, [open, ctx?.apiConnected]);
 
   const rollback = async () => {
     if (!selectedRev || !ctx) return;
@@ -162,7 +162,7 @@ function RollbackModal({ open, onClose }) {
           "Rolling back replaces the current BOM data with the selected revision. The current state is not lost — it remains as the latest revision in history."}
       </p>
       <div className="mb-12">
-        {window.apiConnected ? (
+        {ctx?.apiConnected ? (
           <Badge tone="success">
             {__t("rollback.loadingFromServer") ||
               "Loading revisions from server"}

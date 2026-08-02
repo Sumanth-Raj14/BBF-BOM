@@ -5,7 +5,7 @@
 ## 0. Snapshot
 - **Version:** 2.1.0
 - **Last updated:** 2026-08-01
-- **Alembic head:** `047_solidworks_integration` (single, linear · 47 migrations) · fresh install builds **159 tables**
+- **Alembic head:** `048_index_foreign_keys` (single, linear · 48 migrations) · fresh install builds **159 tables**
 - **Test status:** **Postgres CI is a green HARD GATE — 634 passed / 0 failed / 1 skipped / 1 xfailed** on real PG16 (`.github/workflows/postgres-ci.yml`). SQLite remains the fast local/dev track.
 - **State:** feature-complete + published; remaining work is packaging/ops handoffs (see §12)
 
@@ -36,7 +36,7 @@ backend/
   app/services/*.py           # 18 business-logic services
   app/core/                   # config.py (settings), deps.py, security, tenant_events.py (tenant isolation), backup.py
   app/db/                     # session.py (async engine), base.py (Base + model registry)
-  alembic/                    # env.py + versions/*.py (47 migrations, head 047_solidworks_integration); alembic.ini
+  alembic/                    # env.py + versions/*.py (48 migrations, head 048_index_foreign_keys); alembic.ini
   scripts/                    # init_db.py (schema bootstrap), db_backup.py, pitr_restore.py, restore_wizard.py, startup_health_check.py
   app/tests/                  # pytest (SQLite via create_all)
   docker-compose.yml, Dockerfile(.prod), .env (gitignored — real secrets)
@@ -58,7 +58,7 @@ install.ps1 / install.bat / Makefile / docker-compose.yml   # deploy entry point
 ## 6. Database
 - **Multi-tenancy:** primary = app-layer (`app/core/tenant_events.py` auto-filters SELECT, guards UPDATE/DELETE, auto-populates `tenantId` on INSERT). Opt-in Postgres RLS (`ENABLE_RLS`, default off) is defense-in-depth (migration 040).
 - **Schema owner / bootstrap:** `backend/scripts/init_db.py` — greenfield DB → `Base.metadata.create_all()` + `alembic stamp head`; existing DB → `alembic upgrade head`. Wired into the deploy path (Makefile, docker-entrypoint.sh, INSTALL, runbook). **This exists because the historical migration chain can't build from base** (migration 004 references `po_headers`, a `create_all`-era table not formalized until 022).
-- **Migrations:** 47 files in `backend/alembic/versions`; single linear head `047_solidworks_integration` (chain: 040→041_compliance→041_part11→042_substance→043_composition→044_evaluations→041_zoho→045→046→047; the two `041_*` files thread linearly — not a multi-head split). `alembic/env.py` reads `DATABASE_URL` else falls back to `settings.DATABASE_URI`, and widens `alembic_version.version_num` to VARCHAR(255) on Postgres.
+- **Migrations:** 48 files in `backend/alembic/versions`; single linear head `048_index_foreign_keys` (chain: 040→041_compliance→041_part11→042_substance→043_composition→044_evaluations→041_zoho→045→046→047→048; the two `041_*` files thread linearly — not a multi-head split). `alembic/env.py` reads `DATABASE_URL` else falls back to `settings.DATABASE_URI`, and widens `alembic_version.version_num` to VARCHAR(255) on Postgres.
 - **Dev DB:** native Postgres 18 `bom_db` (owner `bom_user`), at head, on `127.0.0.1:5432`. `bom_user` password = the 24-char `POSTGRES_PASSWORD` in `backend/.env`; superuser `postgres` password = `admin` (dev machine only).
 - **Three Postgres-only bugs fixed this cycle** (invisible to SQLite tests): (1) `version_num` VARCHAR(32) truncation at migration 036; (2) env.py ignoring `.env`; (3) `CheckConstraint` raw-SQL camelCase columns unquoted (Postgres folds to lowercase) — fixed in capa/contract/deviation/document models.
 

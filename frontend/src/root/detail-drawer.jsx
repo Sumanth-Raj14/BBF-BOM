@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { navigateTo } from "../services/navigation.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import { PartComplianceTab } from "../components/PartComplianceTab.jsx";
@@ -771,7 +772,7 @@ function WhereUsedTab({ row }) {
     toast((__t("detailDrawer.navigatedTo") || "Navigated to ") + bomName, {
       kind: "info",
     });
-    window.__nav?.("bom");
+    navigateTo("bom");
   };
 
   const { loading, usages, error } = state;

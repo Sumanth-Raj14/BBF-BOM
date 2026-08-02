@@ -40,15 +40,15 @@ class ComplianceEvaluation(Base, TenantAwareMixin):
     regulation_version_id = Column(
         Integer, ForeignKey("regulation_versions.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    bom_id = Column(Integer, ForeignKey("boms.id", ondelete="CASCADE"))  # NULL = context-free SELF
+    bom_id = Column(Integer, ForeignKey("boms.id", ondelete="CASCADE"), index=True)  # NULL = context-free SELF
     bom_rev = Column(String)
     status = Column(String, nullable=False)  # see spec 4.1 lattice
     basis = Column(String, nullable=False)  # SELF / ROLLUP
     exceedance = Column(Boolean, nullable=False, default=False)  # raw breach at SELF, pre-exemption (P3)
     data_fidelity = Column(String)  # COMPUTED_FROM_FMD/ASSERTED_FROM_SUMMARY/NO_DATA
-    driving_child_part_id = Column(Integer, ForeignKey("parts.id", ondelete="SET NULL"))
-    driving_substance_id = Column(Integer, ForeignKey("substances.id", ondelete="SET NULL"))
-    applied_exemption_id = Column(Integer, ForeignKey("rohs_exemptions.id", ondelete="SET NULL"))
+    driving_child_part_id = Column(Integer, ForeignKey("parts.id", ondelete="SET NULL"), index=True)
+    driving_substance_id = Column(Integer, ForeignKey("substances.id", ondelete="SET NULL"), index=True)
+    applied_exemption_id = Column(Integer, ForeignKey("rohs_exemptions.id", ondelete="SET NULL"), index=True)
     evaluated_at = Column(DateTime(timezone=True), server_default=func.now())
     is_stale = Column(Boolean, nullable=False, default=False)
 
@@ -85,8 +85,8 @@ class ReachObligation(Base, TenantAwareMixin):
 
     id = Column(Integer, primary_key=True)
     part_id = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True)  # carrier (parent accumulating)
-    article_part_id = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False)  # offending leaf article
-    substance_id = Column(Integer, ForeignKey("substances.id", ondelete="CASCADE"), nullable=False)
+    article_part_id = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True)  # offending leaf article
+    substance_id = Column(Integer, ForeignKey("substances.id", ondelete="CASCADE"), nullable=False, index=True)
     regulation_version_id = Column(
         Integer, ForeignKey("regulation_versions.id", ondelete="CASCADE"), nullable=False
     )

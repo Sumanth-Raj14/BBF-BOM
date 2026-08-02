@@ -1,4 +1,5 @@
 import { __t } from "../../i18n";
+import { navigateTo } from "../../services/navigation.js";
 
 import { toast } from "../../utils/toast";
 import { Icon, api, useAppStore } from "../../globals";
@@ -126,7 +127,7 @@ export default function OCRScreen() {
           kind: "success",
           action: {
             label: __t("ocr.openPart") || "Open part",
-            onClick: () => window.__nav?.("bom"),
+            onClick: () => navigateTo("bom"),
           },
         },
       );

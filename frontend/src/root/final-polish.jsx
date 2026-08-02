@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { getInrRate } from "../utils/currency.js";
 import { storage } from "../utils/storage.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
@@ -937,12 +938,12 @@ window.printPO = async function (item, vendorHint) {
     h(item.qty) +
     "</td>" +
     "<td class='r'>₹" +
-    ((item.cost || 12) * (window.INR_RATE || 83)).toLocaleString("en-IN", {
+    ((item.cost || 12) * getInrRate()).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     }) +
     "</td>" +
     "<td class='r' style='font-weight:600'>₹" +
-    (lineCost * (window.INR_RATE || 83)).toLocaleString("en-IN", {
+    (lineCost * getInrRate()).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     }) +
     "</td></tr></tbody></table>" +
@@ -950,28 +951,28 @@ window.printPO = async function (item, vendorHint) {
     "<tr><td>" +
     h(__t("printPo.subtotal") || "Subtotal") +
     "</td><td class='r'>₹" +
-    (lineCost * (window.INR_RATE || 83)).toLocaleString("en-IN", {
+    (lineCost * getInrRate()).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     }) +
     "</td></tr>" +
     "<tr><td>" +
     h(__t("printPo.tax") || "Tax (GST 18%)") +
     "</td><td class='r'>₹" +
-    (tax * (window.INR_RATE || 83)).toLocaleString("en-IN", {
+    (tax * getInrRate()).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     }) +
     "</td></tr>" +
     "<tr><td>" +
     h(__t("printPo.shipping") || "Shipping") +
     "</td><td class='r'>₹" +
-    (ship * (window.INR_RATE || 83)).toLocaleString("en-IN", {
+    (ship * getInrRate()).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     }) +
     "</td></tr>" +
     "<tr class='total'><td>" +
     h(__t("printPo.total") || "TOTAL") +
     "</td><td class='r'>₹" +
-    (total * (window.INR_RATE || 83)).toLocaleString("en-IN", {
+    (total * getInrRate()).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     }) +
     "</td></tr>" +

@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { navigateTo } from "../services/navigation.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import { Icon, cadAPI, documentsAPI, revisionsAPI, api, useAppStore } from "../globals";
@@ -883,7 +884,7 @@ function CADRevisionsModal({ open, onClose, file }) {
                       kind: "info",
                       action: {
                         label: __t("pdm.openDiff") || "Open diff",
-                        onClick: () => window.__nav?.("diff"),
+                        onClick: () => navigateTo("diff"),
                       },
                     },
                   )

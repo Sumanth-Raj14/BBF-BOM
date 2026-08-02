@@ -120,7 +120,7 @@ class RestrictedSubstanceEntry(Base):
     regulation_version_id = Column(
         Integer, ForeignKey("regulation_versions.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    substance_id = Column(Integer, ForeignKey("substances.id", ondelete="CASCADE"))
+    substance_id = Column(Integer, ForeignKey("substances.id", ondelete="CASCADE"), index=True)
     substance_group_id = Column(Integer, ForeignKey("substance_groups.id", ondelete="CASCADE"))
     threshold_ppm = Column(Numeric(12, 4), nullable=False)  # RoHS 1000, Cd 100, SVHC 1000
     threshold_basis = Column(String, nullable=False)  # HOMOGENEOUS_MATERIAL / ARTICLE / MIXTURE / PRODUCT

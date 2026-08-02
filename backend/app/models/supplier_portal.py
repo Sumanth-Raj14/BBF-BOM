@@ -73,9 +73,8 @@ class RfqHeader(Base, TenantAwareMixin):
     issue_date = Column(DateTime(timezone=True), server_default=func.now())
     response_deadline = Column(DateTime(timezone=True))
     awarded_to_vendor_id = Column(
-        Integer, ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True
-    )
-    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+        Integer, ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -119,11 +118,9 @@ class RfqSupplierResponse(Base, TenantAwareMixin):
         Integer, ForeignKey("rfq_headers.id", ondelete="CASCADE"), nullable=False, index=True
     )
     supplier_user_id = Column(
-        Integer, ForeignKey("supplier_users.id", ondelete="CASCADE"), nullable=False
-    )
+        Integer, ForeignKey("supplier_users.id", ondelete="CASCADE"), nullable=False, index=True)
     line_item_id = Column(
-        Integer, ForeignKey("rfq_line_items.id", ondelete="CASCADE"), nullable=False
-    )
+        Integer, ForeignKey("rfq_line_items.id", ondelete="CASCADE"), nullable=False, index=True)
     quoted_price = Column(Numeric(18, 4), nullable=False)
     quoted_lead_time_days = Column(Integer)
     notes = Column(String)

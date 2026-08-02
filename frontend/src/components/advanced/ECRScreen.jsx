@@ -1,4 +1,5 @@
 import { storage } from "../../utils/storage.js";
+import { navigateTo } from "../../services/navigation.js";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
@@ -517,7 +518,7 @@ function ECRScreen() {
     {
       icon: <Icon.Diff size={11} />,
       label: __t("advanced.ecr.viewDiff") || "View diff",
-      onSelect: () => window.__nav?.("diff"),
+      onSelect: () => navigateTo("diff"),
     },
     {
       icon: <Icon.Doc size={11} />,

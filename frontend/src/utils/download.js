@@ -1,4 +1,5 @@
 import { __t } from "../i18n";
+import { getInrRate } from "../utils/currency.js";
 import { toast } from "../utils/toast";
 import { escapeHtml, openPrintWindow } from '../../api.js';
 export function downloadBlob(content, filename, type = "text/plain") {
@@ -63,7 +64,7 @@ export function printBOM(rows, project) {
   const list = flattenForCSV(rows);
   const total = list.reduce((s, r) => s + (Number(r.unit_cost) || 0) * (Number(r.qty) || 0), 0);
   const rowHTML = list.map((r, i) => {
-    return "<tr><td>" + (i + 1) + "</td><td style='font-weight:600'>" + esc(r.pn) + "</td><td>" + "".padStart(r.level * 2, "\u00B7") + " " + esc(r.name) + "</td><td>" + esc(r.rev) + "</td><td class='r'>" + esc(r.qty) + "</td><td class='r'>" + esc(r.uom) + "</td><td>" + esc(r.category) + "</td><td>" + esc(r.vendor) + "</td><td class='r'>\u20B9" + ((Number(r.unit_cost) || 0) * (window.INR_RATE || 83)).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + "</td><td class='r'>\u20B9" + ((Number(r.ext_cost) || 0) * (window.INR_RATE || 83)).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + "</td><td>" + esc(r.origin) + "</td><td>" + esc(r.status) + "</td></tr>";
+    return "<tr><td>" + (i + 1) + "</td><td style='font-weight:600'>" + esc(r.pn) + "</td><td>" + "".padStart(r.level * 2, "\u00B7") + " " + esc(r.name) + "</td><td>" + esc(r.rev) + "</td><td class='r'>" + esc(r.qty) + "</td><td class='r'>" + esc(r.uom) + "</td><td>" + esc(r.category) + "</td><td>" + esc(r.vendor) + "</td><td class='r'>\u20B9" + ((Number(r.unit_cost) || 0) * getInrRate()).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + "</td><td class='r'>\u20B9" + ((Number(r.ext_cost) || 0) * getInrRate()).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + "</td><td>" + esc(r.origin) + "</td><td>" + esc(r.status) + "</td></tr>";
   }).join("");
   const printHtml = "<!doctype html><html><head><title>BOM \u00B7 " + esc(project.code) + " \u00B7 " + esc(project.version) + "</title>" +
     "<style>@page{size:A4 landscape;margin:16mm}body{font-family:-apple-system,sans-serif;color:#000;font-size:10px;margin:0;padding:16px}h1{font-size:16px;margin:0 0 4px}.meta{display:flex;gap:18px;font-family:monospace;font-size:9px;color:#444;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid #000}.meta span strong{color:#000;margin-left:4px}table{width:100%;border-collapse:collapse;font-size:9px;font-family:monospace}th{text-align:left;padding:4px 6px;border-bottom:1px solid #000;font-size:8px;text-transform:uppercase;letter-spacing:0.04em}td{padding:3px 6px;border-bottom:1px solid #eee;vertical-align:top}td.r{text-align:right}tfoot td{font-weight:700;border-top:2px solid #000;padding-top:6px;font-size:11px}.foot{margin-top:14px;font-size:8px;color:#666;display:flex;justify-content:space-between}</style></head><body>" +
@@ -79,7 +80,7 @@ export function printBOM(rows, project) {
     "</div>" +
     "<table><thead><tr><th>#</th><th>" + __t("bomShell.colPartNo") + "</th><th>" + __t("bomShell.colName") + "</th><th>Rev</th><th>Qty</th><th>UoM</th><th>" + __t("bomShell.colCategory") + "</th><th>" + __t("bomShell.colVendor") + "</th><th>Unit</th><th>Ext.</th><th>" + __t("bomShell.colOrigin") + "</th><th>Status</th></tr></thead>" +
     "<tbody>" + rowHTML + "</tbody>" +
-    "<tfoot><tr><td colspan='9' style='text-align:right'>TOTAL</td><td class='r'>\u20B9" + (total * (window.INR_RATE || 83)).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + "</td><td colspan='2'></td></tr></tfoot>" +
+    "<tfoot><tr><td colspan='9' style='text-align:right'>TOTAL</td><td class='r'>\u20B9" + (total * getInrRate()).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + "</td><td colspan='2'></td></tr></tfoot>" +
     "</table>" +
     "<div class='foot'><span>Blackbox BOM \u00B7 " + esc(project.code) + "</span><span>Page 1 of 1</span></div>" +
     "<script>setTimeout(function(){window.print()},300)<\/script>" +

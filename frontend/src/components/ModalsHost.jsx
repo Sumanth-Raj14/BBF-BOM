@@ -1,4 +1,5 @@
 import React from "react";
+import { navigateTo } from "../services/navigation.js";
 import { AppContext } from "../context/AppCtx.jsx";
 
 import { __t } from "../i18n";
@@ -313,7 +314,7 @@ export default function ModalsHost() {
             kind: "success",
             action: {
               label: __t("common.search"),
-              onClick: () => window.__nav("bom"),
+              onClick: () => navigateTo("bom"),
             },
           });
         }}

@@ -2,6 +2,7 @@ import React from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { storage } from "../utils/storage.js";
 import { dataService } from "../services/dataService.js";
+import { setNavigator } from "../services/navigation.js";
 import {
   TWEAK_DEFAULTS,
   INITIAL_COMMENTS,
@@ -48,7 +49,8 @@ function AppCtxProvider({ children }) {
   const [syncStatus, setSyncStatus] = React.useState(
     dataService.getSyncStatus(),
   );
-  window.apiConnected = apiConnected;
+  // Improvement #2: apiConnected is on the context value below; it used to be
+  // mirrored onto window for modals that already hold ctx. Mirror removed.
 
   const [authed, setAuthed] = React.useState(() => storage.auth.get());
   const [onboardingDone, setOnboardingDone] = React.useState(() =>
@@ -384,10 +386,12 @@ function AppCtxProvider({ children }) {
   }, [apiConnected]);
 
   React.useEffect(() => {
-    window.__nav = (r) => {
+    // Improvement #2: registered through services/navigation.js instead of
+    // assigning navigateTo.
+    const unregisterNavigator = setNavigator((r) => {
       setRoute(r);
       setSelectedRow(null);
-    };
+    });
     window.__open_approve_b = () => setModal("approve-b");
     window.__setBomSearch = (s) => setSearch(s);
     const onKey = (e) => {
@@ -398,7 +402,7 @@ function AppCtxProvider({ children }) {
     };
     window.addEventListener("keydown", onKey);
     return () => {
-      delete window.__nav;
+      unregisterNavigator();
       delete window.__open_approve_b;
       delete window.__setBomSearch;
       window.removeEventListener("keydown", onKey);
