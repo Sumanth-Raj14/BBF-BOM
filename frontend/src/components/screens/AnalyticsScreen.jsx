@@ -1,6 +1,7 @@
 ﻿import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
+import { navigateTo } from "../../services/navigation.js";
 import { toast } from "../../utils/toast";
 import {
   BOM_DATA,
@@ -856,11 +857,11 @@ export default function AnalyticsScreen({ data }) {
                     {rows.map((r) => (
                       <tr
                         key={r.vendor}
-                        onClick={() => window.__nav?.("vendors")}
+                        onClick={() => navigateTo("vendors")}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
-                            window.__nav?.("vendors");
+                            navigateTo("vendors");
                           }
                         }}
                         tabIndex={0}

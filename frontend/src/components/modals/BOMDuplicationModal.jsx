@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { navigateTo } from "../../services/navigation.js";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
@@ -63,7 +64,7 @@ function BOMDuplicationModal({ open, onClose }) {
             action: {
               label: __t("bomDuplication.switch") || "Switch",
               onClick: () => {
-                window.__nav?.("bom");
+                navigateTo("bom");
               },
             },
           },
@@ -82,7 +83,7 @@ function BOMDuplicationModal({ open, onClose }) {
             action: {
               label: __t("bomDuplication.switch") || "Switch",
               onClick: () => {
-                window.__nav?.("bom");
+                navigateTo("bom");
               },
             },
           },
@@ -101,7 +102,7 @@ function BOMDuplicationModal({ open, onClose }) {
           action: {
             label: __t("bomDuplication.switch") || "Switch",
             onClick: () => {
-              window.__nav?.("bom");
+              navigateTo("bom");
             },
           },
         },

@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { navigateTo } from "../services/navigation.js";
 import { storage } from "../utils/storage.js";
 import { useAutosave } from "../hooks/useAutosave.js";
 import { __t } from "../i18n";
@@ -1321,7 +1322,7 @@ export function BomEditor({
                                       action: {
                                         label: __t("common.view") || "View",
                                         onClick: () =>
-                                          window.__nav?.("procurement"),
+                                          navigateTo("procurement"),
                                       },
                                     },
                                   );
@@ -1562,7 +1563,7 @@ export function BomEditor({
                     kind: "success",
                     action: {
                       label: __t("common.view") || "View",
-                      onClick: () => window.__nav?.("procurement"),
+                      onClick: () => navigateTo("procurement"),
                     },
                   },
                 );

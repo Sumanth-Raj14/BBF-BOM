@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { navigateTo } from "../services/navigation.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import { api } from "../globals";
@@ -169,7 +170,7 @@ function DashboardScreen() {
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => window.__nav?.("analytics")}
+              onClick={() => navigateTo("analytics")}
             >
               <Icon.Chart size={11} />{" "}
               {__t("dashboard.deepAnalytics") || "Deep analytics"}
@@ -391,13 +392,13 @@ function DashboardScreen() {
                   }
                   onClick={() => {
                     ctx?.switchProject?.(k);
-                    window.__nav?.("bom");
+                    navigateTo("bom");
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
                       ctx?.switchProject?.(k);
-                      window.__nav?.("bom");
+                      navigateTo("bom");
                     }
                   }}
                   className="bg-elev border-line rounded-r2 c-pointer"
@@ -516,7 +517,7 @@ function RiskTile() {
     <Tile
       title={__t("dashboard.supplyRisk") || "Supply Risk"}
       action={__t("dashboard.viewAll") || "View all"}
-      onAction={() => window.__nav?.("bom")}
+      onAction={() => navigateTo("bom")}
     >
       {items === null ? (
         <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
@@ -605,7 +606,7 @@ function ApprovalsTile({ role }) {
     <Tile
       title={__t("dashboard.approvalsInbox") || "Approvals Inbox"}
       action={__t("dashboard.open") || "Open"}
-      onAction={() => window.__nav?.("approvals")}
+      onAction={() => navigateTo("approvals")}
     >
       {loading ? (
         <div className="flex items-center gap-8" style={{ padding: "6px 0" }}>
@@ -687,7 +688,7 @@ function InFlightTile() {
     <Tile
       title={__t("dashboard.inFlight") || "In Flight"}
       action={__t("nav.procurement") || "Procurement"}
-      onAction={() => window.__nav?.("procurement")}
+      onAction={() => navigateTo("procurement")}
     >
       <div
         className="d-grid gap-8 mb-8"
@@ -775,7 +776,7 @@ function MyBOMsTile() {
     <Tile
       title={__t("dashboard.myBoms") || "My BOMs"}
       action={__t("dashboard.openEditor") || "Open editor"}
-      onAction={() => window.__nav?.("bom")}
+      onAction={() => navigateTo("bom")}
     >
       {items === null ? (
         <div className="flex items-center gap-8" style={{ padding: "6px 0" }}>
@@ -869,7 +870,7 @@ function VendorsTile() {
     <Tile
       title={__t("nav.vendors") || "Vendors"}
       action={__t("dashboard.allVendors") || "All"}
-      onAction={() => window.__nav?.("vendors")}
+      onAction={() => navigateTo("vendors")}
     >
       <div className="vendor-row">
         <span className="fg-3 fw-600">{__t("vendor.active") || "Active"}</span>
@@ -952,7 +953,7 @@ function SpendMixTile() {
     <Tile
       title={__t("dashboard.spendMix") || "Spend Mix"}
       action={__t("nav.analytics") || "Analytics"}
-      onAction={() => window.__nav?.("analytics")}
+      onAction={() => navigateTo("analytics")}
     >
       {rows === null ? (
         <div className="fs-11 fg-3" style={{ padding: "10px 0" }}>
@@ -997,7 +998,7 @@ function CostTrendTile() {
     <Tile
       title={__t("dashboard.monthlySpend") || "Monthly Spend (₹Cr)"}
       action={__t("nav.analytics") || "Analytics"}
-      onAction={() => window.__nav?.("analytics")}
+      onAction={() => navigateTo("analytics")}
     >
       <div className="flex items-end h-80 gap-4 mb-8">
         {data.map((v, i) => (
@@ -1066,7 +1067,7 @@ function ActivityTile() {
     <Tile
       title={__t("dashboard.recentActivity") || "Recent Activity"}
       action={__t("dashboard.viewAll") || "View all"}
-      onAction={() => window.__nav?.("activity")}
+      onAction={() => navigateTo("activity")}
     >
       {items === null ? (
         <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
@@ -1138,7 +1139,7 @@ function UsersTile() {
     <Tile
       title={__t("dashboard.users") || "Users & Tenant"}
       action={__t("dashboard.manage") || "Manage"}
-      onAction={() => window.__nav?.("tenant-admin")}
+      onAction={() => navigateTo("tenant-admin")}
     >
       {users === null ? (
         <div className="flex items-center gap-8" style={{ padding: "6px 0" }}>
@@ -1238,7 +1239,7 @@ function SystemHealthTile({ ctx }) {
     <Tile
       title={__t("dashboard.systemHealth") || "System Health"}
       action={__t("dashboard.monitoring") || "Monitoring"}
-      onAction={() => window.__nav?.("monitoring")}
+      onAction={() => navigateTo("monitoring")}
     >
       <div className="flex items-center gap-8 mb-10">
         <StatusPill status={online ? "Operational" : "Degraded"} />
@@ -1326,7 +1327,7 @@ function AuditTile() {
     <Tile
       title={__t("dashboard.auditLog") || "Audit Log"}
       action={__t("dashboard.viewAll") || "View all"}
-      onAction={() => window.__nav?.("audit-trail")}
+      onAction={() => navigateTo("audit-trail")}
     >
       {loading ? (
         <div className="flex items-center gap-8" style={{ padding: "6px 0" }}>
@@ -1395,7 +1396,7 @@ function ECOTile() {
     <Tile
       title={__t("dashboard.openECOs") || "Open ECOs"}
       action={__t("dashboard.viewAll") || "View all"}
-      onAction={() => window.__nav?.("ecr")}
+      onAction={() => navigateTo("ecr")}
     >
       {loading ? (
         <div className="flex items-center gap-8" style={{ padding: "6px 0" }}>
@@ -1463,7 +1464,7 @@ function WhereUsedTile() {
     <Tile
       title={__t("dashboard.whereUsed") || "Where Used"}
       action={__t("nav.parts") || "Components"}
-      onAction={() => window.__nav?.("parts")}
+      onAction={() => navigateTo("parts")}
     >
       {items === null ? (
         <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
@@ -1545,7 +1546,7 @@ function ReceivingTile() {
     <Tile
       title={__t("dashboard.receiving") || "Receiving"}
       action={__t("dashboard.trackOrders") || "Track orders"}
-      onAction={() => window.__nav?.("order-tracking")}
+      onAction={() => navigateTo("order-tracking")}
     >
       {items === null ? (
         <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
@@ -1621,7 +1622,7 @@ function CostRollupTile() {
     <Tile
       title={__t("dashboard.costRollup") || "Cost Rollup by Project"}
       action={__t("nav.analytics") || "Analytics"}
-      onAction={() => window.__nav?.("analytics")}
+      onAction={() => navigateTo("analytics")}
     >
       {rows === null ? (
         <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>
@@ -1672,7 +1673,7 @@ function ShouldCostTile() {
     <Tile
       title={__t("dashboard.shouldCost") || "Should-Cost Variance"}
       action={__t("nav.analytics") || "Analytics"}
-      onAction={() => window.__nav?.("analytics")}
+      onAction={() => navigateTo("analytics")}
     >
       {items === null ? (
         <div className="fs-11 fg-3" style={{ padding: "6px 0" }}>

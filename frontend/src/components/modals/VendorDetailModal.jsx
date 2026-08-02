@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import { navigateTo } from "../../services/navigation.js";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
@@ -218,7 +219,7 @@ export default function VendorDetailModal({ open, onClose, vendor }) {
             variant="primary"
             onClick={() => {
               onClose();
-              window.__nav?.("procurement");
+              navigateTo("procurement");
               toast(
                 (__t("modals.vendorDetail.openProcurementFor") ||
                   "Opening procurement for") +
