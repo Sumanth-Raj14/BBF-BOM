@@ -392,8 +392,9 @@ function AppCtxProvider({ children }) {
       setRoute(r);
       setSelectedRow(null);
     });
-    window.__open_approve_b = () => setModal("approve-b");
-    window.__setBomSearch = (s) => setSearch(s);
+    // Improvement #2: window.__open_approve_b and window.__setBomSearch are
+    // gone. Both consumers (DiffScreen, the BOM editor screens) live inside
+    // this provider, so they call ctx.openModal / ctx.setSearch directly.
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
@@ -403,8 +404,6 @@ function AppCtxProvider({ children }) {
     window.addEventListener("keydown", onKey);
     return () => {
       unregisterNavigator();
-      delete window.__open_approve_b;
-      delete window.__setBomSearch;
       window.removeEventListener("keydown", onKey);
     };
   }, [setRoute]);
