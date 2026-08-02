@@ -175,7 +175,14 @@ export async function apiRequest(endpoint, options = {}, retries = 2, delay = 50
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-        throw new Error(error.detail || `HTTP ${response.status}`);
+        const err = new Error(error.detail || `HTTP ${response.status}`);
+        // Audit finding A4: tag the status so the handler below can tell a
+        // DETERMINISTIC client error (404/400/403...) from a transport or
+        // server failure. Retrying a 404 never succeeds, and counting it as a
+        // circuit failure took a whole resource offline for 30s after five of
+        // them -- e.g. a screen probing for optional records.
+        err.status = response.status;
+        throw err;
       }
 
       _circuitBreaker.recordSuccess(circuitName);
@@ -189,7 +196,27 @@ export async function apiRequest(endpoint, options = {}, retries = 2, delay = 50
       if (e.message === 'Session expired — please sign in again') throw e;
       if (e.message === 'Session temporarily unavailable — try again') throw e;
 
+      // A4: 4xx means the server answered correctly and the request was wrong.
+      // It is neither a health signal nor retryable. 408/429 are excluded --
+      // those genuinely are "try again".
+      const _status = e && e.status;
+      const _isClientError =
+        typeof _status === 'number' &&
+        _status >= 400 &&
+        _status < 500 &&
+        _status !== 408 &&
+        _status !== 429;
+      if (_isClientError) throw e;
+
       _circuitBreaker.recordFailure(circuitName);
+
+      // A4: never auto-retry a non-idempotent request that failed in transit --
+      // the server may have applied it already, so a retry can duplicate the
+      // record. Idempotent verbs stay retryable.
+      const _method = (config.method || 'GET').toUpperCase();
+      if (_method !== 'GET' && _method !== 'HEAD' && _method !== 'OPTIONS') {
+        throw e;
+      }
 
       if (attempt === retries) {
         if (e.message === 'Failed to fetch') {
@@ -369,6 +396,23 @@ export const documentsAPI = {
     const query = new URLSearchParams(params).toString();
     return apiRequest(`/documents${query ? '?' + query : ''}`);
   },
+
+  // Raw bytes for a stored document (GET /documents/{id}/download).
+  // Not via apiRequest: that parses every response as JSON, which would
+  // corrupt binary. GET needs no CSRF token; auth rides on the cookie.
+  downloadBuffer: async (id) => {
+    const response = await fetch(`${API_BASE}/documents/${id}/download`, {
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error(
+        response.status === 404
+          ? 'This file is not available on the server'
+          : `HTTP ${response.status}`,
+      );
+    }
+    return response.arrayBuffer();
+  },
   
   folders: () => apiRequest('/documents/folders'),
   
@@ -432,6 +476,35 @@ export const usersAPI = {
   
   delete: (id) => 
     apiRequest(`/users/${id}`, { method: 'DELETE' }),
+};
+
+// RBAC API — roles, permissions, and role<->user assignment.
+// The backend has had these endpoints all along; nothing in the UI called them,
+// so there was no way to add a member or change their privileges.
+export const rbacAPI = {
+  roles: () => apiRequest('/rbac/roles'),
+
+  createRole: (role) =>
+    apiRequest('/rbac/roles', { method: 'POST', body: JSON.stringify(role) }),
+
+  permissions: () => apiRequest('/rbac/permissions'),
+
+  rolePermissions: (roleId) => apiRequest(`/rbac/roles/${roleId}/permissions`),
+
+  roleUsers: (roleId) => apiRequest(`/rbac/roles/${roleId}/users`),
+
+  // Payload keys are userId/roleId (see UserRoleAssign in roles_permissions.py).
+  assignUser: (userId, roleId) =>
+    apiRequest('/rbac/roles/assign-user', {
+      method: 'POST',
+      body: JSON.stringify({ userId, roleId }),
+    }),
+
+  unassignUser: (userId, roleId) =>
+    apiRequest('/rbac/roles/unassign-user', {
+      method: 'POST',
+      body: JSON.stringify({ userId, roleId }),
+    }),
 };
 
 // Notifications API
@@ -1416,6 +1489,7 @@ export const api = {
   procurement: procurementAPI,
   documents: documentsAPI,
   users: usersAPI,
+  rbac: rbacAPI,
   notifications: notificationsAPI,
   comments: commentsAPI,
   approvals: approvalsAPI,

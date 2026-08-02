@@ -16,6 +16,7 @@ import {
   EmptyState,
   Spinner,
 } from "../components/ui";
+import CadViewer, { isViewable } from "../components/cad/CadViewer.jsx";
 // PDM / CAD Vault feature set: vault tree, check-in/out, CAD revision history,
 // 3D viewer, drawing markup, CAD attribute extraction, bidirectional sync,
 // drawing release workflow, watermarking.
@@ -587,158 +588,122 @@ function PDMVaultScreen() {
   );
 }
 
-// ============ CAD 3D PREVIEW (faux 3D using SVG) ============
+// ============ CAD 3D PREVIEW ============
+// Was a "faux 3D using SVG" box: a CSS-transform wireframe that rendered the
+// same shape for every file and had nothing to do with its contents. Now a real
+// three.js viewer (see components/cad/CadViewer.jsx).
+//
+// Selecting a vault row fetches that document's bytes from
+// GET /documents/{id}/download and renders them. The local file picker remains
+// as a fallback for models that are not in the vault yet.
 function CADPreview({ file, onClose }) {
-  const [rot, setRot] = React.useState({ x: -15, y: 25, z: 0 });
-  const [zoom, setZoom] = React.useState(1);
-  const dragRef = React.useRef(null);
-  const dragging = React.useRef(false);
-  const last = React.useRef({ x: 0, y: 0 });
+  const [buffer, setBuffer] = React.useState(null);
+  const [loadedName, setLoadedName] = React.useState("");
+  const [fetchError, setFetchError] = React.useState("");
+  const inputRef = React.useRef(null);
 
-  const onMouseDown = (e) => {
-    dragging.current = true;
-    last.current = { x: e.clientX, y: e.clientY };
-  };
-  const onMouseMove = (e) => {
-    if (!dragging.current) return;
-    const dx = e.clientX - last.current.x;
-    const dy = e.clientY - last.current.y;
-    last.current = { x: e.clientX, y: e.clientY };
-    setRot((r) => ({
-      ...r,
-      y: r.y + dx * 0.5,
-      x: Math.max(-89, Math.min(89, r.x - dy * 0.5)),
-    }));
-  };
-  const onMouseUp = () => {
-    dragging.current = false;
-  };
+  // Pull the selected vault file's bytes from the server. Only attempt it for
+  // formats the viewer can actually render, so selecting a .sldasm row doesn't
+  // download megabytes just to report that it is unviewable.
+  const vaultName = file?.originalName || file?.name || file?.fileName || "";
+  const vaultId = file?.id;
   React.useEffect(() => {
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
+    let cancelled = false;
+    setBuffer(null);
+    setLoadedName("");
+    setFetchError("");
+    if (!vaultId || !isViewable(vaultName)) return undefined;
+    api.documents
+      .downloadBuffer(vaultId)
+      .then((buf) => {
+        if (cancelled) return;
+        setBuffer(buf);
+        setLoadedName(vaultName);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setFetchError(e?.message || String(e));
+      });
     return () => {
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
+      cancelled = true;
     };
-  }, []);
+  }, [vaultId, vaultName]);
+
+  const onPick = async (e) => {
+    const picked = e.target.files?.[0];
+    if (!picked) return;
+    setLoadedName(picked.name);
+    setBuffer(await picked.arrayBuffer());
+  };
 
   return (
-    <Card
-      title={file.name}
-      subtitle={`${file.ext} · Rev ${file.rev} · ${file.size}`}
-      actions={
-        <Button
-          variant="ghost"
-          size="sm"
-          iconOnly
-          aria-label={__t("common.close") || "Close"}
-          onClick={onClose}
-        >
-          <Icon.X size={12} />
+    <Card className="h-100">
+      <div className="cadprev__head">
+        <div className="cadprev__title" title={file?.name || file?.fileName}>
+          {file?.name || file?.fileName || __t("pdm.preview") || "Preview"}
+        </div>
+        <Button variant="ghost" onClick={onClose} aria-label={__t("common.close") || "Close"}>
+          {"×"}
         </Button>
-      }
-      bodyClassName="p-0"
-      footer={
-        <div className="font-mono fs-10 fg-3">
-          {__t("pdm.viewerHelp") ||
-            "Drag to rotate · Scroll to zoom · Use “Extract attributes” for real CAD metadata"}
-        </div>
-      }
-    >
-      {/* 3D-ish wireframe box rendered using CSS transforms */}
-      <div
-        className="bg-sunk flex items-center justify-center pos-relative overflow-h"
-        style={{
-          height: 320,
-          padding: 20,
-          cursor: dragging.current ? "grabbing" : "grab",
-          perspective: 1000,
-        }}
-        onMouseDown={onMouseDown}
-      >
-        <div
-          ref={dragRef}
-          aria-hidden="true"
-          style={{
-            width: 200 * zoom,
-            height: 140 * zoom,
-            position: "relative",
-            transformStyle: "preserve-3d",
-            transform: `rotateX(${rot.x}deg) rotateY(${rot.y}deg) rotateZ(${rot.z}deg)`,
-            transition: dragging.current ? "none" : "transform 0.1s",
-          }}
-        >
-          {/* 6 faces of a box */}
-          {[
-            { t: "translateZ(70px)", c: "oklch(0.7 0.06 60)" },
-            {
-              t: "translateZ(-70px) rotateY(180deg)",
-              c: "oklch(0.55 0.06 60)",
-            },
-            { t: "translateX(100px) rotateY(90deg)", c: "oklch(0.65 0.06 60)" },
-            {
-              t: "translateX(-100px) rotateY(-90deg)",
-              c: "oklch(0.6 0.06 60)",
-            },
-            { t: "translateY(-70px) rotateX(90deg)", c: "oklch(0.75 0.06 60)" },
-            { t: "translateY(70px) rotateX(-90deg)", c: "oklch(0.5 0.06 60)" },
-          ].map((f) => (
-            <div
-              key={f.t}
-              className="pos-absolute"
-              style={{
-                inset: 0,
-                background: f.c,
-                border: "1.5px solid #1a1a1a",
-                transform: f.t,
-                opacity: 0.85,
-              }}
-            />
-          ))}
-        </div>
-        {/* Tri-axis indicator */}
-        <div
-          className="pos-absolute font-mono fs-10 fg-3"
-          style={{ bottom: 10, left: 10 }}
-          aria-hidden="true"
-        >
-          <div>X: {rot.x.toFixed(0)}°</div>
-          <div>Y: {rot.y.toFixed(0)}°</div>
-          <div>Z: {rot.z.toFixed(0)}°</div>
-        </div>
-        <div className="pos-absolute flex gap-4" style={{ top: 10, right: 10 }}>
-          <Button
-            variant="ghost"
-            size="sm"
-            iconOnly
-            aria-label={__t("pdm.zoomIn") || "Zoom in"}
-            onClick={() => setZoom((z) => Math.min(2, z * 1.2))}
-          >
-            +
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            iconOnly
-            aria-label={__t("pdm.zoomOut") || "Zoom out"}
-            onClick={() => setZoom((z) => Math.max(0.5, z / 1.2))}
-          >
-            −
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            iconOnly
-            aria-label={__t("pdm.resetView") || "Reset view"}
-            onClick={() => {
-              setRot({ x: -15, y: 25, z: 0 });
-              setZoom(1);
-            }}
-          >
-            ⟲
-          </Button>
-        </div>
       </div>
+
+      <CadViewer buffer={buffer} name={loadedName} height={320} />
+
+      <div className="cadprev__actions">
+        <input
+          ref={inputRef}
+          id="cad-viewer-file"
+          name="cadViewerFile"
+          type="file"
+          accept=".step,.stp,.iges,.igs,.stl,.obj,.gltf,.glb,.ply,.3mf"
+          className="d-none"
+          onChange={onPick}
+          aria-label={__t("pdm.openLocalModel") || "Open a model file to view"}
+        />
+        <Button variant="secondary" onClick={() => inputRef.current?.click()}>
+          {loadedName
+            ? __t("pdm.openAnother") || "Open another model"
+            : __t("pdm.openModel") || "Open model to view"}
+        </Button>
+      </div>
+
+      {fetchError && (
+        <p className="cadprev__error" role="alert">
+          {(__t("pdm.viewerFetchFailed") || "Could not load this file from the server") +
+            ": " +
+            fetchError}
+        </p>
+      )}
+
+      <p className="cadprev__note">
+        {__t("pdm.viewerFormats") ||
+          "Renders STEP, IGES, STL, OBJ, GLTF/GLB, PLY and 3MF. SolidWorks .sldprt/.sldasm are proprietary and cannot be read directly — export STEP or STL first."}
+      </p>
+
+      <style>{`
+        .cadprev__head {
+          display: flex; align-items: center; gap: var(--sp-2);
+          margin-bottom: var(--sp-2);
+        }
+        .cadprev__title {
+          flex: 1; min-width: 0;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          font-weight: var(--fw-medium); color: var(--text-primary);
+        }
+        .cadprev__actions { margin-top: var(--sp-3); }
+        .cadprev__error {
+          margin-top: var(--sp-2);
+          font-size: var(--fs-075);
+          color: #b42318;
+          line-height: 1.5;
+        }
+        .cadprev__note {
+          margin-top: var(--sp-2);
+          font-size: var(--fs-075);
+          color: var(--text-muted);
+          line-height: 1.5;
+        }
+      `}</style>
     </Card>
   );
 }

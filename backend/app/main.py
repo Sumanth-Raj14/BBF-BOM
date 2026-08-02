@@ -4,6 +4,7 @@ import logging
 import os
 import signal
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
@@ -604,12 +605,17 @@ async def _check_ws_redis_rate_limit(client_ip: str) -> Optional[bool]:
         r = await get_redis()
         if r is not None:
             key = f"{_WS_RATE_LIMIT_REDIS_PREFIX}{client_ip}"
-            now = int(time.time())
+            # A13: this used int(time.time()) as BOTH score and member. Every
+            # connection within the same second wrote the identical member, so
+            # the sorted set collapsed them into one entry and a burst counted
+            # as a single attempt. Use a float score and a unique member.
+            now = time.time()
             window_start = now - _WS_RATE_LIMIT_WINDOW
+            member = f"{now:.6f}:{uuid.uuid4().hex}"
             pipe = r.pipeline()
             pipe.zremrangebyscore(key, 0, window_start)
             pipe.zcard(key)
-            pipe.zadd(key, {str(now): now})
+            pipe.zadd(key, {member: now})
             pipe.expire(key, int(_WS_RATE_LIMIT_WINDOW))
             results = await pipe.execute()
             count = results[1]
@@ -629,7 +635,24 @@ async def _check_ws_rate_limit(client_ip: str) -> bool:
     window_start = now - _WS_RATE_LIMIT_WINDOW
     if client_ip not in _ws_rate_limit:
         if len(_ws_rate_limit) >= _WS_RATE_LIMIT_MAX_IPS:
-            _ws_rate_limit.clear()
+            # A13: this used to be _ws_rate_limit.clear(), which reset EVERY
+            # tracked IP's window. An attacker cycling source IPs past the cap
+            # could therefore clear everyone's counters at will, disabling the
+            # limit entirely. Evict only entries whose window has fully expired;
+            # if that frees nothing, drop the single least-recently-active IP.
+            expired = [
+                ip
+                for ip, ts in _ws_rate_limit.items()
+                if not ts or max(ts) <= window_start
+            ]
+            for ip in expired:
+                del _ws_rate_limit[ip]
+            if len(_ws_rate_limit) >= _WS_RATE_LIMIT_MAX_IPS:
+                oldest = min(
+                    _ws_rate_limit,
+                    key=lambda ip: max(_ws_rate_limit[ip]) if _ws_rate_limit[ip] else 0,
+                )
+                del _ws_rate_limit[oldest]
         _ws_rate_limit[client_ip] = []
     timestamps = _ws_rate_limit[client_ip]
     _ws_rate_limit[client_ip] = [t for t in timestamps if t > window_start]
@@ -650,7 +673,14 @@ async def websocket_endpoint(websocket: WebSocket, channel: str):
         return
 
     # Rate limit by client IP
-    client_ip = websocket.client.host if websocket.client else "unknown"
+    # Audit finding A13: reading websocket.client.host directly ignores the
+    # proxy. Behind one, every user shares the proxy's IP and they collectively
+    # hit the 30/min cap -- one user could lock everyone out. get_client_ip()
+    # honours X-Forwarded-For/X-Real-IP (only when BEHIND_PROXY) and is
+    # duck-typed on .client/.headers, which WebSocket provides.
+    from app.core.client_ip import get_client_ip
+
+    client_ip = get_client_ip(websocket)
     if not await _check_ws_rate_limit(client_ip):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         logger.warning("WebSocket rate limit exceeded from IP %s", client_ip)
