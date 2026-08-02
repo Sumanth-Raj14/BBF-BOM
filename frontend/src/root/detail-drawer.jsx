@@ -40,7 +40,9 @@ function Drawer({ row, onClose, data, openModal, overlay }) {
   const commentList = (ctx?.comments && ctx.comments[row.pn]) || [];
   const approvalKey = row.assembly
     ? row.pn
-    : data.rows[0].children.find((s) =>
+    : // A1 class: rows is empty until the API responds, and is a FLAT parts
+      // array once it does -- neither has [0].children.
+      (data.rows?.[0]?.children || []).find((s) =>
         s.children?.some((c) => c.id === row.id),
       )?.pn;
   const approval = approvalKey && ctx?.approvals?.[approvalKey];

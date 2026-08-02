@@ -213,11 +213,18 @@ function AppCtxProvider({ children }) {
           parts: 0,
           terms: v.terms,
         }))
-      : data.vendors;
+      : [];
 
-  const [rows, setRows] = React.useState(() => {
-    return apiRows || data.rows;
-  });
+  // Never substitute the bundled demo BOM for real data. This used to be
+  // `apiRows || data.rows`: before the parts API responded (and forever, if it
+  // failed), every consumer -- Analytics, the BOM editor, search, sourcing --
+  // silently rendered the DEMO assembly. No error, no empty state, just
+  // plausible numbers that were not the user's. Screens must show real data or
+  // an honest empty state.
+  //
+  // Fixing it here fixes every downstream `ctx?.rows || BOM_DATA.rows`
+  // fallback too, because [] is truthy and so wins those expressions.
+  const [rows, setRows] = React.useState(() => apiRows || []);
   const [vendors, setVendors] = React.useState(effectiveVendors);
   const [comments, setComments] = React.useState(INITIAL_COMMENTS);
   const [approvals, setApprovals] = React.useState(INITIAL_APPROVALS);

@@ -13,9 +13,16 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [
+    // Logs in once and stores the session. The backend allows only 5 auth
+    // requests/minute, so a suite that logs in per test 429s itself.
+    {
+      name: 'setup',
+      testMatch: /auth\.setup\.js/,
+    },
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+      dependencies: ['setup'],
     },
   ],
   webServer: {
