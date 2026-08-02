@@ -316,12 +316,21 @@ function AppShell() {
               toast(__t("auth.loginFailed"), { kind: "error" });
             } catch (e) {
               const msg = e.message || "";
+              // Audit finding A10 -- AUTH BYPASS. The local-first offline path
+              // exists for genuine network loss: the server cannot be asked
+              // whether the credentials are valid, so a previously-known user
+              // is let into the shell. That reasoning only holds when the
+              // server is UNREACHABLE.
+              //
+              // "Internal server error" was in this list, so an HTTP 500 -- which
+              // proves the server answered -- opened the full app shell to
+              // ARBITRARY credentials. Removed: a reachable-but-erroring server
+              // is a failed login, not offline mode.
               const isNetworkError =
                 msg.includes("Failed to fetch") ||
                 msg.includes("NetworkError") ||
                 msg.includes("Unable to connect") ||
-                msg.includes("temporarily unavailable") ||
-                msg.includes("Internal server error");
+                msg.includes("temporarily unavailable");
               if (isNetworkError) {
                 storage.auth.set(u);
                 ctx.setAuthed(u);
