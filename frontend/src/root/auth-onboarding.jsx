@@ -67,13 +67,29 @@ function AuthScreen({ onSignIn }) {
       return;
     }
     setLoading(true);
+    if (mode === "forgot") {
+      // Finding: forgot-password used to show a fake "reset link sent" toast
+      // on a setTimeout without ever calling the backend. POST
+      // /auth/forgot-password is a real endpoint (see openapi.json) — call it
+      // for real and only show success after it resolves.
+      apiRequest("/auth/forgot-password", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      })
+        .then(() => {
+          toast(__t("auth.passwordResetSent") + " " + email, { kind: "success" });
+          setMode("signin");
+        })
+        .catch((resetErr) => {
+          setErr(resetErr.message || __t("auth.loginFailed"));
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+      return;
+    }
     setTimeout(() => {
       setLoading(false);
-      if (mode === "forgot") {
-        toast(__t("auth.passwordResetSent") + " " + email, { kind: "success" });
-        setMode("signin");
-        return;
-      }
       onSignIn({
         email,
         password,
@@ -84,18 +100,14 @@ function AuthScreen({ onSignIn }) {
       });
     }, 700);
   };
-  const sso = (provider) => {
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      onSignIn({
-        email: "admin@blackbox.com",
-        password: "",
-        name: "Admin User",
-        via: provider,
-      });
-    }, 800);
-  };
+  // Finding: the SSO buttons used to call onSignIn with a hardcoded
+  // admin@blackbox.com + empty password, fabricating an identity instead of
+  // performing SSO. The backend exposes GET /sso/authorize/{provider} to
+  // start a real OAuth flow, but no frontend route consumes the ?code&state
+  // redirect it comes back with, so there is no way to complete a real
+  // sign-in here yet. Rather than send users into a dead-end redirect (or
+  // keep fabricating a fake identity), the buttons are disabled with an
+  // honest "not configured" state below.
   return (
     <div className="auth-screen">
       <div className="auth-side">
@@ -172,8 +184,8 @@ function AuthScreen({ onSignIn }) {
                   variant="secondary"
                   size="lg"
                   block
-                  onClick={() => sso("Google")}
-                  disabled={loading}
+                  disabled
+                  title={__t("auth.ssoNotConfigured") || "SSO not configured"}
                 >
                   <span
                     className="font-mono fw-700 fs-13"
@@ -188,8 +200,8 @@ function AuthScreen({ onSignIn }) {
                   variant="secondary"
                   size="lg"
                   block
-                  onClick={() => sso("Microsoft")}
-                  disabled={loading}
+                  disabled
+                  title={__t("auth.ssoNotConfigured") || "SSO not configured"}
                 >
                   <span className="font-mono fw-700 fs-13" aria-hidden="true">
                     ⊞
@@ -202,8 +214,8 @@ function AuthScreen({ onSignIn }) {
                 size="lg"
                 block
                 className="mb-14"
-                onClick={() => sso("SAML SSO")}
-                disabled={loading}
+                disabled
+                title={__t("auth.ssoNotConfigured") || "SSO not configured"}
               >
                 <Icon.Link size={12} /> {__t("auth.ssoSaml")}
               </Button>
@@ -721,52 +733,39 @@ OnboardingWizard.propTypes = {
 function MobileScanView({ onClose }) {
   const [scans, setScans] = React.useState([]);
   const [scanning, setScanning] = React.useState(false);
-  const fakeScan = () => {
+  const [manualCode, setManualCode] = React.useState("");
+  // Finding: this used to fabricate a random sample part on every "scan"
+  // instead of looking anything up. There is no real camera barcode decoder
+  // wired in, but GET /barcodes/lookup/{barcode} is real (see
+  // BarcodeScanModal.jsx for the same pattern) — so this is now an honest
+  // manual-entry lookup against that endpoint instead of a fake result.
+  const lookupScan = () => {
+    const code = manualCode.trim();
+    if (!code) return;
     setScanning(true);
-    setTimeout(() => {
-      const samples = [
-        {
-          pn: "EL-MCU-STM32H7",
-          name: "MCU Module STM32H743",
-          loc: "A-12-03",
-          stock: 142,
-          status: "ok",
-        },
-        {
-          pn: "EL-PSU-240W",
-          name: "Power Supply 240W ATX",
-          loc: "B-04-11",
-          stock: 28,
-          status: "low",
-        },
-        {
-          pn: "MEC-PL-040A",
-          name: "Side Panel Anodized",
-          loc: "C-01-22",
-          stock: 0,
-          status: "out",
-        },
-        {
-          pn: "HW-FAS-M3-08",
-          name: "Screw M3×8 Socket",
-          loc: "D-09-17",
-          stock: 4820,
-          status: "ok",
-        },
-      ];
-      const pick = samples[Math.floor(Math.random() * samples.length)];
-      setScans([
-        {
-          ...pick,
-          at: new Date().toLocaleTimeString("en-US", {
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-        },
-        ...scans,
-      ]);
-      setScanning(false);
-    }, 900);
+    api.barcodes
+      .lookup(code)
+      .then((part) => {
+        setScans([
+          {
+            ...part,
+            at: new Date().toLocaleTimeString("en-US", {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+          },
+          ...scans,
+        ]);
+        setManualCode("");
+      })
+      .catch((e) => {
+        toast(e.message || __t("mobileScan.barcodeLookupFailed"), {
+          kind: "error",
+        });
+      })
+      .finally(() => {
+        setScanning(false);
+      });
   };
   return (
     <div className="mobile-scan">
@@ -805,17 +804,28 @@ function MobileScanView({ onClose }) {
         </div>
       </div>
       <div className="ms-actions">
-        <button className="ms-action" onClick={fakeScan} disabled={scanning}>
+        <Input
+          id="ms-manual-barcode"
+          name="manualBarcode"
+          type="text"
+          mono
+          className="ms-manual-input"
+          value={manualCode}
+          onChange={(e) => setManualCode(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && lookupScan()}
+          placeholder={__t("mobileScan.manualLookup") || "Enter barcode..."}
+          disabled={scanning}
+          aria-label={__t("mobileScan.manualLookup") || "Enter barcode"}
+        />
+        <button
+          className="ms-action"
+          onClick={lookupScan}
+          disabled={scanning || !manualCode.trim()}
+        >
           <Icon.Scan size={18} />{" "}
           {scanning
             ? __t("mobileScan.scanningVerb")
-            : __t("mobileScan.tapToScan")}
-        </button>
-        <button
-          className="ms-action ms-secondary"
-          onClick={() => toast(__t("mobileScan.manualEntry"))}
-        >
-          <Icon.Edit size={16} /> {__t("mobileScan.type")}
+            : __t("mobileScan.manualLookup") || __t("mobileScan.tapToScan")}
         </button>
       </div>
       <div className="ms-history">
@@ -826,24 +836,23 @@ function MobileScanView({ onClose }) {
         {scans.length === 0 && (
           <div className="ms-empty">{__t("mobileScan.empty")}</div>
         )}
-        {scans.map((s) => (
-          <div key={s.pn} className="ms-card">
+        {scans.map((s, i) => (
+          // Finding: fields below now come straight off the real
+          // BarcodeLookupResponse (pn/name/vendor/cost/status) — the old
+          // fake location + ok/low/out stock level had no backend to back it.
+          <div key={s.pn + "-" + i} className="ms-card">
             <div>
               <div className="ms-pn">{s.pn}</div>
               <div className="ms-name">{s.name}</div>
               <div className="ms-meta">
-                📍 {s.loc} · {s.at}
+                {s.vendor || __t("mobileScan.unknown")} · {s.at}
               </div>
             </div>
-            <div className={"ms-stock " + s.status}>
-              <div className="ms-stock-num">{s.stock}</div>
-              <div className="ms-stock-lbl">
-                {s.status === "out"
-                  ? __t("mobileScan.outOfStock")
-                  : s.status === "low"
-                    ? __t("mobileScan.lowStock")
-                    : __t("mobileScan.inStock")}
+            <div className="ms-stock">
+              <div className="ms-stock-num">
+                {s.cost != null ? "$" + Number(s.cost).toFixed(2) : "—"}
               </div>
+              <div className="ms-stock-lbl">{s.status}</div>
             </div>
           </div>
         ))}

@@ -17,14 +17,57 @@ import {
   Modal,
   EmptyState,
   ScreenHeader,
+  Spinner,
 } from "../components/ui";
 // Final polish layer: Approvals inbox, Roadmap, Bulk vendor import,
 // Offline indicator, URL-synced filters, Saved searches, Notif prefs, PO PDF.
 // ============ APPROVALS INBOX ============
 const APPROVALS_FILTER_TABS_ID = "approvals-filter-tabs";
+// finding: approvalsList used to push 5 hardcoded fake rows (fake names,
+// dates, ₹ values: "K. Singh", "E. Chen", PO-2026-0491, etc.) alongside the
+// real ctx-derived BOM revision rows. A real `api.approvals` endpoint exists
+// (see dashboard.jsx's ApprovalsTile) — wire to it instead of inventing rows.
+// Mirrors dashboard.jsx's local APPROVAL_TYPE_DEPARTMENT (not exported there).
+const APPROVAL_TYPE_DEPARTMENT = {
+  ecr: "engineering",
+  eco: "engineering",
+  ncr: "engineering",
+  capa: "engineering",
+  purchase: "procurement",
+  document: "finance",
+};
+const APPROVAL_TYPE_LABEL = {
+  ecr: "ECR",
+  eco: "ECO",
+  ncr: "NCR",
+  capa: "CAPA",
+  purchase: "Purchase Order",
+  document: "Document",
+};
 function ApprovalsScreen() {
   const ctx = useAppStore();
   const [filter, setFilter] = React.useState("all");
+  const [apiApprovals, setApiApprovals] = React.useState(null); // null = loading
+  React.useEffect(() => {
+    let cancelled = false;
+    if (!api?.approvals?.list) {
+      setApiApprovals([]);
+      return undefined;
+    }
+    api.approvals
+      .list({ status: "pending", per_page: 500 })
+      .then((res) => {
+        if (cancelled) return;
+        setApiApprovals(Array.isArray(res) ? res : res?.items || []);
+      })
+      .catch(() => {
+        // Honest failure — do not fall back to fabricated rows.
+        if (!cancelled) setApiApprovals([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const approvalsList = React.useMemo(() => {
     const out = [];
     if (ctx?.approvals) {
@@ -32,67 +75,39 @@ function ApprovalsScreen() {
         Object.entries(stages).forEach(([role, status]) => {
           if (status !== "approved") {
             out.push({
+              source: "ctx",
+              id: "bom:" + pn + ":" + role,
               kind: "BOM Revision",
               target: pn,
               role,
               status,
-              requester: "M. Park",
-              date: "2026-05-24",
+              // ctx's approval matrix doesn't track requester/date — show
+              // unknown honestly rather than inventing a name and date.
+              requester: "—",
+              date: "—",
               value: null,
             });
           }
         });
       });
     }
-    out.push(
-      {
-        kind: "Purchase Order",
-        target: "PO-2026-0491",
-        role: "procurement",
-        status: "pending",
-        requester: "K. Singh",
-        date: "2026-05-25",
-        value: 174300,
-      },
-      {
-        kind: "Purchase Order",
-        target: "PO-2026-0488",
-        role: "finance",
-        status: "pending",
-        requester: "K. Singh",
-        date: "2026-05-25",
-        value: 89400,
-      },
-      {
-        kind: "Vendor Onboarding",
-        target: "Bossard GmbH",
-        role: "procurement",
-        status: "pending",
-        requester: "E. Chen",
-        date: "2026-05-23",
+    (apiApprovals || []).forEach((a) => {
+      out.push({
+        source: "api",
+        id: a.id,
+        kind: APPROVAL_TYPE_LABEL[a.type] || a.type || "Approval",
+        target:
+          a.title || (a.entityType ? a.entityType + " #" + a.entityId : "—"),
+        role: APPROVAL_TYPE_DEPARTMENT[a.type] || "engineering",
+        status: a.status || "pending",
+        requester: a.requesterId != null ? "User #" + a.requesterId : "—",
+        date: a.createdAt ? String(a.createdAt).slice(0, 10) : "—",
         value: null,
-      },
-      {
-        kind: "Part Release",
-        target: "OPT-LNS-25MM Rev B",
-        role: "engineering",
-        status: "pending",
-        requester: "R. Sato",
-        date: "2026-05-22",
-        value: null,
-      },
-      {
-        kind: "Cost Variance",
-        target: "EL-PSU-240W +12%",
-        role: "finance",
-        status: "pending",
-        requester: "System",
-        date: "2026-05-22",
-        value: 8400,
-      },
-    );
+      });
+    });
     return out;
-  }, [ctx?.approvals]);
+  }, [ctx?.approvals, apiApprovals]);
+  const loading = apiApprovals === null;
   const matchesFilter = (a, f) =>
     f === "all" ? true : f === "mine" ? a.role === "engineering" : a.role === f;
   const FILTERS = [
@@ -113,15 +128,26 @@ function ApprovalsScreen() {
     count: approvalsList.filter((a) => matchesFilter(a, f.value)).length,
   }));
   const filtered = approvalsList.filter((a) => matchesFilter(a, filter));
-  const act = (a, action) => {
-    if (
-      action === "approve" &&
-      a.kind === "BOM Revision" &&
-      ctx?.setApprovals
-    ) {
+  // finding: act() only ever mutated state for kind === "BOM Revision" —
+  // every other row (previously the 5 fake ones) silently did nothing on
+  // approve/reject. Now that the other rows are real `api.approvals`
+  // records, route the mutation through the matching real source instead.
+  const act = async (a, action) => {
+    const nextStatus = action === "approve" ? "approved" : "rejected";
+    if (a.source === "ctx" && ctx?.setApprovals) {
       const next = { ...ctx.approvals };
-      next[a.target] = { ...next[a.target], [a.role]: "approved" };
+      next[a.target] = { ...next[a.target], [a.role]: nextStatus };
       ctx.setApprovals(next);
+    } else if (a.source === "api" && api?.approvals?.update) {
+      try {
+        await api.approvals.update(a.id, { status: nextStatus });
+        setApiApprovals((list) => (list || []).filter((x) => x.id !== a.id));
+      } catch (_e) {
+        toast(__t("common.actionFailed") || "Action failed", {
+          kind: "error",
+        });
+        return;
+      }
     }
     toast(
       `${action === "approve" ? __t("common.approved") || "Approved" : __t("common.rejected") || "Rejected"} · ${a.target}`,
@@ -231,7 +257,15 @@ function ApprovalsScreen() {
           items={tabItems}
         />
       </div>
-      {filtered.length === 0 ? (
+      {loading && filtered.length === 0 ? (
+        <div
+          className="flex items-center gap-8"
+          style={{ padding: "24px 0", justifyContent: "center" }}
+        >
+          <Spinner size="sm" />
+          <span className="fs-12 fg-3">{__t("common.loading") || "Loading…"}</span>
+        </div>
+      ) : filtered.length === 0 ? (
         <EmptyState
           icon="✓"
           title={__t("approvals.emptyTitle") || "Inbox zero"}
@@ -245,7 +279,7 @@ function ApprovalsScreen() {
           <DataTable
             columns={columns}
             rows={filtered}
-            getRowKey={(a) => a.target + "-" + a.kind}
+            getRowKey={(a) => String(a.id)}
             ariaLabel={__t("approvals.title") || "Approvals Inbox"}
           />
         </div>
@@ -823,10 +857,22 @@ function NetworkBadge() {
 // whether this file happened to load first.
 export async function printPO(item, vendorHint) {
   if (!item) return;
-  const lineCost = (item.qty || 0) * (item.cost || 12);
-  const tax = lineCost * 0.08;
+  // finding: unit cost used to fall back to a fabricated "12" when the real
+  // cost was missing. Track whether we actually have a cost so the PDF can
+  // show "—" instead of inventing a price.
+  const hasCost = typeof item.cost === "number";
+  const lineCost = (item.qty || 0) * (hasCost ? item.cost : 0);
+  // finding: tax was computed at 8% while the printed label said "GST 18%".
+  // 18% is the real configured GST rate (see power-features.jsx landed-cost
+  // calc), so make the math match the label instead of the other way round.
+  const tax = lineCost * 0.18;
   const ship = 12.5;
   const total = lineCost + tax + ship;
+  // finding: current logged-in user for the signatory line instead of a
+  // hardcoded fake name.
+  const currentUser = storage.auth.get();
+  const signatoryName = currentUser?.name || "—";
+  const signatoryRole = storage.role.get();
   // Resolve the real vendor record when one exists instead of trusting only
   // whatever hint the caller passed in (some callers only pass a country
   // placeholder). Best-effort: any lookup failure just falls back to the
@@ -904,13 +950,20 @@ export async function printPO(item, vendorHint) {
     "<div class='party'><h3>" +
     h(__t("printPo.vendor") || "Vendor") +
     "</h3><div class='name'>" +
-    h(item.vendor || "Mean Well") +
+    // finding: vendor name/email/address/country used fabricated fallbacks
+    // ("Mean Well", a guessed email domain, "1234 Industrial Park", "TW").
+    // A printed PO must show blank/"—" when we don't actually know these.
+    h(item.vendor || "—") +
     "</div>" +
-    "<div>orders@" +
-    h((item.vendor || "vendor").toLowerCase().replace(/\s+/g, "")) +
-    ".com</div>" +
-    "<div>1234 Industrial Park</div><div>" +
-    h(vendor?.country || "TW") +
+    (item.vendor
+      ? "<div>orders@" +
+        h(item.vendor.toLowerCase().replace(/\s+/g, "")) +
+        ".com</div>"
+      : "") +
+    // Backend Vendor schema has no address field (see BulkVendorImportModal
+    // comment above) — never had real data to show here, so don't fake it.
+    "<div>—</div><div>" +
+    h(vendor?.country || "—") +
     "</div></div>" +
     "<div class='party'><h3>" +
     h(__t("printPo.shipTo") || "Ship to") +
@@ -939,15 +992,21 @@ export async function printPO(item, vendorHint) {
     "</td><td class='r'>" +
     h(item.qty) +
     "</td>" +
-    "<td class='r'>₹" +
-    ((item.cost || 12) * getInrRate()).toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-    }) +
+    "<td class='r'>" +
+    (hasCost
+      ? "₹" +
+        (item.cost * getInrRate()).toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+        })
+      : "—") +
     "</td>" +
-    "<td class='r' style='font-weight:600'>₹" +
-    (lineCost * getInrRate()).toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-    }) +
+    "<td class='r' style='font-weight:600'>" +
+    (hasCost
+      ? "₹" +
+        (lineCost * getInrRate()).toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+        })
+      : "—") +
     "</td></tr></tbody></table>" +
     "<div class='totals'><table>" +
     "<tr><td>" +
@@ -988,9 +1047,12 @@ export async function printPO(item, vendorHint) {
     ) +
     "</div>" +
     "<div class='sign-row'><div class='sig'>" +
+    // finding: signatory was a hardcoded fake name ("K. Singh") regardless of
+    // who actually printed the PO — use the real logged-in user instead.
     h(
-      __t("printPo.authorizedBy") ||
-        "Authorized by Buyer · K. Singh, Procurement Lead",
+      (__t("printPo.authorizedByPrefix") || "Authorized by Buyer · ") +
+        signatoryName +
+        (signatoryRole ? ", " + signatoryRole : ""),
     ) +
     "</div><div class='sig'>" +
     h(__t("printPo.acknowledgedBy") || "Acknowledged by Vendor · Date") +

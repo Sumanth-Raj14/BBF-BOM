@@ -467,7 +467,8 @@ function WebhooksScreen() {
       await webhooksAPI?.create({
         url: newUrl,
         events: newEvents,
-        secret: Math.random().toString(36).slice(2),
+        // fix: webhook secret must be cryptographically random, not Math.random()
+        secret: crypto.randomUUID().replace(/-/g, ""),
         active: true,
       });
       toast(__t("integrations.webhooks.created") || "Webhook created", {

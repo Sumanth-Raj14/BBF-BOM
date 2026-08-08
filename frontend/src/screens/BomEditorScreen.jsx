@@ -261,7 +261,9 @@ function BomEditorScreen({
               {__t("bomShell.days")}
             </span>
           </div>
-          <div className="delta up">▲ +3d STM32H7</div>
+          {/* fixfe: hardcoded fake lead-time delta ("+3d STM32H7") replaced — no prior-lead or per-part
+              trend data exists in the rollup, so an honest "—" replaces the fabricated number. */}
+          <div className="delta flat">—</div>
         </div>
         <div className="ribbon-cell">
           <div className="label">{__t("bomShell.vendors")}</div>
@@ -273,14 +275,18 @@ function BomEditorScreen({
         <div className="ribbon-cell">
           <div className="label">{__t("bomShell.riskFlags")}</div>
           <div className="value">{r.risk}</div>
-          <div className="delta up">▲ 1 supplier · 1 dup · 1 origin</div>
+          {/* fixfe: hardcoded fake risk breakdown ("1 supplier · 1 dup · 1 origin") replaced — rollup
+              only has a total risk count, not a breakdown by cause, so show "—" instead of fabricating one. */}
+          <div className="delta flat">—</div>
         </div>
         <div className="ribbon-cell" style={{ background: "var(--bg-sunk)" }}>
           <div className="label">{__t("bomShell.status")}</div>
           <div className="value" style={{ fontSize: 13, marginTop: 2 }}>
             <span className="status released">{p.status}</span>
           </div>
-          <div className="delta flat">3 of 4 sub-assys approved</div>
+          {/* fixfe: hardcoded fake approval fraction ("3 of 4 sub-assys approved") replaced — rows have
+              no "approved" field, only status strings, so this can't be derived; show "—" instead. */}
+          <div className="delta flat">—</div>
         </div>
       </div>
 
@@ -289,13 +295,17 @@ function BomEditorScreen({
           className={"tab " + (bomTab === "hierarchy" ? "active" : "")}
           onClick={() => setBomTab("hierarchy")}
         >
-          {__t("bomShell.tabHierarchy")} <span className="count">87</span>
+          {/* fixfe: hardcoded fake tab count (87) replaced with the real total-parts count already
+              computed above as r.parts (same source the ribbon "Total Parts" cell uses). */}
+          {__t("bomShell.tabHierarchy")} <span className="count">{r.parts}</span>
         </button>
         <button
           className={"tab " + (bomTab === "flat" ? "active" : "")}
           onClick={() => setBomTab("flat")}
         >
-          {__t("bomShell.tabFlatList")} <span className="count">64</span>
+          {/* fixfe: hardcoded fake tab count (64) replaced with the real unique-parts count already
+              computed above as r.unique (same source the ribbon "unique" delta uses). */}
+          {__t("bomShell.tabFlatList")} <span className="count">{r.unique}</span>
         </button>
         <button
           className={"tab " + (bomTab === "cost" ? "active" : "")}
@@ -497,8 +507,9 @@ function BomEditorScreen({
             </>
           )}
           <div className="flex-1" />
+          {/* fixfe: hardcoded fake row/unique counts (64/87) replaced with the real rollup values r.parts/r.unique. */}
           <span className="hint">
-            {bomTab === "flat" ? "64" : "87"} rows \u00B7 64 unique
+            {bomTab === "flat" ? r.unique : r.parts} rows \u00B7 {r.unique} unique
           </span>
           <button
             className="btn small"

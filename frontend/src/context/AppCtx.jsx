@@ -5,8 +5,6 @@ import { dataService } from "../services/dataService.js";
 import { setNavigator } from "../services/navigation.js";
 import {
   TWEAK_DEFAULTS,
-  INITIAL_COMMENTS,
-  INITIAL_APPROVALS,
   INITIAL_NOTIFICATIONS,
 } from "../utils/constants.js";
 import { convertApiPartsToTree } from "../utils/bom.js";
@@ -179,6 +177,29 @@ function AppCtxProvider({ children }) {
             err?.message || err,
           );
         }
+        // Fix: comments/approvals used to stay on the fake demo seed forever
+        // (see comments/setComments init above). dataService.refresh already
+        // knows how to fetch+shape these (same grouped-by-key shape the demo
+        // constants used) — same explicit-refresh-after-syncAll pattern parts
+        // uses above, since syncAll's own internal refresh discards the result.
+        try {
+          const commentsData = await dataService.refresh("comments");
+          if (!cancelled && commentsData) setComments(commentsData);
+        } catch (err) {
+          console.warn(
+            "[AppCtx] Failed to load comments:",
+            err?.message || err,
+          );
+        }
+        try {
+          const approvalsData = await dataService.refresh("approvals");
+          if (!cancelled && approvalsData) setApprovals(approvalsData);
+        } catch (err) {
+          console.warn(
+            "[AppCtx] Failed to load approvals:",
+            err?.message || err,
+          );
+        }
         setApiLoading(false);
         {
           toast(__t("common.apiConnected"), { kind: "success" });
@@ -228,8 +249,12 @@ function AppCtxProvider({ children }) {
   // fallback too, because [] is truthy and so wins those expressions.
   const [rows, setRows] = React.useState(() => apiRows || []);
   const [vendors, setVendors] = React.useState(effectiveVendors);
-  const [comments, setComments] = React.useState(INITIAL_COMMENTS);
-  const [approvals, setApprovals] = React.useState(INITIAL_APPROVALS);
+  // Fix: comments/approvals used to seed from fake demo rows
+  // (INITIAL_COMMENTS/INITIAL_APPROVALS in utils/constants.js — invented
+  // names/statuses that never got overwritten by real data). Start empty,
+  // like rows/vendors above, and hydrate from the real API below.
+  const [comments, setComments] = React.useState({});
+  const [approvals, setApprovals] = React.useState({});
   const [notifications, setNotifications] = React.useState(() =>
     storage.notifications.get(INITIAL_NOTIFICATIONS),
   );
