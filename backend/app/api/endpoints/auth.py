@@ -137,6 +137,22 @@ async def plugin_login(
     if matched is None:
         raise HTTPException(status_code=401, detail="Invalid or expired API key")
 
+    # CLUSTER api-key-security finding 1: the token minted below is a normal
+    # bearer JWT. core/deps.py's bearer-token path (get_current_user) carries
+    # no scope claim and enforces no scope check at all -- only the
+    # X-API-Key header path (_authenticate_by_api_key) does that. So handing
+    # out a bearer token for a read-only key would silently defeat the scope
+    # guard the moment the plugin uses the token instead of the raw key.
+    # Since the bearer path can't be retrofitted to honour scopes here
+    # (out of scope / do-not-edit for this fix), refuse to mint a token
+    # unless the key itself has full ("write") capability.
+    scopes = matched.scopes if isinstance(matched.scopes, list) else []
+    if "write" not in scopes:
+        raise HTTPException(
+            status_code=403,
+            detail="API key does not have sufficient scope for plugin-login (requires 'write')",
+        )
+
     user = await db.get(User, matched.user_id)
     if user is None or not getattr(user, "isActive", True):
         raise HTTPException(status_code=401, detail="API key user is inactive")
