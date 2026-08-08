@@ -21,6 +21,7 @@ from app.models.inventory import (
     InventoryTransaction,
     Warehouse,
 )
+from app.models.part import Part
 from app.models.user import User
 from app.services.inventory_service import (
     adjust_inventory as service_adjust,
@@ -322,14 +323,35 @@ async def get_stock_valuation(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # tenant-insert-valuation (fabrication fix): valuation previously multiplied
+    # quantity_on_hand by a hardcoded 1.0 instead of a real unit cost, so the
+    # reported "value" was just the quantity. Inventory.unit_cost is the lot's
+    # actual recorded cost (same field the 025 materialized view uses for
+    # on_hand_qty * unit_cost); fall back to the part's catalog cost when a lot
+    # has no cost recorded, and exclude items with neither rather than fabricate
+    # a price.
     result = await db.execute(
         select(
             Inventory.part_id,
             Inventory.quantity_on_hand,
-        ).order_by(Inventory.part_id)
+            Inventory.unit_cost,
+            Part.cost.label("part_cost"),
+        )
+        .join(Part, Part.id == Inventory.part_id)
+        .order_by(Inventory.part_id)
     )
     items = result.all()
     total_value = 0.0
+    priced_items = 0
     for item in items:
-        total_value += float(item.quantity_on_hand or 0) * 1.0
-    return {"total_items": len(items), "estimated_total_value": total_value, "currency": "USD"}
+        cost = item.unit_cost if item.unit_cost is not None else item.part_cost
+        if cost is None:
+            continue
+        total_value += float(item.quantity_on_hand or 0) * float(cost)
+        priced_items += 1
+    return {
+        "total_items": len(items),
+        "priced_items": priced_items,
+        "estimated_total_value": total_value,
+        "currency": "USD",
+    }

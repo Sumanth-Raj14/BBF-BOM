@@ -1980,21 +1980,29 @@ async def import_bom(
     if not file_url:
         raise HTTPException(status_code=400, detail="file_url is required")
     tid = get_tenant_id()
-    bom = BOM(
-        name=f"Imported BOM ({datetime.now(UTC).strftime('%Y-%m-%d')})",
-        description=f"Imported from {file_url} ({format})",
-        project_id=project_id,
-        status="draft",
-        tenantId=tid,
+    # Reuse create_bom (see apply_template above) instead of a bare BOM(...)
+    # insert — it auto-generates the required, otherwise-omitted bom_number.
+    bom = await create_bom(
+        db,
+        {
+            "name": f"Imported BOM ({datetime.now(UTC).strftime('%Y-%m-%d')})",
+            "description": f"Imported from {file_url} ({format})",
+            "project_id": project_id,
+        },
+        tenant_id=tid,
     )
-    db.add(bom)
-    await db.commit()
-    await db.refresh(bom)
+    # bom-integrity finding 2: file_url is never fetched or parsed here, so no
+    # rows are ever created — reporting "success" made an empty draft BOM
+    # indistinguishable from a real import. Report "not_implemented" instead.
     return {
         "bom_id": bom.id,
-        "import_status": "success",
+        "import_status": "not_implemented",
         "items_imported": 0,
-        "warnings": ["BOM structure created. Import items via BOM Items API."],
+        "warnings": [
+            f"File parsing is not implemented; no items were imported from "
+            f"{file_url}. An empty draft BOM was created — add items via the "
+            "BOM Items API."
+        ],
     }
 
 
@@ -2060,33 +2068,48 @@ async def apply_template(
     tmpl = result.scalar_one_or_none()
     if not tmpl:
         raise HTTPException(status_code=404, detail="Template not found")
-    bom = BOM(
-        name=f"{tmpl.name} (from template)",
-        project_id=project_id,
-        status="draft",
-        tenantId=tid,
-    )
-    db.add(bom)
-    await db.flush()
+    # Reuse create_bom (not a bare BOM(...) insert) — boms.bom_number is
+    # NOT NULL with no DB default, and create_bom is the helper that already
+    # auto-generates a tenant-scoped one. Discovered while fixing the
+    # bom-integrity closure finding below: the old bare BOM(...) here had no
+    # bom_number at all and would fail its INSERT on any real database.
+    bom = await create_bom(db, {"name": f"{tmpl.name} (from template)", "project_id": project_id}, tenant_id=tid)
 
     template_items = await db.execute(
         select(TemplateBomItem).where(TemplateBomItem.bomTemplateId == template_id)
     )
-    items_created = 0
+    created_items: list[BOMItem] = []
     for ti in template_items.scalars().all():
-        db.add(
-            BOMItem(
-                bom_id=bom.id,
-                part_id=ti.partId,
-                quantity=ti.quantity or 1,
-                reference_designator=ti.referenceDesignator,
-                notes=ti.notes,
-                sort_order=ti.sortOrder or 0,
-                tenantId=tid,
-            )
+        item = BOMItem(
+            bom_id=bom.id,
+            part_id=ti.partId,
+            quantity=ti.quantity or 1,
+            reference_designator=ti.referenceDesignator,
+            notes=ti.notes,
+            sort_order=ti.sortOrder or 0,
+            tenantId=tid,
         )
-        items_created += 1
+        db.add(item)
+        created_items.append(item)
+    await db.flush()  # assigns each item.id, needed by closure rows below
+
+    # bom-integrity finding 1: create_bom_item is not the sole path that
+    # creates BOMItem rows — this loop was skipping the BomClosure self-row
+    # that _closure_add_item writes, permanently breaking where-used for
+    # every template-applied item. Match create_bom_item's exact pattern.
+    for item in created_items:
+        await _closure_add_item(db, bom.id, tid, item.id, item.parent_item_id)
 
     await db.commit()
     await db.refresh(bom)
-    return {"bom_id": bom.id, "template_id": template_id, "items_created": items_created}
+
+    for item in created_items:
+        await db.refresh(item)
+        await webhook_service.emit_event(
+            db,
+            "bom.item.created",
+            {"bom_id": bom.id, "item_id": item.id, "part_id": item.part_id},
+            item.tenantId,
+        )
+
+    return {"bom_id": bom.id, "template_id": template_id, "items_created": len(created_items)}

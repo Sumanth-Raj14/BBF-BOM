@@ -140,7 +140,11 @@ async def add_routing_operation(
 ):
     await db.execute(
         text(
-            "INSERT INTO routing_operations (routing_id, operation_number, operation_name, description, work_center, setup_time_min, run_time_min, cycle_time_min, estimated_cost) VALUES (:rid, :on, :name, :d, :wc, :st, :rt, :ct, :ec)"
+            # tenant-insert-valuation: raw INSERT bypasses the ORM before_insert
+            # listener (tenant_events.py) that stamps tenantId, so set it explicitly.
+            # Use user.tenantId (not get_tenant_id()/tenant_sql_clause context, which is
+            # None for superusers) so the row always gets a real owning tenant.
+            'INSERT INTO routing_operations (routing_id, operation_number, operation_name, description, work_center, setup_time_min, run_time_min, cycle_time_min, estimated_cost, "tenantId") VALUES (:rid, :on, :name, :d, :wc, :st, :rt, :ct, :ec, :tid)'
         ),
         {
             "rid": routing_id,
@@ -152,6 +156,7 @@ async def add_routing_operation(
             "rt": body.run_time_min,
             "ct": body.cycle_time_min,
             "ec": body.estimated_cost,
+            "tid": user.tenantId,
         },
     )
     await db.commit()
@@ -195,7 +200,10 @@ async def create_process_plan(
     num = f"PP-{count + 1:04d}"
     await db.execute(
         text(
-            "INSERT INTO process_plans (plan_number, name, description, part_family, is_template, created_by) VALUES (:pn, :n, :d, :pf, :it, :u)"
+            # tenant-insert-valuation: raw INSERT bypasses the ORM before_insert
+            # listener that stamps tenantId, so set it explicitly (user.tenantId,
+            # not context, so superusers still get a real owning tenant).
+            'INSERT INTO process_plans (plan_number, name, description, part_family, is_template, created_by, "tenantId") VALUES (:pn, :n, :d, :pf, :it, :u, :tid)'
         ),
         {
             "pn": num,
@@ -204,6 +212,7 @@ async def create_process_plan(
             "pf": body.part_family,
             "it": body.is_template,
             "u": user.id,
+            "tid": user.tenantId,
         },
     )
     await db.commit()
@@ -239,7 +248,10 @@ async def add_process_plan_step(
 ):
     await db.execute(
         text(
-            "INSERT INTO process_plan_steps (process_plan_id, step_number, step_name, description, work_center, setup_time_min, run_time_min, inspection_required) VALUES (:pid, :sn, :name, :d, :wc, :st, :rt, :ir)"
+            # tenant-insert-valuation: raw INSERT bypasses the ORM before_insert
+            # listener that stamps tenantId, so set it explicitly (user.tenantId,
+            # not context, so superusers still get a real owning tenant).
+            'INSERT INTO process_plan_steps (process_plan_id, step_number, step_name, description, work_center, setup_time_min, run_time_min, inspection_required, "tenantId") VALUES (:pid, :sn, :name, :d, :wc, :st, :rt, :ir, :tid)'
         ),
         {
             "pid": plan_id,
@@ -250,6 +262,7 @@ async def add_process_plan_step(
             "st": body.setup_time_min,
             "rt": body.run_time_min,
             "ir": body.inspection_required,
+            "tid": user.tenantId,
         },
     )
     await db.commit()

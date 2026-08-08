@@ -101,6 +101,10 @@ async def test_plugin_login_with_api_key(client, db_session, test_user):
             key_hash=get_password_hash(raw),
             key_prefix="bkb",
             is_active=True,
+            # A SolidWorks add-in writes BOM data, so it needs a write-scoped key.
+            # plugin-login now refuses to mint a full token for a scope-less key
+            # (see auth.py: a read-only key must not yield write capability).
+            scopes=["read", "write"],
             tenantId=test_user.tenantId,
         )
     )
