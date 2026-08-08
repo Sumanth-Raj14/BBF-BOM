@@ -6,7 +6,13 @@ __pycache__
 .gitignore
 *.md
 test.db
+test_*.db
 bom.db
+# finding: infra-secrets-health #1 - COPY . . in Dockerfile baked RSA keys/secret into image
+private.pem
+public.pem
+.secret_key
+rsa_keys/
 .DS_Store
 .venv
 venv

@@ -91,9 +91,9 @@
     </Reference>
   </ItemGroup>
 
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\BlackboxBOM.ico" />
-  </ItemGroup>
+  <!-- Finding 4: Resources\BlackboxBOM.ico does not exist (there is no icon), so
+       this EmbeddedResource entry failed the build with MSB3030 ("could not find
+       file"). Removed rather than made conditional - there is nothing to embed. -->
 
   <!-- Fail fast with an actionable message instead of a wall of CS0246 "type or
        namespace not found" errors when the SolidWorks interop DLLs aren't where

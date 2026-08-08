@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
+from app.core.tenant_context import tenant_sql_clause
 from app.db.session import get_db
 from app.models.user import User
 
@@ -57,10 +58,14 @@ class PartCertifyCreate(BaseModel):
 async def list_compliance(
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
+    # tenant-security: raw text() SQL bypasses the ORM select tenant filter
+    # (tenant_events.py), so scope it explicitly via the shared helper.
+    tc, tp = tenant_sql_clause()
     r = await db.execute(
         text(
-            'SELECT id, name, description, "isActive", "createdAt", "updatedAt" FROM compliance ORDER BY name'
-        )
+            f'SELECT id, name, description, "isActive", "createdAt", "updatedAt" FROM compliance WHERE 1=1 {tc} ORDER BY name'
+        ),
+        tp,
     )
     return [dict(row) for row in r.mappings().all()]
 
@@ -87,11 +92,13 @@ async def get_compliance(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: scope by tenant so ids from another tenant 404 instead of leaking.
+    tc, tp = tenant_sql_clause()
     r = await db.execute(
         text(
-            'SELECT id, name, description, "isActive", "createdAt", "updatedAt" FROM compliance WHERE id = :id'
+            f'SELECT id, name, description, "isActive", "createdAt", "updatedAt" FROM compliance WHERE id = :id {tc}'
         ),
-        {"id": compliance_id},
+        {"id": compliance_id, **tp},
     )
     row = r.mappings().one_or_none()
     if not row:
@@ -106,14 +113,16 @@ async def update_compliance(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: scope both the existence check and the UPDATE by tenant.
+    tc, tp = tenant_sql_clause()
     existing = await db.execute(
-        text("SELECT id FROM compliance WHERE id = :id"), {"id": compliance_id}
+        text(f"SELECT id FROM compliance WHERE id = :id {tc}"), {"id": compliance_id, **tp}
     )
     if not existing.mappings().one_or_none():
         raise HTTPException(status_code=404, detail="Compliance standard not found")
 
     sets = []
-    params: dict = {"id": compliance_id}
+    params: dict = {"id": compliance_id, **tp}
     if body.name is not None:
         sets.append("name = :name")
         params["name"] = body.name
@@ -129,8 +138,8 @@ async def update_compliance(
     sets.append('"updatedAt" = NOW()')
     r = await db.execute(
         text(
-            'UPDATE compliance SET {} WHERE id = :id RETURNING id, name, description, "isActive", "createdAt", "updatedAt"'.format(
-                ", ".join(sets)
+            'UPDATE compliance SET {} WHERE id = :id {} RETURNING id, name, description, "isActive", "createdAt", "updatedAt"'.format(
+                ", ".join(sets), tc
             )
         ),
         params,
@@ -155,12 +164,16 @@ async def delete_compliance(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: scope both the existence check and the DELETE by tenant.
+    tc, tp = tenant_sql_clause()
     existing = await db.execute(
-        text("SELECT id FROM compliance WHERE id = :id"), {"id": compliance_id}
+        text(f"SELECT id FROM compliance WHERE id = :id {tc}"), {"id": compliance_id, **tp}
     )
     if not existing.mappings().one_or_none():
         raise HTTPException(status_code=404, detail="Compliance standard not found")
-    await db.execute(text("DELETE FROM compliance WHERE id = :id"), {"id": compliance_id})
+    await db.execute(
+        text(f"DELETE FROM compliance WHERE id = :id {tc}"), {"id": compliance_id, **tp}
+    )
     await db.commit()
     return {"status": "deleted"}
 
@@ -275,24 +288,29 @@ async def get_part_compliance(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: parts and compliance both carry tenantId; scope both
+    # raw queries so a caller cannot probe another tenant's part/standard by id.
+    tc, tp = tenant_sql_clause()
     r = await db.execute(
-        text("SELECT id, pn, name FROM parts WHERE id = :pid"),
-        {"pid": part_id},
+        text(f"SELECT id, pn, name FROM parts WHERE id = :pid {tc}"),
+        {"pid": part_id, **tp},
     )
     part = r.mappings().one_or_none()
     if not part:
         raise HTTPException(status_code=404, detail="Part not found")
 
+    tc_c, tp_c = tenant_sql_clause("c")
     standards = await db.execute(
-        text("""
+        text(f"""
             SELECT c.id, c.name, c.description,
                    pc.certified_by, pc.certification_date::text, pc.expiry_date::text,
                    pc.notes, pc."createdAt" AS certified_at
             FROM compliance c
             LEFT JOIN part_certifications pc ON pc.compliance_id = c.id AND pc.part_id = :pid
+            WHERE 1=1 {tc_c}
             ORDER BY c.name
         """),
-        {"pid": part_id},
+        {"pid": part_id, **tp_c},
     )
 
     return {
@@ -308,12 +326,18 @@ async def certify_part(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    part = await db.execute(text("SELECT id FROM parts WHERE id = :pid"), {"pid": part_id})
+    # tenant-security: validate both FKs against the caller's own tenant before
+    # inserting a certification row that links them.
+    tc, tp = tenant_sql_clause()
+    part = await db.execute(
+        text(f"SELECT id FROM parts WHERE id = :pid {tc}"), {"pid": part_id, **tp}
+    )
     if not part.mappings().one_or_none():
         raise HTTPException(status_code=404, detail="Part not found")
 
     std = await db.execute(
-        text("SELECT id FROM compliance WHERE id = :cid"), {"cid": body.compliance_id}
+        text(f"SELECT id FROM compliance WHERE id = :cid {tc}"),
+        {"cid": body.compliance_id, **tp},
     )
     if not std.mappings().one_or_none():
         raise HTTPException(status_code=404, detail="Compliance standard not found")

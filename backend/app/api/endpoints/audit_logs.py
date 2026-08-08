@@ -76,7 +76,11 @@ async def create_audit_log(
     """
     Create a new audit log entry
     """
-    db_log = AuditLog(**log.model_dump())
+    # Use the authenticated caller's id, not the client-supplied userId —
+    # otherwise any user can forge an audit entry attributed to someone else.
+    data = log.model_dump()
+    data["userId"] = current_user.id
+    db_log = AuditLog(**data)
     db.add(db_log)
     await db.commit()
     await db.refresh(db_log)

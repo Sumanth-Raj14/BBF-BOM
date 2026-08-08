@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
+from app.core.tenant_context import tenant_sql_clause
 from app.db.session import get_db
 from app.models.user import User
 
@@ -65,7 +66,12 @@ class TimesheetCreate(BaseModel):
 async def list_work_centers(
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
-    r = await db.execute(text("SELECT * FROM work_centers ORDER BY code"))
+    # tenant-security: work_centers carries tenantId; raw text() reads bypass
+    # the ORM select filter (tenant_events.py) so scope explicitly here.
+    tc, tp = tenant_sql_clause()
+    r = await db.execute(
+        text(f"SELECT * FROM work_centers WHERE 1=1 {tc} ORDER BY code"), tp
+    )
     return [dict(row) for row in r.mappings().all()]
 
 
@@ -98,8 +104,9 @@ async def create_work_center(
 async def capacity_overview(
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
+    tc, tp = tenant_sql_clause("wc")
     r = await db.execute(
-        text("""
+        text(f"""
         SELECT wc.id, wc.code, wc.name, wc.description, wc.capacity_per_hour, wc.cost_per_hour,
                wc.available_hours_per_day, wc.is_bottleneck, wc.is_active,
                COALESCE(rs.planned_hours, 0) as planned,
@@ -110,8 +117,10 @@ async def capacity_overview(
             FROM resource_schedules WHERE status = 'scheduled' AND scheduled_date >= CURRENT_DATE
             GROUP BY work_center_id
         ) rs ON wc.id = rs.work_center_id
+        WHERE 1=1 {tc}
         ORDER BY wc.code
-    """)
+    """),
+        tp,
     )
     rows = [dict(row) for row in r.mappings().all()]
     return {"work_centers": rows, "total": len(rows)}
@@ -124,8 +133,10 @@ async def capacity_overview(
 async def list_schedules(
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
+    tc, tp = tenant_sql_clause()
     r = await db.execute(
-        text("SELECT * FROM resource_schedules ORDER BY scheduled_date DESC LIMIT 100")
+        text(f"SELECT * FROM resource_schedules WHERE 1=1 {tc} ORDER BY scheduled_date DESC LIMIT 100"),
+        tp,
     )
     return [dict(row) for row in r.mappings().all()]
 
@@ -161,8 +172,10 @@ async def create_schedule(
 async def list_labor_rates(
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
+    tc, tp = tenant_sql_clause()
     r = await db.execute(
-        text("SELECT * FROM labor_rates WHERE is_active = true ORDER BY employee_name")
+        text(f"SELECT * FROM labor_rates WHERE is_active = true {tc} ORDER BY employee_name"),
+        tp,
     )
     return [dict(row) for row in r.mappings().all()]
 
@@ -196,7 +209,10 @@ async def create_labor_rate(
 async def list_timesheets(
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
-    r = await db.execute(text("SELECT * FROM timesheet_entries ORDER BY date DESC LIMIT 100"))
+    tc, tp = tenant_sql_clause()
+    r = await db.execute(
+        text(f"SELECT * FROM timesheet_entries WHERE 1=1 {tc} ORDER BY date DESC LIMIT 100"), tp
+    )
     return [dict(row) for row in r.mappings().all()]
 
 
@@ -230,8 +246,9 @@ async def create_timesheet(
 async def labor_cost_summary(
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
+    tc, tp = tenant_sql_clause("te")
     r = await db.execute(
-        text("""
+        text(f"""
         SELECT employee_id, employee_name, regular_rate, overtime_rate,
                regular_hours, overtime_hours, regular_cost, overtime_cost
         FROM (
@@ -242,9 +259,11 @@ async def labor_cost_summary(
                    SUM(CASE WHEN te.is_overtime = true THEN te.hours_worked * lr.overtime_rate ELSE 0 END) as overtime_cost
             FROM timesheet_entries te
             LEFT JOIN labor_rates lr ON te.employee_id = lr.employee_id
+            WHERE 1=1 {tc}
             GROUP BY te.employee_id, lr.employee_name, lr.regular_rate, lr.overtime_rate
         ) sub
         ORDER BY (COALESCE(regular_cost, 0) + COALESCE(overtime_cost, 0)) DESC
-    """)
+    """),
+        tp,
     )
     return [dict(row) for row in r.mappings().all()]

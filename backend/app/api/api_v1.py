@@ -371,8 +371,19 @@ async def prometheus_metrics(user: User = Depends(get_current_user)):
 
 
 @api_router.get("/health/detailed")
-async def detailed_health(db: AsyncSession = Depends(get_db)):
-    return await get_detailed_health(db)
+async def detailed_health(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    # finding: infra-secrets-health #2 - endpoint had no auth (unlike /metrics above)
+    # and leaked internal row counts/system info to anyone. Require auth like /metrics.
+    # It also echoed hardcoded "security"/"authentication" blocks that were never
+    # actually verified against runtime config (e.g. csrf_protection: True regardless
+    # of real state) - drop them rather than report fabricated status as fact.
+    result = await get_detailed_health(db)
+    result.pop("security", None)
+    result.pop("authentication", None)
+    return result
 
 
 # Health check endpoint

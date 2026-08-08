@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user
 from app.core.pagination import PageParams, get_page_params, paginate
 from app.core.rbac import require_parts_write
+from app.core.tenant_context import get_tenant_id
 from app.db.session import get_db
 from app.models.bom_item import BomItem
 from app.models.bom_template import BomTemplate
@@ -163,7 +164,13 @@ async def bulk_delete_bom_items(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_parts_write),
 ):
-    result = await db.execute(delete(BomItem).where(BomItem.id.in_(req.ids)))
+    # tenant-security: Core delete() bypasses the ORM before_flush tenant
+    # guard in tenant_events.py, so it must scope by tenant explicitly here.
+    stmt = delete(BomItem).where(BomItem.id.in_(req.ids))
+    tenant_id = get_tenant_id()
+    if tenant_id is not None:
+        stmt = stmt.where(BomItem.tenantId == tenant_id)
+    result = await db.execute(stmt)
     deleted = result.rowcount
     if deleted and req.ids:
         first = await db.execute(select(BomItem.bomTemplateId).where(BomItem.id == req.ids[0]))
