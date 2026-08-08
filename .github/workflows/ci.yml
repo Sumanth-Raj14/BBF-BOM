@@ -57,16 +57,29 @@ jobs:
   test-backend:
     name: Test Backend
     runs-on: ubuntu-latest
+    # Finding 3(c)/(d): this job USED to run bare `alembic upgrade head` against an
+    # empty Postgres (fails — migrations 004+ assume tables that only ever existed
+    # via create_all; see postgres-ci.yml's header) and then ran the legacy
+    # backend/tests/ (5 files) instead of backend/app/tests/ (~140 files) — broken,
+    # and misleadingly green on the wrong suite when it did run.
+    #
+    # It is REPAIRED here, not deleted: build-and-push -> deploy-staging/production
+    # gate on this job via `needs:`, and cross-workflow `needs:` cannot reference
+    # postgres-ci.yml, so removing it would let the deploy pipeline ship without any
+    # backend-test gate. It now mirrors postgres-ci.yml's proven path: init_db
+    # bootstrap, then the full app/tests suite on real Postgres. The overlap with
+    # postgres-ci.yml is intentional — that workflow is the merge gate; this is the
+    # deploy-path gate.
     defaults:
       run:
         working-directory: backend
     services:
       postgres:
-        image: postgres:15
+        image: postgres:16
         env:
           POSTGRES_USER: bom_user
-          POSTGRES_PASSWORD: ${{ secrets.CI_PG_PASSWORD }}
-          POSTGRES_DB: bom_db
+          POSTGRES_PASSWORD: ci_postgres_pw_9f3a7c1e
+          POSTGRES_DB: bom_test_db
         ports:
           - 5432:5432
         options: >-
@@ -74,58 +87,41 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    env:
+      # conftest reads TEST_DATABASE_URL first; the test_engine drop_all/create_all's
+      # this DB, so it must be a throwaway (bom_test_db).
+      TEST_DATABASE_URL: postgresql+asyncpg://bom_user:ci_postgres_pw_9f3a7c1e@127.0.0.1:5432/bom_test_db
+      # Values must NOT contain a _WEAK_SECRET_VALUES substring ("test"/"secret"/
+      # "admin") or Settings rejects them and conftest fails to import. Use "suite".
+      SECRET_KEY: ci-cd-suite-signkey-donotuse-9f3a7c1e4b2d5a8b6d4f2a0c8e7b
+      ENCRYPTION_KEY: ci-cd-suite-encryption-key-do-not-use-in-prod-4b2d9f3a5a8b
+      S3_SECRET_KEY: ci-cd-suite-s3key-donotuse-7c1e4b2d9f3a5a8b6d4f2a0c8e7b
+      POSTGRES_PASSWORD: ci_postgres_pw_9f3a7c1e
+      ADMIN_EMAIL: ci@blackbox-bom.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
+          cache-dependency-path: backend/requirements.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-test.txt
-      - name: Run migrations
-        run: alembic upgrade head
-        env:
-          TEST_DATABASE_URL: postgresql+asyncpg://bom_user:${{ secrets.CI_PG_PASSWORD }}@127.0.0.1:5432/bom_db
-          POSTGRES_SERVER: 127.0.0.1
-          POSTGRES_USER: bom_user
-          POSTGRES_PASSWORD: ${{ secrets.CI_PG_PASSWORD }}
-          POSTGRES_DB: bom_db
-          SECRET_KEY: ci-backend-signkey-donotuse-a1b2c3d4e5f60718293a4b5c6d7e
-          ENCRYPTION_KEY: ci-backend-enckey-donotuse-b2c3d4e5f6a708192a3b4c5d9e0f
-          S3_SECRET_KEY: ci-backend-s3key-donotuse-c3d4e5f6a7b809192a3b4c5d0e1f
-          ADMIN_EMAIL: ci@blackbox-bom.com
-          REDIS_URL: redis://localhost:6379/0
-      - name: Run tests with coverage
+      - name: Wait for Postgres to accept connections
         run: |
-          python -m pytest tests/ -v --tb=short --asyncio-mode=auto --cov=app --cov-report=xml --cov-report=term
-        env:
-          TEST_DATABASE_URL: postgresql+asyncpg://bom_user:${{ secrets.CI_PG_PASSWORD }}@127.0.0.1:5432/bom_db
-          POSTGRES_SERVER: 127.0.0.1
-          POSTGRES_USER: bom_user
-          POSTGRES_PASSWORD: ${{ secrets.CI_PG_PASSWORD }}
-          POSTGRES_DB: bom_db
-          SECRET_KEY: ci-backend-signkey-donotuse-a1b2c3d4e5f60718293a4b5c6d7e
-          ENCRYPTION_KEY: ci-backend-enckey-donotuse-b2c3d4e5f6a708192a3b4c5d9e0f
-          S3_SECRET_KEY: ci-backend-s3key-donotuse-c3d4e5f6a7b809192a3b4c5d0e1f
-          ADMIN_EMAIL: ci@blackbox-bom.com
-          REDIS_URL: redis://localhost:6379/0
-      - uses: dorny/test-reporter@v1
-        if: success() || failure()
-        with:
-          name: Test Results
-          path: backend/junit.xml
-          reporter: java-junit
+          for i in $(seq 1 30); do
+            pg_isready -h 127.0.0.1 -p 5432 -U bom_user && break
+            echo "Waiting for postgres... ($i)"
+            sleep 2
+          done
+      - name: Run the full app/tests suite on Postgres
+        # Session-scoped asyncio loops are REQUIRED for asyncpg (see postgres-ci.yml).
+        run: |
+          python -m pytest -p no:cacheprovider -q \
+            -o asyncio_default_fixture_loop_scope=session \
+            -o asyncio_default_test_loop_scope=session
 
   security-scan:
     name: Security Scan
@@ -252,9 +248,15 @@ jobs:
             type=ref,event=branch
             type=raw,value=latest,enable={{is_default_branch}}
       - name: Build and push
+        # Finding 3(b): "." has no Dockerfile at repo root - the real Dockerfile
+        # lives at backend/Dockerfile (docker-compose.yml's "backend" service
+        # builds context: ./backend, dockerfile: Dockerfile). The image this
+        # pushes is the one deploy-staging/deploy-production later `pull` for
+        # the "backend" compose service, so point the build at that context.
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./backend
+          file: ./backend/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -282,9 +284,9 @@ jobs:
           chmod 644 ~/.ssh/known_hosts
           ssh -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts -i ~/.ssh/deploy_key $STAGING_USER@$STAGING_HOST "
             cd /opt/bom-tool &&
-            docker compose pull api &&
-            docker compose up -d --no-deps api &&
-            docker compose exec api alembic upgrade head &&
+            docker compose pull backend &&
+            docker compose up -d --no-deps backend &&
+            docker compose exec backend alembic upgrade head &&
             echo 'Deployment complete'
           "
 
@@ -312,9 +314,9 @@ jobs:
           chmod 644 ~/.ssh/known_hosts
           ssh -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts -i ~/.ssh/deploy_key $PRODUCTION_USER@$PRODUCTION_HOST "
             cd /opt/bom-tool &&
-            docker compose pull api &&
-            docker compose up -d --no-deps api &&
-            docker compose exec api alembic upgrade head &&
+            docker compose pull backend &&
+            docker compose up -d --no-deps backend &&
+            docker compose exec backend alembic upgrade head &&
             echo 'Production deployment complete'
           "
 

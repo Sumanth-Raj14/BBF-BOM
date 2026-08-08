@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
+from app.core.tenant_context import tenant_sql_clause
 from app.db.session import get_db
 from app.models.user import User
 
@@ -57,9 +58,12 @@ async def list_routings(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: routing_tables carries tenantId; raw text() reads bypass
+    # the ORM select filter (tenant_events.py) so scope explicitly here.
+    tc, tp = tenant_sql_clause("rt")
     r = await db.execute(
         text(
-            """SELECT rt.*, rt.routing_number as code,
+            f"""SELECT rt.*, rt.routing_number as code,
                rt.status = 'active' as is_active,
                COALESCE(op_counts.cnt, 0) as operations_count
             FROM routing_tables rt
@@ -67,9 +71,10 @@ async def list_routings(
                 SELECT routing_id, COUNT(*) as cnt
                 FROM routing_operations GROUP BY routing_id
             ) op_counts ON rt.id = op_counts.routing_id
+            WHERE 1=1 {tc}
             ORDER BY rt.id DESC LIMIT :l OFFSET :s"""
         ),
-        {"l": limit, "s": skip},
+        {"l": limit, "s": skip, **tp},
     )
     return [dict(row) for row in r.mappings().all()]
 
@@ -105,8 +110,15 @@ async def get_routing(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: scope the routing_tables lookup by tenant.
+    tc, tp = tenant_sql_clause()
     hdr = (
-        (await db.execute(text("SELECT * FROM routing_tables WHERE id = :id"), {"id": routing_id}))
+        (
+            await db.execute(
+                text(f"SELECT * FROM routing_tables WHERE id = :id {tc}"),
+                {"id": routing_id, **tp},
+            )
+        )
         .mappings()
         .first()
     )

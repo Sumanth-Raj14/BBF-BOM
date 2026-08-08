@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
+from app.core.tenant_context import tenant_sql_clause
 from app.db.session import get_db
 from app.models.user import User
 
@@ -76,17 +77,21 @@ async def list_service_boms(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # tenant-security: service_bom_headers carries tenantId; raw text() reads
+    # bypass the ORM select filter (tenant_events.py) so scope explicitly here.
+    tc, tp = tenant_sql_clause("h")
     result = await db.execute(
         text(
-            """SELECT h.*, COALESCE(item_counts.cnt, 0) as items_count
+            f"""SELECT h.*, COALESCE(item_counts.cnt, 0) as items_count
             FROM service_bom_headers h
             LEFT JOIN (
                 SELECT service_bom_id, COUNT(*) as cnt
                 FROM service_bom_items GROUP BY service_bom_id
             ) item_counts ON h.id = item_counts.service_bom_id
+            WHERE 1=1 {tc}
             ORDER BY h.id DESC LIMIT :limit OFFSET :skip"""
         ),
-        {"limit": limit, "skip": skip},
+        {"limit": limit, "skip": skip, **tp},
     )
     return [dict(r) for r in result.mappings().all()]
 
@@ -127,7 +132,10 @@ async def get_service_bom(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    hdr = await db.execute(text("SELECT * FROM service_bom_headers WHERE id = :id"), {"id": bom_id})
+    tc, tp = tenant_sql_clause()
+    hdr = await db.execute(
+        text(f"SELECT * FROM service_bom_headers WHERE id = :id {tc}"), {"id": bom_id, **tp}
+    )
     header = hdr.mappings().first()
     if not header:
         raise HTTPException(404, "Service BOM not found")
@@ -194,11 +202,14 @@ async def merge_boms(
     if len(body.source_bom_ids) < 2:
         raise HTTPException(400, "Need at least 2 BOMs to merge")
 
+    # tenant-security: bom_items carries tenantId; raw text() reads bypass the
+    # ORM select filter (tenant_events.py) so scope explicitly here.
+    tc, tp = tenant_sql_clause()
     all_items = []
     for bom_id in body.source_bom_ids:
         result = await db.execute(
-            text('SELECT * FROM bom_items WHERE "bomTemplateId" = :bid'),
-            {"bid": bom_id},
+            text(f'SELECT * FROM bom_items WHERE "bomTemplateId" = :bid {tc}'),
+            {"bid": bom_id, **tp},
         )
         all_items.extend(result.mappings().all())
 
