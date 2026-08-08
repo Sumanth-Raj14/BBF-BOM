@@ -52,6 +52,31 @@ Controller runs the authoritative `vite build` + review before commit. Targets:
   MobileScanView fake barcode. (SSO = dead button, NOT an auth bypass — backend rejects empty pw.)
 - `integration-screens.jsx` webhook secret via Math.random; `prod-additions.jsx` 12% fake-fail demo.
 
+**Fix wave 2 (frontend): DONE — committed `dbcab0d`, pushed.** All 7 files, authoritative
+`vite build` + 216 unit tests pass; every wired endpoint verified to exist.
+
+**Doc-mismatch fixes: DONE — committed `12f0736`.** README frontend dir + compose file,
+MODULE_REFERENCE VARCHAR-issue-resolved + dead cross-ref links, RELEASE_NOTES false init.sql
+ALTER claim.
+
+**Fix wave 3 (final backend security/integrity): DONE — committed `d351863`, pushed.** 42 tests.
+plugin-login scope bypass, `bkb` prefix collision, apply_template BomClosure + emit,
+import_bom honest status, both BOM builders missing bom_number (would fail on real DB),
+inventory valuation ×1.0, routing raw-INSERT tenantId. Fixed a collateral test
+(test_solidworks_bom_ingest key now write-scoped).
+
+**COVERAGE: `docs/audit-2026-08/FIX_COVERAGE.md` — 43 fixed / 31 deferred.** 5/5 critical,
+21/24 high (3 deferred = dead-layer modals), 10/23 medium, 7/22 low. Deferred = dead-layer
+fabrication (not mounted) + the flagged follow-ups below + low dead-code/doc tail.
+
+**Remaining follow-ups (need a decision or larger work, NOT yet done):**
+- `process_notification_queue` has no scheduler — ECO notifications created but never delivered.
+- Nothing creates `eco_approvals` rows — notifications + ECR UI read an empty table.
+- `routing_api` list/get_process_plan *reads* still tenant-unscoped (inserts fixed).
+- Dead-layer fabrication in unmounted files (SourcingView, AutoScrape/ImportRFQs/QuoteHistory/
+  Settings/Profile modals, some components/screens) — fix when wired.
+- Low dead-code (unused schemas, duplicate functions, unregistered listeners) + doc polish.
+
 **Fix wave 3 (dead-layer + medium/low): NOT STARTED.** See FINDINGS_FULL_SCAN.md medium/low.
 
 **Method for every fix:** root-cause, smallest diff, a test red-before/green-after, inline comment
