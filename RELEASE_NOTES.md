@@ -294,12 +294,11 @@ After restore completes:
 ### Postgres-Specific Defects (Discovered 2026-07-19)
 
 1. **`alembic_version.version_num` VARCHAR(32) too narrow**: revision ID `036_role_permission_tenant_scoped` is 33 characters. Fresh Postgres installs die at migration 036 without widening the column. SQLite tests never catch this because SQLite ignores VARCHAR constraints.
-   - **Workaround**: Automated in `docker-compose.yml` via `docker/postgres/init.sql`, which runs `ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)` on DB init.
-   - **Manual fix** (if running Postgres outside Docker): 
+   - **Actual resolution**: fresh Postgres installs bootstrap via `scripts/init_db` (`create_all` + stamp head), which creates `alembic_version` with a width that fits the current revision IDs — migrations 004+ are not replayed on an empty DB, so the old die-at-036 path is not exercised. The `postgres-ci.yml` fresh-install job proves a from-nothing install reaches head 050 on every push.
+   - **Correction (2026-08-02)**: an earlier version of this note claimed `docker/postgres/init.sql` runs an `ALTER TABLE alembic_version …` on DB init. It does not — that file only enables the `pgcrypto` and `pg_stat_statements` extensions. If you run Postgres outside the documented bootstrap and hit the width limit, widen it manually:
      ```sql
      ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64);
      ```
-   - **Permanent fix pending**: upstream in `alembic/env.py` to set `version_num = Column(String(64), ...)`
 
 2. **`alembic/env.py` only reads `DATABASE_URL`**: Alembic migrations ignore the app's `.env` file. If `DATABASE_URL` is not exported, migrations fall back to the hardcoded `sqlalchemy.url` in `alembic.ini` (default: `postgresql://bom_user@localhost/bom_db` with empty password).
    - **Workaround**: Automated in Docker; must export `DATABASE_URL` in manual Postgres setups:
