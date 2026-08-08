@@ -1358,11 +1358,10 @@ api.boms = {
 
 ### Database
 
-⚠️ **Alembic VARCHAR(32) Issue** (from system brief):
-- `alembic_version.version_num` too short for 33-char revision IDs (e.g., 036_role_permission_tenant_scoped)
-- Fresh Postgres installs fail at migration 036
-- SQLite tests don't catch this (ignores VARCHAR length)
-- **Workaround**: Manually widen column; permanent fix pending in alembic/env.py
+✅ **Alembic VARCHAR(32) Issue** (RESOLVED):
+- `alembic_version.version_num` was too short for 33-char revision IDs (e.g., 036_role_permission_tenant_scoped).
+- Fresh Postgres installs no longer hit this: `scripts/init_db` bootstraps via `create_all` + stamp (it does not run migrations 004+ on an empty DB), and the `.github/workflows/postgres-ci.yml` fresh-install job proves a from-nothing Postgres install reaches the current head (050) on every push.
+- Historical detail retained so the origin of the 3-digit revision naming is clear.
 - **Status**: Documented, not yet resolved
 
 ⚠️ **Alembic ENV VAR Handling**:
@@ -1399,13 +1398,13 @@ api.boms = {
 
 | File | Purpose |
 |------|---------|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | High-level system design, deployment patterns, scalability notes |
-| [API.md](./API.md) | REST API endpoint reference, request/response schemas, error codes |
-| [DATABASE.md](./DATABASE.md) | Schema ERD, migration guide, backup/restore procedures |
-| [DEPLOYMENT.md](./DEPLOYMENT.md) | Docker, Kubernetes, systemd, environment setup |
-| [SECURITY.md](./SECURITY.md) | Authentication, authorization, encryption, compliance (SOC 2, HIPAA) |
-| [TESTING.md](./TESTING.md) | Unit tests, integration tests, test fixtures, coverage metrics |
-| [OPERATIONS.md](./OPERATIONS.md) | Monitoring, alerting, troubleshooting, runbooks |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) / [PROJECT_ARCHITECTURE.md](./PROJECT_ARCHITECTURE.md) | High-level system design, deployment patterns, scalability notes |
+| [PROJECT_REFERENCE.md](./PROJECT_REFERENCE.md) | Canonical reference; API surface and module map |
+| [DATA_HANDLING.md](./DATA_HANDLING.md) | Data model, storage, backup/restore procedures |
+| [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) | Docker, environment setup, production hardening |
+| [SECURITY.md](./SECURITY.md) | Authentication, authorization, encryption, compliance |
+| [TESTING_AND_VALIDATION.md](./TESTING_AND_VALIDATION.md) | Test suites, fixtures, CI gates, coverage |
+| [DISASTER_RECOVERY_RUNBOOK.md](./DISASTER_RECOVERY_RUNBOOK.md) | Monitoring, backup/restore, troubleshooting runbooks |
 
 ---
 
