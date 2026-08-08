@@ -122,7 +122,15 @@ async def delete_part(db: AsyncSession, part_id: int) -> None:
 async def bulk_delete_parts(db: AsyncSession, part_ids: list[int]) -> int:
     from sqlalchemy import delete
 
-    result = await db.execute(delete(Part).where(Part.id.in_(part_ids)))
+    from app.core.tenant_context import get_tenant_id
+
+    # tenant-security: Core delete() bypasses the ORM before_flush tenant
+    # guard in tenant_events.py, so it must scope by tenant explicitly here.
+    stmt = delete(Part).where(Part.id.in_(part_ids))
+    tenant_id = get_tenant_id()
+    if tenant_id is not None:
+        stmt = stmt.where(Part.tenantId == tenant_id)
+    result = await db.execute(stmt)
     await db.commit()
     return result.rowcount
 

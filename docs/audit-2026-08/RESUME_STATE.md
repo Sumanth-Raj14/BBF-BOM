@@ -3,6 +3,56 @@
 Written mid-flight because the session was about to hit its usage limit. Everything
 below is on disk. Nothing here is committed except where stated.
 
+---
+
+## ADDENDUM — full-repo scan + fix campaign (later on 2026-08-02)
+
+After the wave-one snapshot, the user asked for a **line-by-line scan of the whole
+repo (except `_archive`) then fix everything with documentation**. Status:
+
+**Scan: DONE and committed** (`5136b38` on branch `wip/gap-closing-2026-08-02`).
+- 13 read-only agents read every first-party source file (513 read in full).
+- `docs/audit-2026-08/FINDINGS_FULL_SCAN.md` = all **74 findings** (5 critical, 24 high,
+  23 medium, 22 low), each with file:line + the failure. Per-scope detail in `scan_*.md`.
+- Frontend findings tagged **LIVE** (reachable from `src/main.jsx`) vs **dead-layer**
+  (mid-migration, not mounted). The 4 dead files: `SourcingView.jsx`, `AutoScrapeModal.jsx`,
+  `ImportRFQsModal.jsx`, `QuoteHistoryModal.jsx` — their fake data can't mislead a live demo yet.
+- Verified by the controller: the tenant-isolation linchpin (`core/tenant_events.py` filters
+  ORM selects + ORM flush only; raw `text()` and bulk Core delete/update bypass it), the two
+  bulk-delete sites, and that the secret files are gitignored (Docker-bake only, no rotation needed).
+
+**Fix wave 1 (backend): RUNNING as workflow** `wf_f466318c-e74` (scriptPath
+`scratchpad/fix_backend.js`). 4 agents, disjoint files, each with a red-before/green-after test:
+- `tenant-security`: add tenant scoping to bulk_delete_parts, bulk_delete_bom_items, and raw-SQL
+  endpoints (compliance/routing/resource/service_bom/order_tracking).
+- `infra-secrets-health`: `.dockerignore` excludes pem/.secret_key; `/health/detailed` requires
+  auth + drops fabricated security fields; `create_admin.py` engine-init crash.
+- `schema-gates`: RfqHeader nullable fix + new migration 050; eco_api create_ecr/ecn require
+  engineering; audit_logs stop trusting client userId.
+- `migrations-ci-build`: fix migration 009 (`ADD CONSTRAINT IF NOT EXISTS`) + 033 (blanket
+  suppress); fix the broken legacy `ci.yml` (4 ways); remove missing-.ico ref in the SolidWorks csproj.
+  To resume/re-run: `Workflow({scriptPath, resumeFromRunId: 'wf_f466318c-e74'})`.
+
+**Fix wave 2 (frontend LIVE fabrication/data-loss): NOT STARTED.** These need render-reachability
+care (import-reachable ≠ rendered). The LIVE targets:
+- `final-polish.jsx` printPO tax label 8%-vs-18% + fabricated fallbacks; ApprovalsScreen 5 fake rows.
+- `ModalsHost.jsx` Release persists only local state; rev-increment bug.
+- `power-features.jsx` WorkOrders/NCR persist only local state + fake seeds.
+- `BomEditorScreen.jsx` hardcoded ribbon stats (87/64/etc).
+- `AppCtx.jsx` comments/approvals seeded with fake demo data, never overwritten by API.
+- `auth-onboarding.jsx` forgot-password fake success (real endpoint exists), SSO dead buttons,
+  MobileScanView fake barcode. (SSO = dead button, NOT an auth bypass — backend rejects empty pw.)
+- `integration-screens.jsx` webhook secret via Math.random; `prod-additions.jsx` 12% fake-fail demo.
+
+**Fix wave 3 (dead-layer + medium/low): NOT STARTED.** See FINDINGS_FULL_SCAN.md medium/low.
+
+**Method for every fix:** root-cause, smallest diff, a test red-before/green-after, inline comment
+naming the finding. No agent commits; controller reviews + commits per wave. All fix writeups in
+`scratchpad/fix_*.md` (copy into `docs/audit-2026-08/` before commit).
+
+---
+
+
 ## Where the work lives
 
 - **Branch:** `test/e2e-ci-and-write-flows` (PR #10, open, NOT merged)
