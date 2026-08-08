@@ -378,8 +378,18 @@ function APIKeysModal({ open, onClose }) {
             action: rawKey
               ? {
                   label: __t("common.copy") || "Copy",
+                  // fix: only toast success once the clipboard write actually resolves
                   onClick: () =>
-                    toast((__t("apiKeys.copied") || "Copied ") + rawKey),
+                    navigator.clipboard
+                      ?.writeText(rawKey)
+                      .then(() =>
+                        toast((__t("apiKeys.copied") || "Copied ") + rawKey),
+                      )
+                      .catch(() =>
+                        toast(__t("apiKeys.copyFailed") || "Copy failed", {
+                          kind: "error",
+                        }),
+                      ),
                 }
               : undefined,
           },
@@ -535,11 +545,22 @@ function APIKeysModal({ open, onClose }) {
                       <span className="inline-flex gap-2">
                         <button
                           className="icon-btn w-22 h-22"
+                          // fix: toast "Copied" only after clipboard write resolves; handle failure
                           onClick={() =>
-                            toast(
-                              (__t("apiKeys.copied") || "Copied ") +
-                                (k.key_prefix || ""),
-                            )
+                            navigator.clipboard
+                              ?.writeText(k.key_prefix || "")
+                              .then(() =>
+                                toast(
+                                  (__t("apiKeys.copied") || "Copied ") +
+                                    (k.key_prefix || ""),
+                                ),
+                              )
+                              .catch(() =>
+                                toast(
+                                  __t("apiKeys.copyFailed") || "Copy failed",
+                                  { kind: "error" },
+                                ),
+                              )
                           }
                           title={
                             __t("apiKeys.copyPrefix") || "Copy key prefix"

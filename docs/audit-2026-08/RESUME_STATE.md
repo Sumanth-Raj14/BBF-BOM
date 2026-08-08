@@ -21,8 +21,13 @@ repo (except `_archive`) then fix everything with documentation**. Status:
   ORM selects + ORM flush only; raw `text()` and bulk Core delete/update bypass it), the two
   bulk-delete sites, and that the secret files are gitignored (Docker-bake only, no rotation needed).
 
-**Fix wave 1 (backend): RUNNING as workflow** `wf_f466318c-e74` (scriptPath
-`scratchpad/fix_backend.js`). 4 agents, disjoint files, each with a red-before/green-after test:
+**Fix wave 1 (backend): DONE — committed `c6d4565`, pushed.** 44 backend tests pass
+(10 new + 34 touched endpoint suites). One agent had tried to DELETE the broken
+`test-backend` CI job and strip it from the deploy `needs:` chain (flagged as a CI-gate
+removal); the controller instead REPAIRED it (init_db bootstrap + full app/tests on
+Postgres) and re-added it to `needs:`, and bumped the alembic head pins 049→050 in
+postgres-ci.yml + test_regulated_foundation.py (migration 050 was added). Was workflow
+`wf_f466318c-e74` (scriptPath `scratchpad/fix_backend.js`); details in `fix_*.md`.
 - `tenant-security`: add tenant scoping to bulk_delete_parts, bulk_delete_bom_items, and raw-SQL
   endpoints (compliance/routing/resource/service_bom/order_tracking).
 - `infra-secrets-health`: `.dockerignore` excludes pem/.secret_key; `/health/detailed` requires
@@ -33,8 +38,11 @@ repo (except `_archive`) then fix everything with documentation**. Status:
   suppress); fix the broken legacy `ci.yml` (4 ways); remove missing-.ico ref in the SolidWorks csproj.
   To resume/re-run: `Workflow({scriptPath, resumeFromRunId: 'wf_f466318c-e74'})`.
 
-**Fix wave 2 (frontend LIVE fabrication/data-loss): NOT STARTED.** These need render-reachability
-care (import-reachable ≠ rendered). The LIVE targets:
+**Fix wave 2 (frontend LIVE fabrication/data-loss): RUNNING** as workflow
+`wf_152dfb41-049` (scriptPath `scratchpad/fix_frontend.js`). 7 agents, one file each,
+each told to first confirm the flagged code actually renders before editing, then wire to
+a real api/screenData wrapper or show an honest empty/unknown state (never a new fake).
+Controller runs the authoritative `vite build` + review before commit. Targets:
 - `final-polish.jsx` printPO tax label 8%-vs-18% + fabricated fallbacks; ApprovalsScreen 5 fake rows.
 - `ModalsHost.jsx` Release persists only local state; rev-increment bug.
 - `power-features.jsx` WorkOrders/NCR persist only local state + fake seeds.

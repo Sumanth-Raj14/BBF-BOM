@@ -976,31 +976,38 @@ ProductTour.propTypes = {
 };
 // ============ OPTIMISTIC RETRY HELPER ============
 // Usage: optimistic(() => doMutation(), { undo: () => revert(), label: "Saved" });
-// 12% chance of simulated failure for demo purposes.
+// fix: removed the 12% Math.random() fake-failure injection - the helper now
+// reflects the mutation's real outcome (awaiting it if it returns a promise).
 export function optimistic(mutation, opts = {}) {
-  try {
-    mutation();
-  } catch (e) {
+  const onFail = (e) => {
     toast(
-      __t("common.failedWithMessage", { message: e.message }) ||
-        "Failed: " + e.message,
-      { kind: "error" },
-    );
-    return;
-  }
-  if (Math.random() < 0.12) {
-    // Simulate API failure after a delay
-    setTimeout(() => {
-      toast(opts.failLabel || __t("common.saveFailed") || "Save failed", {
+      opts.failLabel ||
+        __t("common.failedWithMessage", { message: e?.message }) ||
+        "Failed: " + e?.message,
+      {
         kind: "error",
         duration: 6000,
         action: {
           label: __t("common.retry") || "Retry",
           onClick: () => optimistic(mutation, opts),
         },
-      });
-      opts.undo && opts.undo();
-    }, 600);
+      },
+    );
+    opts.undo && opts.undo();
+  };
+  let result;
+  try {
+    result = mutation();
+  } catch (e) {
+    onFail(e);
+    return;
+  }
+  if (result && typeof result.then === "function") {
+    result
+      .then(() => {
+        if (opts.label) toast(opts.label, { kind: "success", duration: 1800 });
+      })
+      .catch(onFail);
   } else if (opts.label) {
     setTimeout(
       () => toast(opts.label, { kind: "success", duration: 1800 }),
