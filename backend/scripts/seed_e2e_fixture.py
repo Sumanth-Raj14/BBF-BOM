@@ -18,8 +18,12 @@ SAFETY
   removable, and it cannot collide with real records.
 * Idempotent: re-running updates/reuses rather than duplicating.
 * `--clean` removes exactly what it created and nothing else.
-* Targets whatever DATABASE_URL/settings point at. It is a DEV fixture —
-  don't run it against production data.
+* Targets whichever database app.db.session resolves (TEST_DATABASE_URL >
+  DATABASE_URL > settings.DATABASE_URI — see that module for why). Before
+  writing anything, it calls scripts._db_guard.require_non_production_db(),
+  which REFUSES to run unless that URL is sqlite, has an obvious test/e2e
+  marker in the database name, or ALLOW_SEED_ON_LIVE_DB is explicitly set.
+  It does not just trust whatever settings claim to point at.
 
 USAGE
     python -m scripts.seed_e2e_fixture            # create/refresh
@@ -33,6 +37,7 @@ import sys
 
 from sqlalchemy import delete, select
 
+from scripts._db_guard import require_non_production_db
 from app.core.tenant_context import TenantContext
 from app.db.session import get_session_maker
 from app.core.security import get_password_hash
@@ -277,6 +282,8 @@ if __name__ == "__main__":
         "Dev and CI only.",
     )
     args = ap.parse_args()
+    require_non_production_db()  # raises RuntimeError if this looks like a live DB
+
     async def _run():
         if args.clean:
             await clean()

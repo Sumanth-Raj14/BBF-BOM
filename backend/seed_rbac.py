@@ -7,6 +7,13 @@ SEED_TENANT_ID env var; if unset, the first existing tenant (by id) is used,
 and if no tenant exists yet at all, a bootstrap "Default Tenant" is created.
 Re-running this script only clears/reseeds the CATALOG for that one tenant,
 never other tenants' roles/permissions.
+
+INCIDENT (2026-08-09): this script used to resolve its own DB URL
+(DATABASE_URL/DATABASE_URI or a hardcoded localhost/bom_db default),
+ignoring TEST_DATABASE_URL, and never checked whether it was about to run
+its destructive delete/recreate against a live database. It now resolves via
+app.db.session.resolve_database_url() and calls
+scripts._db_guard.require_non_production_db() before touching the database.
 """
 
 import asyncio
@@ -19,12 +26,7 @@ from app.db.base import Base
 from app.models.permission import Permission
 from app.models.role import Role, role_permissions, user_roles
 from app.models.tenant import Tenant
-
-DATABASE_URL = (
-    os.environ.get("DATABASE_URL")
-    or os.environ.get("DATABASE_URI")
-    or "postgresql+asyncpg://bom_user:bom_password@127.0.0.1:5432/bom_db"
-)
+from scripts._db_guard import require_non_production_db
 
 # Default roles
 DEFAULT_ROLES = [
@@ -314,7 +316,11 @@ async def _resolve_seed_tenant_id(session: AsyncSession) -> int:
 
 
 async def seed():
-    engine = create_async_engine(DATABASE_URL)
+    # Resolves via app.db.session.resolve_database_url() and raises unless the
+    # target looks like a test/e2e/sqlite database (or ALLOW_SEED_ON_LIVE_DB is
+    # explicitly set). Must happen before any connection is opened.
+    database_url = require_non_production_db()
+    engine = create_async_engine(database_url)
 
     # Create tables
     async with engine.begin() as conn:

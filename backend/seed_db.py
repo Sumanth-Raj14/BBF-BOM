@@ -16,6 +16,7 @@ from app.models.project import Project
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.vendor import Vendor
+from scripts._db_guard import require_non_production_db
 
 # Sample data converted from data.js
 SEED_PARTS = [
@@ -200,6 +201,10 @@ SEED_PROJECTS = [
 
 async def seed_database():
     """Seed the database with initial data"""
+    # This writes fixture data (and, when SEED_ADMIN_PASSWORD is set, a
+    # superuser credential) -- refuse unless the resolved DB looks like a
+    # test/e2e/sqlite database (see the 2026-08-09 incident).
+    require_non_production_db()
     # Create tables
     engine = await init_engine()
     async with engine.begin() as conn:

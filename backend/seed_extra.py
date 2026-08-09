@@ -18,6 +18,7 @@ from sqlalchemy import func, select  # noqa: E402
 
 from app.core.security import get_password_hash  # noqa: E402
 from app.db.session import get_session_maker, init_engine  # noqa: E402
+from scripts._db_guard import require_non_production_db  # noqa: E402
 from app.models.document import Document  # noqa: E402
 from app.models.inventory import Inventory, Warehouse  # noqa: E402
 from app.models.part import Part  # noqa: E402
@@ -43,6 +44,10 @@ def _f(obj, *names, default=None):
 
 
 async def main():
+    # Writes fixture data (RFQ, PO, supplier-user credentials) -- refuse
+    # unless the resolved DB looks like a test/e2e/sqlite database (see the
+    # 2026-08-09 incident).
+    require_non_production_db()
     await init_engine()
     Session = await get_session_maker()
     created = {}
