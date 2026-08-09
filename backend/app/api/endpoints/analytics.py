@@ -219,24 +219,40 @@ async def analytics_inflation(
     guessed at.
     """
     tf, tf_params = _tenant_filter_params(current_user, "ph")
+    # PORTABILITY: this grouped by TO_CHAR(..., 'YYYY-MM'), which is
+    # Postgres-only and made this endpoint 500 on SQLite. The per-category
+    # trend maths already happened in Python below, so the month bucketing and
+    # averaging move there too — same results on both engines. (Same fix as
+    # /analytics/trends; this product is local-first and SQLite is a legitimate
+    # small deployment.)
     rows = await db.execute(
         text(f"""
             SELECT COALESCE(p.category, 'Other') as category,
-                   TO_CHAR(COALESCE(ph."effectiveDate", ph."recordedAt"), 'YYYY-MM') as month,
-                   AVG(ph.price) as avg_price
+                   COALESCE(ph."effectiveDate", ph."recordedAt") as dated,
+                   ph.price as price
             FROM price_history ph
             JOIN parts p ON p.id = ph."partId"
             WHERE {tf}
-            GROUP BY COALESCE(p.category, 'Other'),
-                     TO_CHAR(COALESCE(ph."effectiveDate", ph."recordedAt"), 'YYYY-MM')
-            ORDER BY category, month
         """),
         tf_params,
     )
 
-    by_category: dict[str, list[dict]] = {}
-    for row in rows.fetchall():
-        by_category.setdefault(row[0], []).append({"month": row[1], "avgPrice": float(row[2])})
+    # category -> month -> list of prices
+    grouped: dict[str, dict[str, list[float]]] = {}
+    for category, dated, price in rows.fetchall():
+        if dated is None or price is None:
+            continue
+        # datetime on Postgres, ISO string on SQLite — handle both.
+        month = dated.strftime("%Y-%m") if hasattr(dated, "strftime") else str(dated)[:7]
+        grouped.setdefault(category, {}).setdefault(month, []).append(float(price))
+
+    by_category: dict[str, list[dict]] = {
+        category: [
+            {"month": month, "avgPrice": sum(prices) / len(prices)}
+            for month, prices in sorted(months.items())
+        ]
+        for category, months in sorted(grouped.items())
+    }
 
     categories = []
     for category, points in by_category.items():
