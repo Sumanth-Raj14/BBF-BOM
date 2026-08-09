@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -135,31 +137,46 @@ async def analytics_trends(
     current_user: User = Depends(get_current_user),
 ):
     tf, tf_params = _tenant_filter_params(current_user)
-    interval_map = {
-        "1mo": "1 month",
-        "3mo": "3 months",
-        "6mo": "6 months",
-        "1yr": "1 year",
-    }
-    interval = interval_map.get(range_, "6 months")
+    # PORTABILITY: this used TO_CHAR(...) and NOW() - INTERVAL '<n> months',
+    # all of which are Postgres-only, so /analytics/trends 500'd outright on
+    # SQLite. That matters because this product is local-first and a SQLite
+    # install is a legitimate small deployment. Compute the cutoff in Python,
+    # bind it as a parameter, and bucket by month in Python — identical results
+    # on both engines, and it also removes an f-string interpolation into SQL.
+    days_map = {"1mo": 30, "3mo": 91, "6mo": 182, "1yr": 365}
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days_map.get(range_, 182))
 
-    cost_trend = await db.execute(
+    rows = await db.execute(
         text(f"""
-                SELECT TO_CHAR("createdAt", 'YYYY-MM') as month,
-                       COALESCE(AVG(cost), 0) as avg_cost,
-                       COUNT(*) as part_count
+                SELECT "createdAt" AS created_at, cost
                 FROM parts
-                WHERE {tf} AND "createdAt" >= NOW() - INTERVAL '{interval}'
-                GROUP BY TO_CHAR("createdAt", 'YYYY-MM')
-                ORDER BY month
+                WHERE {tf} AND "createdAt" >= :cutoff
             """),
-        tf_params,
+        {**tf_params, "cutoff": cutoff},
     )
+
+    buckets: dict[str, list[float]] = {}
+    for created_at, cost in rows.fetchall():
+        if created_at is None:
+            continue
+        # createdAt is a datetime on Postgres and may come back as an ISO
+        # string on SQLite; handle both rather than assuming one driver.
+        month = (
+            created_at.strftime("%Y-%m")
+            if hasattr(created_at, "strftime")
+            else str(created_at)[:7]
+        )
+        buckets.setdefault(month, []).append(float(cost) if cost is not None else 0.0)
+
     return {
         "range": range_,
         "data": [
-            {"month": row[0], "avgCost": float(row[1]), "partCount": row[2]}
-            for row in cost_trend.fetchall()
+            {
+                "month": month,
+                "avgCost": (sum(costs) / len(costs)) if costs else 0.0,
+                "partCount": len(costs),
+            }
+            for month, costs in sorted(buckets.items())
         ],
     }
 
