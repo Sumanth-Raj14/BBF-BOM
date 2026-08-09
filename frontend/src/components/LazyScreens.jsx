@@ -215,7 +215,15 @@ export const TraceabilityScreen = createLazyScreen(function () {
 export const DeviationsScreen = createLazyScreen(function () {
   return import("./screens/DeviationsScreen.jsx");
 }, "DeviationsScreen");
+// Requirements management + part traceability + coverage (/requirements).
+export const RequirementsScreen = createLazyScreen(function () {
+  return import("./screens/RequirementsScreen.jsx");
+}, "RequirementsScreen");
 // Configurable BOM variants (/bom/variants).
 export const BomVariantsScreen = createLazyScreen(function () {
   return import("./screens/BomVariantsScreen.jsx");
 }, "BomVariantsScreen");
+// xBOM: BOM type filter + EBOM -> MBOM derivation (/mbom).
+export const MbomScreen = createLazyScreen(function () {
+  return import("./screens/MbomScreen.jsx");
+}, "MbomScreen");

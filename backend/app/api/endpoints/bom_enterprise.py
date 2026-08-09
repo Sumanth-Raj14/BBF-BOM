@@ -4,7 +4,7 @@ Multi-level BOM, quantity rollups, snapshots, where-used, variants
 """
 
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import io
 
@@ -17,6 +17,7 @@ from app.core.deps import get_current_user
 from app.core.rbac import require_engineering, require_viewer
 from app.db.session import get_db
 from app.models.user import User
+from app.schemas.bom import BOMRead
 from app.services import bom_service, export_service
 
 router = APIRouter(
@@ -104,15 +105,19 @@ class BomCreateRequest(BaseModel):
     status: Optional[str] = None
     version: Optional[str] = None
     project_id: Optional[int] = None
+    # xBOM (migration 052) — EBOM/MBOM/SBOM. Omit to keep the model's "EBOM"
+    # default, so every existing caller is unaffected.
+    bom_type: Optional[Literal["EBOM", "MBOM", "SBOM"]] = None
 
 
 @router.get("/")
 async def list_boms(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
+    bom_type: Optional[str] = Query(None, pattern="^(EBOM|MBOM|SBOM)$"),
     db: AsyncSession = Depends(get_db),
 ):
-    boms, total = await bom_service.list_boms(db, skip=skip, limit=limit)
+    boms, total = await bom_service.list_boms(db, skip=skip, limit=limit, bom_type=bom_type)
     return {
         "items": [
             {
@@ -121,6 +126,7 @@ async def list_boms(
                 "description": b.description,
                 "status": b.status,
                 "version": b.version,
+                "bom_type": b.bom_type,
             }
             for b in boms
         ],
@@ -145,6 +151,7 @@ async def create_bom(
         "description": bom.description,
         "status": bom.status,
         "version": bom.version,
+        "bom_type": bom.bom_type,
     }
 
 
@@ -439,3 +446,13 @@ async def apply_template(
     current_user: User = Depends(get_current_user),
 ):
     return await bom_service.apply_template(db, template_id, project_id)
+
+
+# NOTE: deliberately declared LAST. "/{bom_id}" is a single-segment catch-all
+# that would otherwise shadow every literal single-segment GET route above it
+# (e.g. GET /templates) — FastAPI/Starlette matches routes in registration
+# order, and an unconverted "{bom_id}" segment matches any string before the
+# int-validation on the path param even runs.
+@router.get("/{bom_id}", response_model=BOMRead)
+async def get_bom(bom_id: int, db: AsyncSession = Depends(get_db)):
+    return await bom_service.get_bom_or_404(db, bom_id)

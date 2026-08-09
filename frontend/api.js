@@ -901,6 +901,26 @@ export const traceabilityAPI = {
   },
 };
 
+// Requirements management + traceability links + coverage
+export const requirementAPI = {
+  list: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiRequest(`/requirements${q ? '?' + q : ''}`);
+  },
+  get: (id) => apiRequest(`/requirements/${id}`),
+  create: (data) => apiRequest('/requirements', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id, data) => apiRequest(`/requirements/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id) => apiRequest(`/requirements/${id}`, { method: 'DELETE' }),
+  coverage: () => apiRequest('/requirements/coverage'),
+  byPart: (partId) => apiRequest(`/requirements/by-part/${partId}`),
+  linkedParts: (id) => apiRequest(`/requirements/${id}/parts`),
+  linkPart: (id, partId) => apiRequest(`/requirements/${id}/parts`, { method: 'POST', body: JSON.stringify({ partId }) }),
+  unlinkPart: (id, partId) => apiRequest(`/requirements/${id}/parts/${partId}`, { method: 'DELETE' }),
+  linkedBoms: (id) => apiRequest(`/requirements/${id}/boms`),
+  linkBom: (id, bomId) => apiRequest(`/requirements/${id}/boms`, { method: 'POST', body: JSON.stringify({ bomId }) }),
+  unlinkBom: (id, bomId) => apiRequest(`/requirements/${id}/boms/${bomId}`, { method: 'DELETE' }),
+};
+
 // Kanban Triggers
 export const kanbanAPI = {
   list: (params = {}) => {
@@ -1027,6 +1047,19 @@ export const exportAPI = {
     const filename = match ? match[1] : `export.${body.format || 'csv'}`;
     return { blob, filename };
   },
+};
+
+// Units of Measure + conversion (see backend/app/api/endpoints/uom_api.py).
+// convert() throws with the backend's exact error message (422 detail) on
+// an unknown unit or a cross-dimension mismatch — never returns a guessed
+// 1:1 value, so callers can show the real reason a conversion failed.
+export const uomAPI = {
+  units: () => apiRequest('/uom/units'),
+  convert: (quantity, fromUom, toUom) => {
+    const q = new URLSearchParams({ quantity, from_uom: fromUom, to_uom: toUom }).toString();
+    return apiRequest(`/uom/convert?${q}`);
+  },
+  rollupQuantities: (lines) => apiRequest('/uom/rollup-quantities', { method: 'POST', body: JSON.stringify({ lines }) }),
 };
 
 // Import API — shared contract (see CLUSTER export-import-frontend):
@@ -1545,6 +1578,18 @@ export const bomItemsAPI = {
       method: 'POST',
       body: JSON.stringify(itemIds),
     }),
+
+  // Effectivity resolution — "give me this template's BOM as of X" (migration
+  // 053_bom_effectivity). Pass exactly one of asOfDate/asOfSerial/asOfLot;
+  // with none given the backend defaults asOfDate to today.
+  resolved: (bomTemplateId, { asOfDate, asOfSerial, asOfLot } = {}) => {
+    const params = { bomTemplateId };
+    if (asOfDate) params.asOfDate = asOfDate;
+    if (asOfSerial) params.asOfSerial = asOfSerial;
+    if (asOfLot) params.asOfLot = asOfLot;
+    const query = new URLSearchParams(params).toString();
+    return apiRequest(`/bom-items/resolved?${query}`);
+  },
 };
 
 export const api = {
@@ -1585,6 +1630,7 @@ export const api = {
   fai: faiAPI,
   deviation: deviationAPI,
   traceability: traceabilityAPI,
+  requirement: requirementAPI,
   kanban: kanbanAPI,
   contract: contractAPI,
   health: healthAPI,
@@ -1607,8 +1653,10 @@ export const api = {
   userDataSync: userDataSyncAPI,
   calendarEvents: calendarEventsAPI,
   catalogs: catalogsAPI,
+  uom: uomAPI,
 };
 window.api = api;
+window.uomAPI = uomAPI;
 
 window.poOrdersAPI = poOrdersAPI;
 window.analyticsAPI = analyticsAPI;
@@ -1652,6 +1700,56 @@ bomEnterpriseAPI.list = (params = {}) => {
   const q = new URLSearchParams(params).toString();
   return apiRequest(`/bom/${q ? '?' + q : ''}`);
 };
+// list() above already passes through arbitrary params, so { bom_type: 'MBOM' }
+// (xBOM, migration 052) filters for free — see app/api/endpoints/bom_enterprise.py.
+// get/create fill in the two BOM-header routes that had no client wrapper yet.
+bomEnterpriseAPI.get = (bomId) => apiRequest(`/bom/${bomId}`);
+bomEnterpriseAPI.create = (data) =>
+  apiRequest('/bom/', { method: 'POST', body: JSON.stringify(data) });
+
+// xBOM: manufacturing BOM (mbom_headers/mbom_items/mbom_operations) — see
+// app/api/endpoints/mbom_api.py, mounted at prefix "/mbom" in api_v1.py.
+export const mbomAPI = {
+  headers: {
+    list: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return apiRequest(`/mbom/headers${q ? '?' + q : ''}`);
+    },
+    get: (id) => apiRequest(`/mbom/headers/${id}`),
+    create: (data) =>
+      apiRequest('/mbom/headers', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id, data) =>
+      apiRequest(`/mbom/headers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  },
+  items: {
+    list: (mbomId) => apiRequest(`/mbom/headers/${mbomId}/items`),
+    create: (mbomId, data) =>
+      apiRequest(`/mbom/headers/${mbomId}/items`, { method: 'POST', body: JSON.stringify(data) }),
+    update: (mbomId, itemId, data) =>
+      apiRequest(`/mbom/headers/${mbomId}/items/${itemId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+  },
+  operations: {
+    list: (mbomId) => apiRequest(`/mbom/headers/${mbomId}/operations`),
+    create: (mbomId, data) =>
+      apiRequest(`/mbom/headers/${mbomId}/operations`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (mbomId, operationId, data) =>
+      apiRequest(`/mbom/headers/${mbomId}/operations/${operationId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+  },
+  // The actual point of xBOM: derive a manufacturing BOM from an existing
+  // EBOM's structure (POST /mbom/derive, see bom_service.derive_mbom_from_ebom).
+  derive: (data) => apiRequest('/mbom/derive', { method: 'POST', body: JSON.stringify(data) }),
+};
+api.mbom = mbomAPI;
+window.mbomAPI = mbomAPI;
 
 // Appended for modals-extra.jsx (API Keys modal): user-scoped API key
 // management backing GET/POST /api-keys, POST /api-keys/{id}/rotate and

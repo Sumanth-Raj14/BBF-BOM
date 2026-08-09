@@ -37,6 +37,8 @@ const ROUTES = [
   "/currency", "/compliance-autonumber", "/custom-attributes", "/api-keys",
   "/my-work", "/integrations", "/audit-trail", "/zoho-books", "/catalogs",
   "/traceability", "/deviations", "/bom-variants",
+  // wave 2 parity screens
+  "/requirements", "/mbom",
 ];
 
 

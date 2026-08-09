@@ -20,6 +20,7 @@ from app.models.bom_snapshot import BomBaseline, BomSnapshot
 from app.models.bom_template import BomTemplate
 from app.models.bom_variant import BomVariant, BomVariantItem
 from app.models.bulk_import import BulkImportJob, BulkImportRow
+from app.models.cad_connection import CadConnection
 from app.models.catalog import Catalog, PartCatalog
 from app.models.capa import CAPA, CapaAttachment
 from app.models.comment import Comment
@@ -80,6 +81,7 @@ from app.models.po_models import POHeader, POLineItem
 from app.models.price_history import PriceHistory
 from app.models.project import Project
 from app.models.quality import CapaAction, InspectionPlan, InspectionRecord, NcrReport
+from app.models.requirement import Requirement, RequirementBomLink, RequirementPartLink
 from app.models.resource_scheduling import CapacityReport, ResourceSchedule, WorkCenter
 from app.models.revision import Revision, RevisionBomSnapshotItem
 from app.models.role import Role
@@ -129,6 +131,7 @@ from app.models.team import Team, TeamMember
 from app.models.tenant import Tenant
 from app.models.token_blacklist import TokenBlacklist
 from app.models.traceability import LotBatch, SerialNumber, SerialNumberEvent
+from app.models.uom import UomConversion, UomUnit
 from app.models.user import User
 from app.models.user_data import (
     BomDraft,

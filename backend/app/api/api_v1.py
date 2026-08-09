@@ -148,6 +148,11 @@ api_router.include_router(
     tags=["traceability"],
 )
 api_router.include_router(
+    endpoints.requirements_api.router,
+    prefix="/requirements",
+    tags=["requirements"],
+)
+api_router.include_router(
     endpoints.kanban.router,
     prefix="/kanban",
     tags=["kanban"],
@@ -250,6 +255,20 @@ api_router.include_router(
     prefix="/bom",
     tags=["bom-enterprise"],
 )
+# xBOM: manufacturing BOM (mbom_headers/mbom_items/mbom_operations) — model
+# existed with zero routes; see app/api/endpoints/mbom_api.py.
+api_router.include_router(
+    endpoints.mbom_api.router,
+    prefix="/mbom",
+    tags=["mbom"],
+)
+# CAD connectors: vendor-agnostic routes over the connector registry
+# (app/integrations/cad). Adding a vendor never touches this file again.
+api_router.include_router(
+    endpoints.cad_connectors.router,
+    prefix="/cad-connectors",
+    tags=["cad-connectors"],
+)
 api_router.include_router(
     endpoints.eco_api.router,
     prefix="/eco",
@@ -345,6 +364,13 @@ api_router.include_router(
     endpoints.api_keys.router,
     prefix="/api-keys",
     tags=["api-keys"],
+)
+
+# Units of Measure + conversion (multi-UOM quantity/cost roll-up support)
+api_router.include_router(
+    endpoints.uom_api.router,
+    prefix="/uom",
+    tags=["uom"],
 )
 
 # SAML SSO
