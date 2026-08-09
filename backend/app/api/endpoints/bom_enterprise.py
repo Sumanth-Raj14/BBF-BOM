@@ -6,7 +6,10 @@ Multi-level BOM, quantity rollups, snapshots, where-used, variants
 from decimal import Decimal
 from typing import Any, Optional
 
+import io
+
 from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +17,7 @@ from app.core.deps import get_current_user
 from app.core.rbac import require_engineering, require_viewer
 from app.db.session import get_db
 from app.models.user import User
-from app.services import bom_service
+from app.services import bom_service, export_service
 
 router = APIRouter(
     tags=["bom-enterprise"], dependencies=[Depends(get_current_user), Depends(require_viewer)]
@@ -381,8 +384,22 @@ async def export_bom(
     bom_id: int,
     format: str = Query("csv", pattern="^(csv|excel|pdf|json)$"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    return await bom_service.export_bom(db, bom_id, format)
+    # "excel" is this endpoint's historical alias for the shared contract's "xlsx".
+    resolved_format = "xlsx" if format == "excel" else format
+    content, content_type, filename = await export_service.render_export(
+        db,
+        current_user.tenantId,
+        entity="bom",
+        format=resolved_format,
+        bom_id=bom_id,
+    )
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/import")

@@ -23,7 +23,12 @@ describe("offline sync queue poisoning", () => {
     vi.resetModules();
   });
 
-  it("drops an already-poisoned queue entry on load (array payload for create)", async () => {
+  // 20s: this test re-imports dataService (vi.resetModules) to trigger the
+  // boot-time sanitiser, which re-evaluates its whole dependency graph
+  // (screenDataBridge -> globals -> api.js). That costs more than the 5s
+  // default when the full suite is running in parallel — it passes in ~1s
+  // alone. The timeout guards import cost, not the logic under test.
+  it("drops an already-poisoned queue entry on load (array payload for create)", { timeout: 20000 }, async () => {
     localStorage.setItem(
       QUEUE_KEY,
       JSON.stringify([

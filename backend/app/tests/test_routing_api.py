@@ -1,6 +1,44 @@
 import pytest
 from sqlalchemy import text
 
+from app.core.security import get_password_hash
+from app.models.routing import ProcessPlan
+from app.models.tenant import Tenant
+from app.models.user import User
+from app.tests.conftest import no_tenant_filter
+
+
+async def _scoped_login(client, db_session, tenant_id, email="scoped@example.com"):
+    """Log in as a real, non-superuser, tenant-scoped user.
+
+    auth_headers (conftest's test_user) is a superuser, and
+    User.effective_tenant_id returns None for superusers — so requests made
+    with auth_headers carry NO tenant context and bypass tenant_sql_clause
+    filtering entirely (by design: superusers can see everything). Reads
+    that must prove tenant *isolation* need an ordinary scoped user instead.
+    """
+    user = User(
+        email=email,
+        username=email.split("@")[0],
+        fullName="Scoped User",
+        hashedPassword=get_password_hash("testpass123"),
+        isActive=True,
+        isSuperuser=False,
+        tenantId=tenant_id,
+    )
+    db_session.add(user)
+    await db_session.commit()
+    resp = await client.post(
+        "/api/v1/auth/login",
+        data={"username": email, "password": "testpass123"},
+    )
+    token = resp.json().get("access_token")
+    headers = {"Authorization": f"Bearer {token}"}
+    csrf_cookie = client.cookies.get("csrf_token")
+    if csrf_cookie:
+        headers["X-CSRF-Token"] = csrf_cookie.split(".")[0]
+    return headers
+
 
 @pytest.mark.asyncio
 async def test_raw_inserts_set_tenant_id(client, auth_headers, db_session, tenant_id):
@@ -81,3 +119,47 @@ async def test_routing_api_get_not_found(client, auth_headers):
 async def test_routing_api_without_auth(client):
     resp = await client.get("/api/v1/manufacturing/routings")
     assert resp.status_code in (200, 401)
+
+
+@pytest.mark.asyncio
+async def test_process_plans_list_scoped_to_tenant(client, db_session, test_tenant, tenant_id):
+    """tenant-security: list_process_plans' raw text() read had no tenantId
+    predicate — a tenant could see every other tenant's process plans."""
+    other = Tenant(id=tenant_id + 1, tenant_name="Other Tenant", tenant_code="OTHER")
+    db_session.add(other)
+    await db_session.commit()
+
+    mine = ProcessPlan(plan_number="PP-MINE-0001", name="Mine", tenantId=test_tenant.id)
+    theirs = ProcessPlan(plan_number="PP-THEIRS-0001", name="Theirs", tenantId=other.id)
+    db_session.add_all([mine, theirs])
+    await db_session.commit()
+
+    headers = await _scoped_login(client, db_session, tenant_id)
+    resp = await client.get("/api/v1/manufacturing/process-plans", headers=headers)
+    assert resp.status_code == 200, resp.text
+    names = {row["name"] for row in resp.json()}
+    assert "Mine" in names
+    assert "Theirs" not in names
+
+
+@pytest.mark.asyncio
+async def test_process_plan_get_scoped_to_tenant(client, db_session, test_tenant, tenant_id):
+    """tenant-security: get_process_plan's raw text() read had no tenantId
+    predicate — a tenant could fetch another tenant's process plan by id."""
+    other = Tenant(id=tenant_id + 1, tenant_name="Other Tenant", tenant_code="OTHER")
+    db_session.add(other)
+    await db_session.commit()
+
+    theirs = ProcessPlan(plan_number="PP-THEIRS-0002", name="Theirs", tenantId=other.id)
+    db_session.add(theirs)
+    await db_session.commit()
+    # refresh() issues a SELECT, which the ORM-level tenant-isolation listener
+    # auto-filters to the ambient (tenant 1) context — bypass it here since
+    # this is test setup for tenant 2's own row, not tenant 1 reading it.
+    with no_tenant_filter():
+        await db_session.refresh(theirs)
+    theirs_id = theirs.id
+
+    headers = await _scoped_login(client, db_session, tenant_id)
+    resp = await client.get(f"/api/v1/manufacturing/process-plans/{theirs_id}", headers=headers)
+    assert resp.status_code == 404, resp.text

@@ -253,6 +253,11 @@ class Settings(BaseSettings):
     # Backup
     BACKUP_DIR: str = "./backups"
     BACKUP_SCHEDULE_HOURS: int = 6
+
+    # How often the background scheduler drains NotificationQueue (email
+    # channel) via email_service.process_notification_queue. Mirrors the
+    # integration outbox drainer's own interval setting.
+    NOTIFICATION_QUEUE_DRAIN_INTERVAL_SECONDS: int = 30
     BACKUP_MIN_DISK_GB: int = 5
     # WAL archive directory — MUST match postgresql.conf's archive_command
     # target (see backend/postgresql.conf) and scripts/pitr_restore.py, or

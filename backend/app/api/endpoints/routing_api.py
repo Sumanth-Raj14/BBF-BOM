@@ -170,9 +170,11 @@ async def list_process_plans(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: scope the process_plans read by tenant, like list_routings.
+    tc, tp = tenant_sql_clause("pp")
     r = await db.execute(
         text(
-            """SELECT pp.*, pp.plan_number as code,
+            f"""SELECT pp.*, pp.plan_number as code,
                COALESCE(step_counts.cnt, 0) as steps_count,
                COALESCE(
                    (SELECT SUM(COALESCE(setup_time_min, 0) + COALESCE(run_time_min, 0))
@@ -183,9 +185,10 @@ async def list_process_plans(
                 SELECT process_plan_id, COUNT(*) as cnt
                 FROM process_plan_steps GROUP BY process_plan_id
             ) step_counts ON pp.id = step_counts.process_plan_id
+            WHERE 1=1 {tc}
             ORDER BY pp.id DESC LIMIT :l OFFSET :s"""
         ),
-        {"l": limit, "s": skip},
+        {"l": limit, "s": skip, **tp},
     )
     return [dict(row) for row in r.mappings().all()]
 
@@ -225,8 +228,15 @@ async def get_process_plan(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: scope the process_plans lookup by tenant.
+    tc, tp = tenant_sql_clause()
     hdr = (
-        (await db.execute(text("SELECT * FROM process_plans WHERE id = :id"), {"id": plan_id}))
+        (
+            await db.execute(
+                text(f"SELECT * FROM process_plans WHERE id = :id {tc}"),
+                {"id": plan_id, **tp},
+            )
+        )
         .mappings()
         .first()
     )

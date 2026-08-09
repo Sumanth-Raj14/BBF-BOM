@@ -211,6 +211,70 @@ async def test_non_approver_engineer_cannot_approve(
 
 
 @pytest.mark.asyncio
+async def test_submit_creates_pending_approval_row_for_designated_approver(
+    client, creator_headers, approver, db_session
+):
+    """Submitting an ECO must actually create an eco_approvals row — this is
+    the gap where the table, the approval endpoints, and the ECR approval UI
+    all read eco_approvals but nothing ever wrote to it, so approvals were
+    always empty."""
+    eco_id = await _create_eco(client, creator_headers)
+    await _submit_eco(client, creator_headers, eco_id)
+
+    result = await db_session.execute(select(EcoApproval).where(EcoApproval.eco_id == eco_id))
+    approvals = result.scalars().all()
+    assert len(approvals) == 1
+    assert approvals[0].approver_id == approver.id
+    assert approvals[0].status == "pending"
+    assert approvals[0].approval_order == 1
+    assert approvals[0].tenantId == approver.tenantId
+
+
+@pytest.mark.asyncio
+async def test_submit_creates_pending_approval_row_per_designated_approver(
+    client, creator_headers, approver, admin_role, db_session, tenant_id
+):
+    """Multiple designated approvers on the tenant each get their own
+    pending row with a distinct approval_order — not just the first one."""
+    second_admin = await _make_user(
+        db_session, tenant_id, admin_role, "second-admin@example.com", "secondadminuser"
+    )
+    eco_id = await _create_eco(client, creator_headers)
+    await _submit_eco(client, creator_headers, eco_id)
+
+    result = await db_session.execute(
+        select(EcoApproval).where(EcoApproval.eco_id == eco_id).order_by(EcoApproval.approval_order)
+    )
+    approvals = result.scalars().all()
+    assert {a.approver_id for a in approvals} == {approver.id, second_admin.id}
+    assert all(a.status == "pending" for a in approvals)
+    assert [a.approval_order for a in approvals] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_approve_fills_in_pending_row_instead_of_duplicating(
+    client, creator_headers, approver_headers, approver, db_session
+):
+    """approve() must consume the pending row submit() created, not leave it
+    dangling forever while inserting a second, separate 'approved' row."""
+    eco_id = await _create_eco(client, creator_headers)
+    await _submit_eco(client, creator_headers, eco_id)
+
+    resp = await client.post(
+        f"/api/v1/eco/{eco_id}/action",
+        headers=approver_headers,
+        json={"action": "approve", "comments": "looks good", "password": "testpass123"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    result = await db_session.execute(select(EcoApproval).where(EcoApproval.eco_id == eco_id))
+    approvals = result.scalars().all()
+    assert len(approvals) == 1
+    assert approvals[0].status == "approved"
+    assert approvals[0].comments == "looks good"
+
+
+@pytest.mark.asyncio
 async def test_authorized_user_can_approve_submitted_eco(
     client, creator_headers, approver_headers, approver, db_session
 ):
