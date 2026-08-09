@@ -39,6 +39,7 @@ const ROUTES = [
   "/traceability", "/deviations", "/bom-variants",
   // wave 2 parity screens
   "/requirements", "/mbom",
+  "/cad-connectors",
 ];
 
 

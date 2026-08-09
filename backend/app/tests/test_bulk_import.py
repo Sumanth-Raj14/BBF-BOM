@@ -1,11 +1,16 @@
 import io
 
 import pytest
+import pytest_asyncio
 from openpyxl import Workbook
 from sqlalchemy import select
 
+from app.core.security import get_password_hash
+from app.core.tenant_context import TenantContext
+from app.models.bulk_import import BulkImportRow
 from app.models.part import Part
 from app.models.tenant import Tenant
+from app.models.user import User
 from app.tests.conftest import no_tenant_filter
 
 
@@ -37,7 +42,10 @@ async def test_upload_empty_filename(client, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_process_import(client, auth_headers):
+async def test_process_import(client, auth_headers, db_session):
+    """/process must actually create the Part row, not just relabel rows as
+    "processed" -- it used to report success while writing zero Part rows.
+    """
     upload_resp = await client.post(
         "/api/v1/import/upload",
         headers=auth_headers,
@@ -58,7 +66,45 @@ async def test_process_import(client, auth_headers):
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] in ("completed", "completed_with_errors")
-    assert data["processedRows"] >= 0
+    assert data["processedRows"] == 1
+
+    part = (
+        await db_session.execute(select(Part).where(Part.pn == "PROC-001"))
+    ).scalar_one()
+    assert part.name == "Process Part"
+
+
+@pytest.mark.asyncio
+async def test_process_import_does_not_fabricate_success_on_bad_mapping(client, auth_headers, db_session):
+    """An empty/wrong mapping must show up as failed rows with zero created
+    Parts -- not a silent "completed" success claim (the old fabricated-
+    success path)."""
+    upload_resp = await client.post(
+        "/api/v1/import/upload",
+        headers=auth_headers,
+        files={
+            "file": (
+                "nomap.csv",
+                io.BytesIO(b"pn,name\nNOMAP-001,No Map Part\n"),
+                "text/csv",
+            )
+        },
+    )
+    job_id = upload_resp.json()["id"]
+    resp = await client.post(
+        f"/api/v1/import/{job_id}/process",
+        headers=auth_headers,
+        json={"mappingConfig": {}},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["processedRows"] == 0
+    assert data["errorRows"] == 1
+
+    existing = (
+        await db_session.execute(select(Part).where(Part.pn == "NOMAP-001"))
+    ).scalars().all()
+    assert existing == []
 
 
 @pytest.mark.asyncio
@@ -378,3 +424,154 @@ async def test_import_never_crosses_tenants(client, auth_headers, db_session, te
     assert mine.name == "My Part"
     assert theirs.id == their_part_id
     assert theirs.name == "Their Part"
+
+
+# ---------------------------------------------------------------------------
+# Tenant isolation: /status, /errors, /process (IDOR / cross-tenant leak)
+#
+# Pre-fix, these three routes selected BulkImportJob/BulkImportRow by id with
+# NO tenantId predicate at all -- any authenticated user of ANY tenant could
+# read (or, for /process, mutate) another tenant's job by incrementing
+# job_id. Mirrors the second_tenant/user_t2/auth_headers_t2 pattern used in
+# test_derivatives.py for a real second logged-in tenant (not just a second
+# DB row under the same ambient test context).
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def second_tenant(db_session):
+    tenant = Tenant(id=2, tenant_name="Second Tenant", tenant_code="TEST2")
+    db_session.add(tenant)
+    await db_session.commit()
+    return tenant
+
+
+@pytest_asyncio.fixture
+async def user_t2(db_session, second_tenant):
+    user = User(
+        email="t2-import-user@example.com",
+        username="t2importuser",
+        fullName="Tenant Two User",
+        hashedPassword=get_password_hash("testpass123"),
+        isActive=True,
+        isSuperuser=True,
+        tenantId=second_tenant.id,
+    )
+    db_session.add(user)
+    token = TenantContext.set(tenant_id=second_tenant.id)
+    try:
+        await db_session.commit()
+        await db_session.refresh(user)
+    finally:
+        TenantContext.reset(token)
+    return user
+
+
+@pytest_asyncio.fixture
+async def auth_headers_t2(client, user_t2, second_tenant):
+    token = TenantContext.set(tenant_id=second_tenant.id)
+    try:
+        resp = await client.post(
+            "/api/v1/auth/login",
+            data={"username": "t2-import-user@example.com", "password": "testpass123"},
+        )
+        access_token = resp.json().get("access_token")
+        headers = {"Authorization": f"Bearer {access_token}"}
+        csrf_cookie = client.cookies.get("csrf_token")
+        if csrf_cookie:
+            headers["X-CSRF-Token"] = csrf_cookie.split(".")[0]
+        client.cookies.delete("access_token")
+        client.cookies.delete("refresh_token")
+        return headers
+    finally:
+        TenantContext.reset(token)
+
+
+async def _upload_job_as_tenant_a(client, auth_headers) -> int:
+    resp = await client.post(
+        "/api/v1/import/upload",
+        headers=auth_headers,
+        files={
+            "file": (
+                "tenant-a.csv",
+                io.BytesIO(b"pn,name,cost,mpn\nSECRET-001,Tenant A Secret Part,999.50,MPN-A\n"),
+                "text/csv",
+            )
+        },
+    )
+    assert resp.status_code == 200
+    return resp.json()["job_id"]
+
+
+@pytest.mark.asyncio
+async def test_status_refuses_other_tenant(client, auth_headers, auth_headers_t2):
+    job_id = await _upload_job_as_tenant_a(client, auth_headers)
+
+    # Sanity: the owning tenant can read its own job.
+    own_resp = await client.get(f"/api/v1/import/{job_id}/status", headers=auth_headers)
+    assert own_resp.status_code == 200
+
+    resp = await client.get(f"/api/v1/import/{job_id}/status", headers=auth_headers_t2)
+    assert resp.status_code == 404, (
+        f"tenant B read tenant A's import job status (leaked rowData): {resp.status_code} {resp.text}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_errors_refuses_other_tenant(client, auth_headers, auth_headers_t2):
+    job_id = await _upload_job_as_tenant_a(client, auth_headers)
+
+    resp = await client.get(f"/api/v1/import/{job_id}/errors", headers=auth_headers_t2)
+    assert resp.status_code == 404, (
+        f"tenant B read tenant A's import job errors: {resp.status_code} {resp.text}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_refuses_other_tenant(client, auth_headers, auth_headers_t2, db_session):
+    job_id = await _upload_job_as_tenant_a(client, auth_headers)
+
+    resp = await client.post(
+        f"/api/v1/import/{job_id}/process",
+        headers=auth_headers_t2,
+        json={"mappingConfig": {"pn": "pn", "name": "name"}},
+    )
+    assert resp.status_code == 404, (
+        f"tenant B mutated tenant A's import job/rows: {resp.status_code} {resp.text}"
+    )
+
+    # The row must still hold tenant A's original, unmutated data.
+    with no_tenant_filter():
+        row = (
+            await db_session.execute(select(BulkImportRow).where(BulkImportRow.jobId == job_id))
+        ).scalar_one()
+    assert row.status == "pending"
+    assert row.rowData["pn"] == "SECRET-001"
+
+
+@pytest.mark.asyncio
+async def test_process_completes_without_integrity_error_on_bad_row(
+    client, auth_headers, db_session
+):
+    """A row that errors out inside /process must still let the job commit as
+    "completed" (with errorRows>0) -- not crash trying to persist a status
+    value the ck_bulk_import_jobs_status CHECK constraint forbids.
+    """
+    job_id = await _upload_job_as_tenant_a(client, auth_headers)
+
+    # Force the per-row processing branch into its except path.
+    row = (
+        await db_session.execute(select(BulkImportRow).where(BulkImportRow.jobId == job_id))
+    ).scalar_one()
+    row.rowData = None
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/import/{job_id}/process",
+        headers=auth_headers,
+        json={"mappingConfig": {"pn": "pn", "name": "name"}},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["status"] == "completed"
+    assert data["errorRows"] == 1

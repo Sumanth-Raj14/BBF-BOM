@@ -89,6 +89,7 @@ export const SECTIONS = [
     items: [
       { id: "webhooks", label: "Webhooks", icon: <Icon.Link size={size} /> },
       { id: "erp", label: "ERP Connectors", icon: <Icon.Refresh size={size} /> },
+      { id: "cad-connectors", label: "CAD Connectors", icon: <Icon.Refresh size={size} /> },
       { id: "zoho-books", label: "Zoho Books", icon: <Icon.Refresh size={size} /> },
       { id: "monitoring", label: "Monitoring", icon: <Icon.Activity size={size} /> },
     ],

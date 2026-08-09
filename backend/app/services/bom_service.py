@@ -26,7 +26,7 @@ from app.models.bom_variant import BomVariant, BomVariantItem
 from app.models.document import Document
 from app.models.enterprise_extensions import CustomAttributeDefinition
 from app.models.part import Part
-from app.services import webhook_service
+from app.services import uom_service, webhook_service
 
 # Upload location comes from settings (env-configurable via UPLOAD_DIR), same as
 # documents.py, so a packaged / read-only install can point it at a writable
@@ -193,7 +193,7 @@ async def derive_mbom_from_ebom(
             MbomItem(
                 mbom_id=header.id,
                 part_id=item.part_id,
-                quantity=item.quantity or 1,
+                quantity=item.quantity if item.quantity is not None else 1,
                 unit=item.unit or "EA",
                 notes=item.notes,
                 tenantId=tid,
@@ -1320,19 +1320,61 @@ async def get_quantity_rollup(db: AsyncSession, bom_id: int) -> dict:
 
     levels, effective_qty = _compute_levels_and_effective_qty(items)
 
+    # Multi-UOM: two BOM lines for the SAME part can be counted in different
+    # units (2 M on one line, 150 CM on another) — summing the raw numbers
+    # would silently produce a meaningless total. The first line seen for a
+    # part number becomes that part's anchor unit; every later line in the
+    # SAME literal unit adds with zero DB cost (identical to pre-UOM
+    # behaviour — the case every existing single-unit BOM hits). A later
+    # line in a DIFFERENT unit is converted into the anchor via uom_service;
+    # if that conversion is impossible (cross-dimension, or either side is
+    # an unrecognised free-text unit), it is never folded in as if 1:1 —
+    # it's left out of the total and reported in uom_warnings so a wrong
+    # number is never mistaken for a right one.
+    # ponytail: this loop calls uom_service.try_convert per differing-unit
+    # line (2 queries each) rather than caching units/factors across the
+    # loop the way uom_service.rollup_quantities now does — real N+1 on a
+    # BOM with many mixed-uom lines, deferred because it would mean
+    # threading a cache dict through convert()/try_convert()'s public
+    # signature. Upgrade path: give try_convert/extended_cost an optional
+    # cache kwarg, mirroring the local dicts in rollup_quantities.
     total_quantity_map: dict[str, float] = {}
+    unit_by_part: dict[str, str] = {}
     levels_by_part: dict[str, set[int]] = {}
+    uom_warnings: list[dict] = []
     for item in items:
         if item.part_id:
             pid = item.part_id
             pn = parts[pid].pn if pid in parts else f"ID:{pid}"
-            total_quantity_map[pn] = total_quantity_map.get(pn, 0) + effective_qty[item.id]
+            unit = item.unit or "EA"
+            eff_qty = effective_qty[item.id]
+            if pn not in total_quantity_map:
+                total_quantity_map[pn] = eff_qty
+                unit_by_part[pn] = unit
+            else:
+                anchor = unit_by_part[pn]
+                if unit.strip().upper() == anchor.strip().upper():
+                    total_quantity_map[pn] += eff_qty
+                else:
+                    converted, err = await uom_service.try_convert(db, eff_qty, unit, anchor, tid)
+                    if err is not None:
+                        uom_warnings.append(
+                            {
+                                "part_number": pn,
+                                "line_unit": unit,
+                                "expected_unit": anchor,
+                                "message": err,
+                            }
+                        )
+                    else:
+                        total_quantity_map[pn] += float(converted)
             levels_by_part.setdefault(pn, set()).add(levels[item.id])
 
     rollup = [
         {
             "part_number": pn,
             "total_quantity": qty,
+            "unit": unit_by_part.get(pn, "EA"),
             "levels": sorted(levels_by_part.get(pn, {1})),
         }
         for pn, qty in sorted(total_quantity_map.items(), key=lambda x: -x[1])
@@ -1342,6 +1384,7 @@ async def get_quantity_rollup(db: AsyncSession, bom_id: int) -> dict:
         "total_items": len(items),
         "unique_parts": len(part_ids),
         "rollup": rollup,
+        "uom_warnings": uom_warnings,
     }
 
 
@@ -1375,14 +1418,39 @@ async def get_cost_rollup(db: AsyncSession, bom_id: int) -> dict:
     total_cost = 0.0
     cost_by_level: dict[int, float] = {}
     cost_by_category: dict[str, float] = {}
+    uom_warnings: list[dict] = []
 
     levels, effective_qty = _compute_levels_and_effective_qty(items)
 
     for item in items:
         if item.part_id and item.part_id in parts_map:
             part = parts_map[item.part_id]
-            unit_cost = float(item.unit_cost_snapshot or (part.cost or 0))
-            extended = unit_cost * effective_qty[item.id]
+            # A snapshot cost is what was recorded FOR this line, so it's
+            # priced per this line's own unit (line_uom == cost_uom below ->
+            # extended_cost's identical-unit fast path, no DB hit, same
+            # number as pre-UOM code). Falling back to Part.cost means the
+            # cost is priced per the PART's stock unit (part.uom), which can
+            # legitimately differ from this line's unit (e.g. costed per M,
+            # line counted in CM) — that's the case uom_service.extended_cost
+            # converts for. Same truthy-fallback rule as before this feature
+            # (a 0/None snapshot falls through to part.cost).
+            if item.unit_cost_snapshot:
+                unit_cost = float(item.unit_cost_snapshot)
+                cost_uom = item.unit or "EA"
+            else:
+                unit_cost = float(part.cost or 0)
+                cost_uom = part.uom or "EA"
+            extended_decimal, warning = await uom_service.extended_cost(
+                db, effective_qty[item.id], item.unit or "EA", unit_cost, cost_uom, tid
+            )
+            extended = float(extended_decimal)
+            if warning is not None:
+                uom_warnings.append(
+                    {
+                        "part_number": part.pn,
+                        "message": warning,
+                    }
+                )
             total_cost += extended
             level = levels[item.id]
             cost_by_level[level] = cost_by_level.get(level, 0) + extended
@@ -1394,6 +1462,7 @@ async def get_cost_rollup(db: AsyncSession, bom_id: int) -> dict:
         "total_cost": round(total_cost, 2),
         "cost_by_level": {k: round(v, 2) for k, v in cost_by_level.items()},
         "cost_by_category": {k: round(v, 2) for k, v in cost_by_category.items()},
+        "uom_warnings": uom_warnings,
     }
     await cache_set(cache_key, result, ttl=300)
     return result
@@ -1674,7 +1743,10 @@ async def create_snapshot(
     part_ids = [item.part_id for item in items if item.part_id]
     parts_map: dict[int, Any] = {}
     if part_ids:
-        pr = await db.execute(select(Part).where(Part.id.in_(set(part_ids))))
+        parts_stmt = select(Part).where(Part.id.in_(set(part_ids)))
+        if tid is not None:
+            parts_stmt = parts_stmt.where(Part.tenantId == tid)
+        pr = await db.execute(parts_stmt)
         for p in pr.scalars().all():
             parts_map[p.id] = p
 
@@ -1771,7 +1843,10 @@ async def compare_boms(db: AsyncSession, bom_id_1: int, bom_id_2: int) -> dict:
     items2 = {i.part_id: i for i in items2_r.scalars().all() if i.part_id}
 
     all_ids = set(items1.keys()) | set(items2.keys())
-    parts_r = await db.execute(select(Part).where(Part.id.in_(all_ids)))
+    parts_stmt = select(Part).where(Part.id.in_(all_ids))
+    if tid is not None:
+        parts_stmt = parts_stmt.where(Part.tenantId == tid)
+    parts_r = await db.execute(parts_stmt)
     parts = {p.id: p for p in parts_r.scalars().all()}
 
     added, removed, modified, unchanged = [], [], [], []
@@ -1840,7 +1915,10 @@ async def create_baseline(
     part_ids = [item.part_id for item in items if item.part_id]
     parts_map: dict[int, Any] = {}
     if part_ids:
-        pr = await db.execute(select(Part).where(Part.id.in_(set(part_ids))))
+        parts_stmt = select(Part).where(Part.id.in_(set(part_ids)))
+        if tid is not None:
+            parts_stmt = parts_stmt.where(Part.tenantId == tid)
+        pr = await db.execute(parts_stmt)
         for p in pr.scalars().all():
             parts_map[p.id] = p
 
@@ -1940,7 +2018,10 @@ async def get_variant(db: AsyncSession, variant_id: int) -> dict:
     part_ids = {i.part_id for i in variant_items if i.part_id}
     parts_map = {}
     if part_ids:
-        pr = await db.execute(select(Part).where(Part.id.in_(part_ids)))
+        parts_stmt = select(Part).where(Part.id.in_(part_ids))
+        if tid is not None:
+            parts_stmt = parts_stmt.where(Part.tenantId == tid)
+        pr = await db.execute(parts_stmt)
         for p in pr.scalars().all():
             parts_map[p.id] = p
 
@@ -1987,7 +2068,10 @@ async def add_variant_item(
     result = await db.execute(variant_stmt)
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Variant not found")
-    part = await db.execute(select(Part).where(Part.id == part_id))
+    part_stmt = select(Part).where(Part.id == part_id)
+    if tid is not None:
+        part_stmt = part_stmt.where(Part.tenantId == tid)
+    part = await db.execute(part_stmt)
     if not part.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Part not found")
 
@@ -2020,7 +2104,10 @@ async def export_bom(db: AsyncSession, bom_id: int, format: str) -> dict:
     part_ids = [i.part_id for i in items if i.part_id]
     parts_map = {}
     if part_ids:
-        pr = await db.execute(select(Part).where(Part.id.in_(set(part_ids))))
+        parts_stmt = select(Part).where(Part.id.in_(set(part_ids)))
+        if tid is not None:
+            parts_stmt = parts_stmt.where(Part.tenantId == tid)
+        pr = await db.execute(parts_stmt)
         for p in pr.scalars().all():
             parts_map[p.id] = p
 
@@ -2091,13 +2178,19 @@ async def create_template(
     source_bom_id: Optional[int] = None,
     user_id: int = None,
 ) -> BomTemplate:
+    tid = get_tenant_id()
     ptc = 0
     if source_bom_id:
-        src = await db.execute(select(BOM).where(BOM.id == source_bom_id))
+        src_stmt = select(BOM).where(BOM.id == source_bom_id)
+        if tid is not None:
+            src_stmt = src_stmt.where(BOM.tenantId == tid)
+        src = await db.execute(src_stmt)
         if src.scalar_one_or_none():
-            items = await db.execute(select(BOMItem).where(BOMItem.bom_id == source_bom_id))
+            items_stmt = select(BOMItem).where(BOMItem.bom_id == source_bom_id)
+            if tid is not None:
+                items_stmt = items_stmt.where(BOMItem.tenantId == tid)
+            items = await db.execute(items_stmt)
             ptc = len(items.scalars().all())
-    tid = get_tenant_id()
     tmpl = BomTemplate(
         name=name,
         description=description,
@@ -2158,7 +2251,7 @@ async def apply_template(
         item = BOMItem(
             bom_id=bom.id,
             part_id=ti.partId,
-            quantity=ti.quantity or 1,
+            quantity=ti.quantity if ti.quantity is not None else 1,
             reference_designator=ti.referenceDesignator,
             notes=ti.notes,
             sort_order=ti.sortOrder or 0,
@@ -2178,8 +2271,10 @@ async def apply_template(
     await db.commit()
     await db.refresh(bom)
 
+    # ponytail: session has expire_on_commit=False (session.py), and item.id/
+    # part_id/tenantId are already populated from the flush() above, so no
+    # per-item refresh() round trip is needed here.
     for item in created_items:
-        await db.refresh(item)
         await webhook_service.emit_event(
             db,
             "bom.item.created",

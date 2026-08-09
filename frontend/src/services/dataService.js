@@ -424,67 +424,15 @@ export const dataService = {
   },
 
   async migrateToBackend() {
+    // ponytail: bomRows/ecrs/templates below were always hardcoded to null
+    // (no localStorage source ever populated them), so every migration
+    // branch was dead — this always resolved to {migrated:[],skipped:[],
+    // errors:[]}. Collapsed to what it actually always evaluated to;
+    // restore the real per-domain branches if/when a legacy localStorage
+    // migration source exists again.
     if (!_online) return { migrated: false, reason: 'offline' };
-    const results = { migrated: [], skipped: [], errors: [] };
     if (!api) return { migrated: false, reason: 'no-api' };
-
-    const bomRows = null;
-    if (bomRows && Array.isArray(bomRows) && bomRows.length > 0) {
-      try {
-        const existing = await api.parts.list({ per_page: 1 });
-        if (!existing || !existing.items || existing.items.length === 0) {
-          for (const row of bomRows) {
-            try {
-              await api.parts.create({
-                pn: row.pn, name: row.name, rev: row.rev, qty: row.qty,
-                uom: row.uom, category: row.category, vendor: row.vendor,
-                cost: row.cost, lead: row.lead, origin: row.origin,
-                status: row.status, assembly: row.assembly || false,
-                material: row.material || '', weight: row.weight,
-                dimensions: row.dimensions || '',
-              });
-              results.migrated.push(row.pn);
-            } catch (e) {
-              results.errors.push({ pn: row.pn, error: e.message });
-            }
-          }
-        } else {
-          results.skipped.push('parts: backend already has data');
-        }
-      } catch (e) {
-        results.errors.push({ domain: 'parts', error: e.message });
-      }
-    }
-
-    const ecrs = null;
-    if (ecrs && Array.isArray(ecrs) && ecrs.length > 0) {
-      try {
-        for (const ecr of ecrs) {
-          try {
-            await api.eco.create(ecr);
-            results.migrated.push('ecr:' + (ecr.id || ecr.number));
-          } catch (e) {
-            results.errors.push({ ecr: ecr.id, error: e.message });
-          }
-        }
-      } catch { /* skip */ }
-    }
-
-    const templates = null;
-    if (templates && Array.isArray(templates) && templates.length > 0) {
-      try {
-        for (const t of templates) {
-          try {
-            await api.bomTemplates.create(t);
-            results.migrated.push('template:' + t.name);
-          } catch (e) {
-            results.errors.push({ template: t.name, error: e.message });
-          }
-        }
-      } catch { /* skip */ }
-    }
-
-    return results;
+    return { migrated: [], skipped: [], errors: [] };
   },
 };
 

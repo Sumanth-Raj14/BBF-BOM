@@ -269,6 +269,136 @@ async def test_coverage_reports_uncovered_requirements(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_create_requirement_duplicate_key_returns_409(client, auth_headers):
+    """uq_requirements_tenant_key is DB-enforced only; a collision used to
+    surface as an unhandled IntegrityError -> generic 500 instead of a clean
+    4xx, unlike the sibling link endpoints in this same file."""
+    payload = {"key": "REQ-DUP-1", "title": "First", "type": "functional"}
+    first = await client.post("/api/v1/requirements/", headers=auth_headers, json=payload)
+    assert first.status_code == 201
+
+    dup = await client.post(
+        "/api/v1/requirements/",
+        headers=auth_headers,
+        json={"key": "REQ-DUP-1", "title": "Second", "type": "functional"},
+    )
+    assert dup.status_code == 409, dup.text
+
+
+@pytest.mark.asyncio
+async def test_update_requirement_duplicate_key_returns_409(client, auth_headers):
+    await client.post(
+        "/api/v1/requirements/",
+        headers=auth_headers,
+        json={"key": "REQ-DUP-EXISTING", "title": "Existing", "type": "functional"},
+    )
+    other = await client.post(
+        "/api/v1/requirements/",
+        headers=auth_headers,
+        json={"key": "REQ-DUP-OTHER", "title": "Other", "type": "functional"},
+    )
+    other_id = other.json()["id"]
+
+    resp = await client.put(
+        f"/api/v1/requirements/{other_id}",
+        headers=auth_headers,
+        json={"key": "REQ-DUP-EXISTING"},
+    )
+    assert resp.status_code == 409, resp.text
+
+
+@pytest.mark.asyncio
+async def test_link_part_rejects_nonexistent_part(client, auth_headers):
+    req_resp = await client.post(
+        "/api/v1/requirements/",
+        headers=auth_headers,
+        json={"key": "REQ-BAD-PART", "title": "Needs a real part", "type": "functional"},
+    )
+    req_id = req_resp.json()["id"]
+
+    resp = await client.post(
+        f"/api/v1/requirements/{req_id}/parts", headers=auth_headers, json={"partId": 999999}
+    )
+    assert resp.status_code == 404, resp.text
+
+
+@pytest.mark.asyncio
+async def test_link_bom_rejects_nonexistent_bom(client, auth_headers):
+    req_resp = await client.post(
+        "/api/v1/requirements/",
+        headers=auth_headers,
+        json={"key": "REQ-BAD-BOM", "title": "Needs a real BOM", "type": "functional"},
+    )
+    req_id = req_resp.json()["id"]
+
+    resp = await client.post(
+        f"/api/v1/requirements/{req_id}/boms", headers=auth_headers, json={"bomId": 999999}
+    )
+    assert resp.status_code == 404, resp.text
+
+
+@pytest.mark.asyncio
+async def test_link_part_rejects_cross_tenant_part(client, db_session):
+    headers_t1 = await _scoped_login(client, db_session, 1, "reqpart-t1@example.com")
+    headers_t2 = await _scoped_login(client, db_session, 2, "reqpart-t2@example.com")
+
+    part_b_resp = await client.post(
+        "/api/v1/parts/",
+        headers=headers_t2,
+        json={"pn": "REQPART-SECRET-B", "name": "Tenant 2 secret part"},
+    )
+    part_b_id = part_b_resp.json()["id"]
+
+    req_resp = await client.post(
+        "/api/v1/requirements/",
+        headers=headers_t1,
+        json={"key": "REQ-CROSS-PART", "title": "Tenant 1 requirement", "type": "functional"},
+    )
+    req_id = req_resp.json()["id"]
+
+    resp = await client.post(
+        f"/api/v1/requirements/{req_id}/parts", headers=headers_t1, json={"partId": part_b_id}
+    )
+    assert resp.status_code == 404, resp.text
+
+    links = await client.get(f"/api/v1/requirements/{req_id}/parts", headers=headers_t1)
+    assert links.json() == []
+
+
+@pytest.mark.asyncio
+async def test_link_bom_rejects_cross_tenant_bom(client, db_session):
+    headers_t1 = await _scoped_login(client, db_session, 1, "reqbom-t1@example.com")
+    headers_t2 = await _scoped_login(client, db_session, 2, "reqbom-t2@example.com")
+
+    from app.core.tenant_context import TenantContext
+
+    bom_b = BOM(bom_number="REQ-CROSS-BOM-B", name="Tenant 2 BOM", tenantId=2)
+    db_session.add(bom_b)
+    token = TenantContext.set(tenant_id=2)
+    try:
+        await db_session.commit()
+        await db_session.refresh(bom_b)
+    finally:
+        TenantContext.reset(token)
+    bom_b_id = bom_b.id
+
+    req_resp = await client.post(
+        "/api/v1/requirements/",
+        headers=headers_t1,
+        json={"key": "REQ-CROSS-BOM", "title": "Tenant 1 requirement", "type": "functional"},
+    )
+    req_id = req_resp.json()["id"]
+
+    resp = await client.post(
+        f"/api/v1/requirements/{req_id}/boms", headers=headers_t1, json={"bomId": bom_b_id}
+    )
+    assert resp.status_code == 404, resp.text
+
+    links = await client.get(f"/api/v1/requirements/{req_id}/boms", headers=headers_t1)
+    assert links.json() == []
+
+
+@pytest.mark.asyncio
 async def test_tenant_isolation(client, db_session):
     headers_t1 = await _scoped_login(client, db_session, 1, "req-t1@example.com")
     headers_t2 = await _scoped_login(client, db_session, 2, "req-t2@example.com")

@@ -1108,8 +1108,44 @@ export const erpConnectorsAPI = {
   testConnection: (id) => apiRequest(`/erp-connectors/${id}/test-connection`, { method: 'POST' }),
 };
 
+// CAD Connectors — generic framework (Onshape/Fusion/Altium cloud) + the
+// credential-free Altium file-upload path. See
+// app/api/endpoints/cad_connectors.py. Distinct from the legacy `cadAPI`
+// above, which is the older CAD-sync/PDM-vault surface, not this connector
+// framework.
+export const cadConnectorsAPI = {
+  types: () => apiRequest('/cad-connectors/types'),
+  list: () => apiRequest('/cad-connectors'),
+  create: (data) => apiRequest('/cad-connectors', { method: 'POST', body: JSON.stringify(data) }),
+  delete: (id) => apiRequest(`/cad-connectors/${id}`, { method: 'DELETE' }),
+  test: (id) => apiRequest(`/cad-connectors/${id}/test`, { method: 'POST' }),
+  documents: (id) => apiRequest(`/cad-connectors/${id}/documents`),
+  importAssembly: (id, data) => apiRequest(`/cad-connectors/${id}/import`, { method: 'POST', body: JSON.stringify(data) }),
+  // No stored connection / no credentials — the multipart upload every
+  // Altium customer can use day one. `dryRun: true` parses and previews
+  // without writing a row (mirrors importAPI.upload's multipart handling).
+  importAltiumFile: async (file, { bomName, dryRun = false } = {}) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (bomName) formData.append('bom_name', bomName);
+    formData.append('dry_run', dryRun ? 'true' : 'false');
+    const response = await fetch(`${API_BASE}/cad-connectors/altium/import-file`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: csrfHeaders(),
+      body: formData,
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: 'Import failed' }));
+      throw new Error(err.detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
+};
+
 // BOM Enterprise API
 export const bomEnterpriseAPI = {
+  list: () => apiRequest('/bom/'),
   explosion: (bomId, level = 10) => apiRequest(`/bom/${bomId}/explosion?level=${level}`),
   quantityRollup: (bomId) => apiRequest(`/bom/${bomId}/quantity-rollup`),
   costRollup: (bomId) => apiRequest(`/bom/${bomId}/cost-rollup`),
@@ -1213,28 +1249,27 @@ export const aiAPI = {
 };
 
 // Compliance API (ISO 9001, AS9100, RoHS, REACH)
-// Backend mounts the compliance router under the /compliance prefix and its
-// routes are themselves /compliance/... , so the effective base is doubled:
-// /compliance/compliance.
+// Backend mounts the compliance router under the /compliance prefix; its
+// routes are relative to that (e.g. "" -> /compliance, "/packs" -> /compliance/packs).
 export const complianceAPI = {
   list: (params = {}) => {
     const q = new URLSearchParams(params).toString();
-    return apiRequest(`/compliance/compliance${q ? '?' + q : ''}`);
+    return apiRequest(`/compliance${q ? '?' + q : ''}`);
   },
-  create: (data) => apiRequest('/compliance/compliance', { method: 'POST', body: JSON.stringify(data) }),
-  get: (id) => apiRequest(`/compliance/compliance/${id}`),
-  update: (id, data) => apiRequest(`/compliance/compliance/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id) => apiRequest(`/compliance/compliance/${id}`, { method: 'DELETE' }),
+  create: (data) => apiRequest('/compliance', { method: 'POST', body: JSON.stringify(data) }),
+  get: (id) => apiRequest(`/compliance/${id}`),
+  update: (id, data) => apiRequest(`/compliance/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id) => apiRequest(`/compliance/${id}`, { method: 'DELETE' }),
   packs: {
-    list: () => apiRequest('/compliance/compliance/packs'),
-    get: (id) => apiRequest(`/compliance/compliance/packs/${id}`),
-    create: (data) => apiRequest('/compliance/compliance/packs', { method: 'POST', body: JSON.stringify(data) }),
+    list: () => apiRequest('/compliance/packs'),
+    get: (id) => apiRequest(`/compliance/packs/${id}`),
+    create: (data) => apiRequest('/compliance/packs', { method: 'POST', body: JSON.stringify(data) }),
   },
   parts: {
-    status: (partId) => apiRequest(`/compliance/compliance/parts/${partId}`),
-    certify: (partId, data) => apiRequest(`/compliance/compliance/parts/${partId}/certify`, { method: 'POST', body: JSON.stringify(data) }),
+    status: (partId) => apiRequest(`/compliance/parts/${partId}`),
+    certify: (partId, data) => apiRequest(`/compliance/parts/${partId}/certify`, { method: 'POST', body: JSON.stringify(data) }),
   },
-  dashboard: () => apiRequest('/compliance/compliance/dashboard'),
+  dashboard: () => apiRequest('/compliance/dashboard'),
 };
 
 // Production Scheduling API
@@ -1654,6 +1689,7 @@ export const api = {
   calendarEvents: calendarEventsAPI,
   catalogs: catalogsAPI,
   uom: uomAPI,
+  cadConnectors: cadConnectorsAPI,
 };
 window.api = api;
 window.uomAPI = uomAPI;
@@ -1666,6 +1702,7 @@ window.scrapingAPI = scrapingAPI;
 window.webhooksAPI = webhooksAPI;
 window.bulkImportAPI = bulkImportAPI;
 window.erpConnectorsAPI = erpConnectorsAPI;
+window.cadConnectorsAPI = cadConnectorsAPI;
 window.supplierPortalAPI = supplierPortalAPI;
 window.monitoringAPI = monitoringAPI;
 window.aiAPI = aiAPI;

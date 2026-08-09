@@ -1,7 +1,6 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -213,10 +212,6 @@ async def commit_import(
             status_code=400, detail="Call /mapping before /commit to supply a column mapping"
         )
 
-    spec = import_service.ENTITY_SPECS[entity]
-    model = spec["model"]
-    natural_key = spec["natural_key"]
-
     rows_result = await db.execute(
         select(BulkImportRow)
         .where(BulkImportRow.jobId == job_id, BulkImportRow.tenantId == current_user.tenantId)
@@ -224,50 +219,12 @@ async def commit_import(
     )
     import_rows = rows_result.scalars().all()
 
-    created = 0
-    updated = 0
-    failed = 0
-    errors: list[CommitRowError] = []
+    result = await import_service.commit_rows(
+        db, import_rows, mapping, entity, current_user.tenantId
+    )
 
-    for idx, row in enumerate(import_rows, start=1):
-        mapped = import_service.map_row(row.rowData or {}, mapping)
-        cleaned, row_errors = import_service.validate_row(entity, mapped)
-        if row_errors:
-            failed += 1
-            errors.append(CommitRowError(row=idx, message="; ".join(row_errors)))
-            row.status = "error"
-            row.errors = "; ".join(row_errors)
-            continue
-
-        key_val = cleaned.get(natural_key)
-        try:
-            async with db.begin_nested():
-                existing_result = await db.execute(
-                    select(model).where(
-                        getattr(model, natural_key) == key_val,
-                        model.tenantId == current_user.tenantId,
-                    )
-                )
-                existing = existing_result.scalar_one_or_none()
-                if existing:
-                    for field, value in cleaned.items():
-                        setattr(existing, field, value)
-                    updated += 1
-                else:
-                    db.add(model(tenantId=current_user.tenantId, **cleaned))
-                    created += 1
-                await db.flush()
-            row.status = "processed"
-            row.errors = None
-        except IntegrityError as exc:
-            failed += 1
-            message = f"{natural_key} '{key_val}': {exc.orig}"
-            errors.append(CommitRowError(row=idx, message=message))
-            row.status = "error"
-            row.errors = message
-
-    job.processedRows = created + updated
-    job.errorRows = failed
+    job.processedRows = result["created"] + result["updated"]
+    job.errorRows = result["failed"]
     # ck_bulk_import_jobs_status only allows pending/processing/completed/
     # failed/cancelled/uploaded -- there is no "completed_with_errors" value
     # (no migration for one, per the no-schema-change rule), so a commit with
@@ -277,47 +234,68 @@ async def commit_import(
     job.completedAt = datetime.now(UTC)
     await db.commit()
 
-    return CommitResponse(created=created, updated=updated, failed=failed, errors=errors)
+    return CommitResponse(
+        created=result["created"],
+        updated=result["updated"],
+        failed=result["failed"],
+        errors=[CommitRowError(row=r, message=m) for r, m in result["errors"]],
+    )
 
 
 @router.post("/{job_id}/process", response_model=BulkImportJobResponse)
 async def process_import(
-    job_id: int, data: BulkImportProcessRequest, db: AsyncSession = Depends(get_db)
+    job_id: int,
+    data: BulkImportProcessRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(BulkImportJob).where(BulkImportJob.id == job_id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    """One-call alternative to /mapping + /commit, for callers that skip the
+    separate preview step.
 
-    job.mappingConfig = data.mappingConfig
+    This used to only rewrite BulkImportRow.rowData/status and report
+    "completed" with a processedRows count while creating ZERO Part rows —
+    fabricated success. It now calls the exact same write path as /commit
+    (import_service.commit_rows), so a "processed" count here means real
+    Part rows were actually created/updated. mappingConfig uses the same
+    {file_column: entity_field} shape as /mapping's `mapping` field.
+    """
+    job = await _get_job_or_404(db, job_id, current_user.tenantId)
+    entity = (job.mappingConfig or {}).get("entity", "parts")
+    mapping = data.mappingConfig
+
+    try:
+        import_service.validate_mapping_targets(entity, mapping)
+    except import_service.ImportValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    job.mappingConfig = {"entity": entity, "mapping": mapping}
     job.status = "processing"
     await db.flush()
 
     rows_result = await db.execute(
-        select(BulkImportRow).where(
-            BulkImportRow.jobId == job_id, BulkImportRow.status == "pending"
+        select(BulkImportRow)
+        .where(
+            BulkImportRow.jobId == job_id,
+            BulkImportRow.tenantId == current_user.tenantId,
+            BulkImportRow.status == "pending",
         )
+        .order_by(BulkImportRow.id)
     )
     pending_rows = rows_result.scalars().all()
 
-    processed = 0
-    errors = 0
-    for row in pending_rows:
-        try:
-            mapped = {}
-            for target_field, source_field in data.mappingConfig.items():
-                mapped[target_field] = row.rowData.get(source_field, "")
-            row.rowData = mapped
-            row.status = "processed"
-            processed += 1
-        except Exception as e:
-            row.status = "error"
-            row.errors = str(e)
-            errors += 1
+    result = await import_service.commit_rows(
+        db, pending_rows, mapping, entity, current_user.tenantId
+    )
 
-    job.processedRows = processed
-    job.errorRows = errors
-    job.status = "completed" if errors == 0 else "completed_with_errors"
+    job.processedRows = result["created"] + result["updated"]
+    job.errorRows = result["failed"]
+    # ck_bulk_import_jobs_status only allows pending/processing/completed/
+    # failed/cancelled/uploaded -- there is no "completed_with_errors" value
+    # (no migration for one), so this must always be "completed", same as
+    # commit_import; errorRows conveys the partial-failure detail. Using the
+    # disallowed value here made the endpoint 500 on its own commit whenever
+    # any row errored (CHECK constraint violation instead of a response).
+    job.status = "completed"
     job.completedAt = datetime.now(UTC)
     await db.commit()
     await db.refresh(job)
@@ -335,28 +313,6 @@ async def process_import(
     )
 
 
-@router.get("/all/status")
-async def get_all_import_status(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(BulkImportJob).order_by(BulkImportJob.createdAt.desc()))
-    jobs = result.scalars().all()
-    return {
-        "jobs": [
-            BulkImportJobResponse(
-                id=j.id,
-                filename=j.filename,
-                status=j.status,
-                totalRows=j.totalRows,
-                processedRows=j.processedRows,
-                errorRows=j.errorRows,
-                mappingConfig=j.mappingConfig,
-                createdAt=str(j.createdAt) if j.createdAt else None,
-                completedAt=str(j.completedAt) if j.completedAt else None,
-            )
-            for j in jobs
-        ]
-    }
-
-
 @router.get("/jobs", response_model=list[BulkImportJobResponse])
 async def list_import_jobs(
     db: AsyncSession = Depends(get_db),
@@ -364,9 +320,12 @@ async def list_import_jobs(
 ):
     """Tenant-scoped import job history (used by the Bulk Import screen).
 
-    Distinct from /all/status above, which is not tenant-scoped and returns
-    every tenant's jobs — kept as-is for backward compatibility, but not
-    safe for a tenant-facing UI to call.
+    A route named /all/status used to live here, deliberately unscoped
+    across every tenant, returning every tenant's filenames/mappingConfig to
+    any authenticated caller. It had no caller anywhere in the codebase (the
+    frontend only calls /mapping, /commit and this /jobs route) and its own
+    docstring admitted it was "not safe for a tenant-facing UI to call" —
+    dead, dangerous surface, so it was deleted rather than scoped.
     """
     result = await db.execute(
         select(BulkImportJob)
@@ -391,13 +350,18 @@ async def list_import_jobs(
 
 
 @router.get("/{job_id}/status", response_model=BulkImportStatusResponse)
-async def get_import_status(job_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(BulkImportJob).where(BulkImportJob.id == job_id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+async def get_import_status(
+    job_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    job = await _get_job_or_404(db, job_id, current_user.tenantId)
 
-    rows_result = await db.execute(select(BulkImportRow).where(BulkImportRow.jobId == job_id))
+    rows_result = await db.execute(
+        select(BulkImportRow).where(
+            BulkImportRow.jobId == job_id, BulkImportRow.tenantId == current_user.tenantId
+        )
+    )
     rows = rows_result.scalars().all()
 
     return BulkImportStatusResponse(
@@ -426,14 +390,19 @@ async def get_import_status(job_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{job_id}/errors", response_model=BulkImportErrorResponse)
-async def get_import_errors(job_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(BulkImportJob).where(BulkImportJob.id == job_id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+async def get_import_errors(
+    job_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    job = await _get_job_or_404(db, job_id, current_user.tenantId)
 
     rows_result = await db.execute(
-        select(BulkImportRow).where(BulkImportRow.jobId == job_id, BulkImportRow.status == "error")
+        select(BulkImportRow).where(
+            BulkImportRow.jobId == job_id,
+            BulkImportRow.tenantId == current_user.tenantId,
+            BulkImportRow.status == "error",
+        )
     )
     error_rows = rows_result.scalars().all()
 

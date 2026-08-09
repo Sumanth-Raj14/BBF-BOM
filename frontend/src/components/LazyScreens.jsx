@@ -227,3 +227,9 @@ export const BomVariantsScreen = createLazyScreen(function () {
 export const MbomScreen = createLazyScreen(function () {
   return import("./screens/MbomScreen.jsx");
 }, "MbomScreen");
+
+// CAD connectors — Onshape/Fusion/Altium connections, test/documents/import,
+// plus the credential-free Altium file upload (/cad-connectors).
+export const CadConnectorsScreen = createLazyScreen(function () {
+  return import("./screens/CadConnectorsScreen.jsx");
+}, "CadConnectorsScreen");

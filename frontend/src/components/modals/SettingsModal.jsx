@@ -1,36 +1,63 @@
 import PropTypes from "prop-types";
 
 import { AppContext } from "../../context/AppCtx.jsx";
+import { navigateTo } from "../../services/navigation.js";
 import { __t } from "../../i18n";
-import { toast } from "../../utils/toast";
-import { Icon } from "../../globals";
+import { Icon, api } from "../../globals";
+import { apiRequest } from "../../../api.js";
 import {
   Modal,
   Button,
-  Field,
-  Input,
-  Select,
-  Textarea,
-  Menu,
   StatusPill,
-  Card,
   Switch,
   DataTable,
+  EmptyState,
+  Spinner,
 } from "../ui";
 
 // ============ WORKSPACE SETTINGS ============
+// Fix (dead-fakes cleanup): every tab here used to show hardcoded members,
+// a hardcoded permission matrix, hardcoded integration cards (SolidWorks,
+// NetSuite, Slack, Google Drive, Jira — none of which are real providers),
+// and a hardcoded billing plan/invoice, all with buttons that only toasted
+// success. Members/Roles/Integrations now load real data (GET /users,
+// GET /rbac/roles + /rbac/permissions, GET /integrations/); actions that
+// have no backing endpoint (invite, per-member role change, billing) are
+// dropped rather than faked. "General" keeps only the accessibility toggles,
+// the one thing on this modal that actually persists (via AppContext).
 
-const boolCell = (value) => (
-  <span aria-label={value ? "Yes" : "No"}>
-    {value ? (
-      <Icon.Check size={12} aria-hidden="true" />
-    ) : (
-      <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>
-        —
-      </span>
-    )}
-  </span>
-);
+function useAsync(loader, deps) {
+  const [state, setState] = React.useState({ loading: true, data: null, error: null });
+  React.useEffect(() => {
+    let cancelled = false;
+    setState({ loading: true, data: null, error: null });
+    loader()
+      .then((data) => {
+        if (!cancelled) setState({ loading: false, data, error: null });
+      })
+      .catch((e) => {
+        if (!cancelled)
+          setState({ loading: false, data: null, error: e?.message || "Failed to load" });
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+  return state;
+}
+
+function LoadPanel({ loading, error, empty, children }) {
+  if (loading) return <Spinner label={__t("common.loading") || "Loading…"} />;
+  if (error)
+    return (
+      <p className="fs-12 fg-3">
+        {__t("common.loadFailed") || "Load failed"}: {error}
+      </p>
+    );
+  if (empty) return <EmptyState message={__t("common.noData") || "No data"} />;
+  return children;
+}
 
 export default function SettingsModal({ open, onClose }) {
   const ctx = React.useContext(AppContext);
@@ -39,16 +66,8 @@ export default function SettingsModal({ open, onClose }) {
   const navRefs = React.useRef([]);
 
   const sections = [
-    {
-      id: "general",
-      label: __t("workspace.general") || "General",
-      icon: Icon.Settings,
-    },
-    {
-      id: "members",
-      label: __t("workspace.members") || "Members",
-      icon: Icon.User,
-    },
+    { id: "general", label: __t("workspace.general") || "General", icon: Icon.Settings },
+    { id: "members", label: __t("workspace.members") || "Members", icon: Icon.User },
     {
       id: "roles",
       label: __t("workspace.rolesPermissions") || "Roles & permissions",
@@ -59,29 +78,30 @@ export default function SettingsModal({ open, onClose }) {
       label: __t("workspace.integrations") || "Integrations",
       icon: Icon.Link,
     },
-    {
-      id: "billing",
-      label: __t("workspace.billing") || "Billing",
-      icon: Icon.Cart,
-    },
-    {
-      id: "danger",
-      label: __t("workspace.dangerZone") || "Danger zone",
-      icon: Icon.Trash,
-      danger: true,
-    },
+    { id: "billing", label: __t("workspace.billing") || "Billing", icon: Icon.Cart },
   ];
 
-  const focusNav = (idx) => {
-    const el = navRefs.current[idx];
-    if (el) el.focus();
-  };
+  const membersState = useAsync(
+    () => (open && tab === "members" ? api.users.list({ per_page: 100 }) : Promise.resolve(null)),
+    [open, tab],
+  );
+  const rolesState = useAsync(
+    () =>
+      open && tab === "roles"
+        ? Promise.all([api.rbac.roles(), api.rbac.permissions()])
+        : Promise.resolve(null),
+    [open, tab],
+  );
+  const integrationsState = useAsync(
+    () => (open && tab === "integrations" ? apiRequest("/integrations/") : Promise.resolve(null)),
+    [open, tab],
+  );
 
+  const focusNav = (idx) => navRefs.current[idx]?.focus();
   const onNavKeyDown = (e, idx) => {
     let next = null;
     if (e.key === "ArrowDown") next = (idx + 1) % sections.length;
-    else if (e.key === "ArrowUp")
-      next = (idx - 1 + sections.length) % sections.length;
+    else if (e.key === "ArrowUp") next = (idx - 1 + sections.length) % sections.length;
     else if (e.key === "Home") next = 0;
     else if (e.key === "End") next = sections.length - 1;
     if (next !== null) {
@@ -91,219 +111,53 @@ export default function SettingsModal({ open, onClose }) {
     }
   };
 
-  const members = [
-    {
-      name: "E. Chen",
-      email: "elena@blackboxfactories.com",
-      role: "Admin",
-      initials: "EC",
-    },
-    {
-      name: "M. Park",
-      email: "marie@blackboxfactories.com",
-      role: "Engineering",
-      initials: "MP",
-    },
-    {
-      name: "K. Singh",
-      email: "karan@blackboxfactories.com",
-      role: "Procurement",
-      initials: "KS",
-    },
-    {
-      name: "R. Sato",
-      email: "ryo@blackboxfactories.com",
-      role: "Engineering",
-      initials: "RS",
-    },
-    {
-      name: "T. Reyes",
-      email: "tom@blackboxfactories.com",
-      role: "Finance",
-      initials: "TR",
-    },
-  ];
-
+  const members = (membersState.data && membersState.data.items) || [];
   const memberColumns = [
     {
       key: "member",
       header: __t("workspace.member") || "Member",
       render: (m) => (
-        <div className="flex items-center gap-8">
-          <span className="avatar" aria-hidden="true">
-            {m.initials}
-          </span>
-          <div>
-            <div className="fw-500 fs-12">{m.name}</div>
-            <div className="font-mono fs-10 fg-3">{m.email}</div>
-          </div>
+        <div>
+          <div className="fw-500 fs-12">{m.fullName || m.username}</div>
+          <div className="font-mono fs-10 fg-3">{m.email}</div>
         </div>
-      ),
-    },
-    {
-      key: "role",
-      header: __t("workspace.role") || "Role",
-      render: (m) => (
-        <Select
-          name="memberRole"
-          defaultValue={m.role}
-          aria-label={
-            (__t("workspace.changeRole") || "Change role") + " – " + m.name
-          }
-        >
-          <option>Admin</option>
-          <option>Engineering</option>
-          <option>Procurement</option>
-          <option>Finance</option>
-          <option>Viewer</option>
-        </Select>
       ),
     },
     {
       key: "status",
       header: __t("workspace.status") || "Status",
-      render: () => (
-        <StatusPill status="active" label={__t("workspace.active") || "Active"} />
-      ),
-    },
-    {
-      key: "actions",
-      header: <span className="sr-only">{__t("common.actions") || "Actions"}</span>,
-      align: "right",
       render: (m) => (
-        <Menu
-          align="right"
-          ariaLabel={
-            (__t("workspace.moreOptions") || "More options") + " – " + m.name
+        <StatusPill
+          status={m.isActive ? "active" : "inactive"}
+          label={
+            m.isActive
+              ? __t("workspace.active") || "Active"
+              : __t("common.inactive") || "Inactive"
           }
-          trigger={
-            <Button
-              variant="ghost"
-              size="sm"
-              iconOnly
-              aria-label={__t("workspace.moreOptions") || "More options"}
-            >
-              <Icon.Dots size={12} />
-            </Button>
-          }
-          items={[
-            {
-              icon: <Icon.Edit size={11} />,
-              label: __t("workspace.changeRole") || "Change role",
-              onSelect: () =>
-                toast(
-                  (__t("workspace.roleUpdatedFor") || "Role updated for ") +
-                    m.name,
-                ),
-            },
-            {
-              icon: <Icon.Trash size={11} />,
-              label: __t("workspace.remove") || "Remove",
-              danger: true,
-              onSelect: () =>
-                toast(
-                  m.name + (__t("workspace.removedSuffix") || " removed"),
-                  { kind: "warn" },
-                ),
-            },
-          ]}
         />
       ),
     },
-  ];
-
-  const roleRows = [
     {
-      action: __t("workspace.createEditBoms") || "Create/edit BOMs",
-      admin: true,
-      eng: true,
-      proc: false,
-      fin: false,
-      view: false,
-    },
-    {
-      action: __t("workspace.approveRevisions") || "Approve revisions",
-      admin: true,
-      eng: true,
-      proc: true,
-      fin: true,
-      view: false,
-    },
-    {
-      action: __t("workspace.createPos") || "Create POs",
-      admin: true,
-      eng: false,
-      proc: true,
-      fin: false,
-      view: false,
-    },
-    {
-      action: __t("workspace.viewCosts") || "View costs",
-      admin: true,
-      eng: true,
-      proc: true,
-      fin: true,
-      view: true,
-    },
-    {
-      action: __t("workspace.manageVendors") || "Manage vendors",
-      admin: true,
-      eng: false,
-      proc: true,
-      fin: false,
-      view: false,
-    },
-    {
-      action: __t("workspace.deleteData") || "Delete data",
-      admin: true,
-      eng: false,
-      proc: false,
-      fin: false,
-      view: false,
+      key: "role",
+      header: __t("workspace.role") || "Role",
+      render: (m) => <span className="fs-11 fg-3">{m.isSuperuser ? "Admin" : "—"}</span>,
     },
   ];
 
+  const [roles, permissions] = rolesState.data || [[], []];
   const roleColumns = [
-    { key: "action", header: __t("workspace.action") || "Action" },
-    { key: "admin", header: "Admin", align: "num", render: (r) => boolCell(r.admin) },
-    { key: "eng", header: "Eng", align: "num", render: (r) => boolCell(r.eng) },
-    { key: "proc", header: "Proc", align: "num", render: (r) => boolCell(r.proc) },
-    { key: "fin", header: "Fin", align: "num", render: (r) => boolCell(r.fin) },
-    { key: "view", header: "View", align: "num", render: (r) => boolCell(r.view) },
+    { key: "name", header: __t("workspace.role") || "Role" },
+    { key: "description", header: __t("common.description") || "Description" },
+    { key: "userCount", header: __t("workspace.members") || "Members", align: "num" },
+    { key: "permissionCount", header: __t("workspace.rolesPermissions") || "Permissions", align: "num" },
+  ];
+  const permColumns = [
+    { key: "name", header: __t("common.name") || "Name" },
+    { key: "resource", header: __t("common.resource") || "Resource" },
+    { key: "action", header: __t("common.action") || "Action" },
   ];
 
-  const integrations = [
-    {
-      name: "SolidWorks",
-      desc: __t("workspace.cadAssemblySync") || "CAD assembly sync",
-      connected: true,
-      glyph: "⌬",
-    },
-    {
-      name: "NetSuite",
-      desc: __t("workspace.erpFinance") || "ERP & finance",
-      connected: false,
-      glyph: "$",
-    },
-    {
-      name: "Slack",
-      desc: __t("workspace.notifications") || "Notifications",
-      connected: true,
-      glyph: "≡",
-    },
-    {
-      name: "Google Drive",
-      desc: __t("workspace.documentStorage") || "Document storage",
-      connected: false,
-      glyph: "▤",
-    },
-    {
-      name: "Jira",
-      desc: __t("workspace.issueTracking") || "Issue tracking",
-      connected: false,
-      glyph: "▦",
-    },
-  ];
+  const integrations = integrationsState.data || [];
 
   return (
     <Modal
@@ -311,29 +165,12 @@ export default function SettingsModal({ open, onClose }) {
       onClose={onClose}
       icon={<Icon.Settings size={16} />}
       title={__t("workspace.settings") || "Workspace Settings"}
-      subtitle={
-        __t("workspace.settingsSubtitle") ||
-        "Blackbox · 24 members · 4 projects"
-      }
       size="lg"
       closeLabel={__t("workspace.closeSettingsDialog") || "Close settings dialog"}
       footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            {__t("common.close") || "Close"}
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => {
-              onClose();
-              toast(__t("workspace.settingsSaved") || "Settings saved", {
-                kind: "success",
-              });
-            }}
-          >
-            {__t("workspace.saveChanges") || "Save changes"}
-          </Button>
-        </>
+        <Button variant="secondary" onClick={onClose}>
+          {__t("common.close") || "Close"}
+        </Button>
       }
     >
       <div
@@ -374,11 +211,7 @@ export default function SettingsModal({ open, onClose }) {
                   borderRadius: "var(--radius-sm)",
                   border: "none",
                   background: selected ? "var(--accent-subtle)" : "transparent",
-                  color: selected
-                    ? "var(--accent-text)"
-                    : s.danger
-                      ? "var(--status-danger-text)"
-                      : "var(--text-secondary)",
+                  color: selected ? "var(--accent-text)" : "var(--text-secondary)",
                   fontWeight: selected ? 600 : 500,
                   fontSize: "var(--fs-100)",
                   textAlign: "left",
@@ -399,66 +232,20 @@ export default function SettingsModal({ open, onClose }) {
         >
           {tab === "general" && (
             <>
-              <h3 className="fs-14" style={{ margin: "0 0 14px" }}>
-                {__t("workspace.general") || "General"}
-              </h3>
-              <Field label={__t("workspace.workspaceName") || "Workspace name"}>
-                <Input name="workspaceName" defaultValue="Blackbox Factories" />
-              </Field>
-              <Field label={__t("workspace.workspaceUrl") || "Workspace URL"}>
-                <Input mono name="workspaceUrl" defaultValue="blackbox.bom.dev" />
-              </Field>
-              <div className="field-row">
-                <Field
-                  label={__t("workspace.defaultCurrency") || "Default currency"}
-                >
-                  <Select name="defaultCurrency" defaultValue="USD">
-                    <option>USD</option>
-                    <option>EUR</option>
-                    <option>JPY</option>
-                    <option>CNY</option>
-                  </Select>
-                </Field>
-                <Field label={__t("workspace.dateFormat") || "Date format"}>
-                  <Select name="dateFormat" defaultValue="YYYY-MM-DD (ISO)">
-                    <option>YYYY-MM-DD (ISO)</option>
-                    <option>MM/DD/YYYY</option>
-                    <option>DD/MM/YYYY</option>
-                  </Select>
-                </Field>
-              </div>
-              <Field label={__t("workspace.description") || "Description"}>
-                <Textarea
-                  name="workspaceDesc"
-                  rows={3}
-                  defaultValue="Internal BOM, procurement, and vendor management for Blackbox internal product dev."
-                />
-              </Field>
-
-              <h3 className="fs-14" style={{ margin: "20px 0 4px" }}>
+              <h3 className="fs-14" style={{ margin: "0 0 4px" }}>
                 {__t("workspace.accessibility") || "Accessibility"}
               </h3>
-              <p
-                className="fs-11"
-                style={{ color: "var(--text-muted)", margin: "0 0 12px" }}
-              >
+              <p className="fs-11" style={{ color: "var(--text-muted)", margin: "0 0 12px" }}>
                 {__t("workspace.accessibilityDesc") ||
                   "Applies on top of your light/dark theme — both can be on at once."}
               </p>
               <div
                 className="flex items-center justify-between"
-                style={{
-                  padding: "var(--sp-2) 0",
-                  borderBottom: "1px solid var(--border-subtle)",
-                }}
+                style={{ padding: "var(--sp-2) 0", borderBottom: "1px solid var(--border-subtle)" }}
               >
                 <div>
                   <div className="fs-12 fw-500">
                     {__t("workspace.highContrast") || "High-contrast mode"}
-                  </div>
-                  <div className="fs-10" style={{ color: "var(--text-muted)" }}>
-                    {__t("workspace.highContrastDesc") ||
-                      "Stronger borders, higher text contrast, heavier focus rings."}
                   </div>
                 </div>
                 <Switch
@@ -467,17 +254,10 @@ export default function SettingsModal({ open, onClose }) {
                   label={__t("workspace.highContrast") || "High-contrast mode"}
                 />
               </div>
-              <div
-                className="flex items-center justify-between"
-                style={{ padding: "var(--sp-2) 0" }}
-              >
+              <div className="flex items-center justify-between" style={{ padding: "var(--sp-2) 0" }}>
                 <div>
                   <div className="fs-12 fw-500">
                     {__t("workspace.colorblindSafe") || "Colorblind-safe mode"}
-                  </div>
-                  <div className="fs-10" style={{ color: "var(--text-muted)" }}>
-                    {__t("workspace.colorblindSafeDesc") ||
-                      "Distinct status palette plus icons/shapes so status is never color-only."}
                   </div>
                 </div>
                 <Switch
@@ -486,35 +266,27 @@ export default function SettingsModal({ open, onClose }) {
                   label={__t("workspace.colorblindSafe") || "Colorblind-safe mode"}
                 />
               </div>
+              <p className="fs-11 fg-3" style={{ marginTop: 16 }}>
+                {__t("workspace.generalMovedNote") ||
+                  "Workspace name, plan, and limits are managed from Tenant Settings."}
+              </p>
             </>
           )}
           {tab === "members" && (
             <>
-              <div
-                className="flex justify-between items-center"
-                style={{ marginBottom: "var(--sp-4)" }}
-              >
-                <h3 className="fs-14 m-0">
-                  {__t("workspace.members") || "Members"}{" "}
-                  <span className="fg-3">(24)</span>
-                </h3>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() =>
-                    toast(__t("workspace.inviteSent") || "Invite sent")
-                  }
-                >
-                  <Icon.Plus size={11} /> {__t("workspace.invite") || "Invite"}
-                </Button>
-              </div>
-              <DataTable
-                ariaLabel={__t("workspace.members") || "Members"}
-                columns={memberColumns}
-                rows={members}
-                getRowKey={(m) => m.email}
-                dense
-              />
+              <h3 className="fs-14 m-0" style={{ marginBottom: "var(--sp-4)" }}>
+                {__t("workspace.members") || "Members"}
+                {members.length > 0 && <span className="fg-3"> ({members.length})</span>}
+              </h3>
+              <LoadPanel loading={membersState.loading} error={membersState.error} empty={!membersState.loading && !membersState.error && members.length === 0}>
+                <DataTable
+                  ariaLabel={__t("workspace.members") || "Members"}
+                  columns={memberColumns}
+                  rows={members}
+                  getRowKey={(m) => m.id}
+                  dense
+                />
+              </LoadPanel>
             </>
           )}
           {tab === "roles" && (
@@ -522,67 +294,65 @@ export default function SettingsModal({ open, onClose }) {
               <h3 className="fs-14" style={{ margin: "0 0 14px" }}>
                 {__t("workspace.rolesPermissions") || "Roles & Permissions"}
               </h3>
-              <DataTable
-                ariaLabel={__t("workspace.rolesPermissions") || "Roles & Permissions"}
-                columns={roleColumns}
-                rows={roleRows}
-                getRowKey={(r) => r.action}
-                dense
-                zebra
-              />
+              <LoadPanel loading={rolesState.loading} error={rolesState.error} empty={!rolesState.loading && !rolesState.error && roles.length === 0}>
+                <>
+                  <DataTable
+                    ariaLabel={__t("workspace.role") || "Roles"}
+                    columns={roleColumns}
+                    rows={roles}
+                    getRowKey={(r) => r.id}
+                    dense
+                    zebra
+                  />
+                  {permissions.length > 0 && (
+                    <>
+                      <h3 className="fs-14" style={{ margin: "20px 0 14px" }}>
+                        {__t("common.permissions") || "Permissions"}
+                      </h3>
+                      <DataTable
+                        ariaLabel={__t("common.permissions") || "Permissions"}
+                        columns={permColumns}
+                        rows={permissions}
+                        getRowKey={(p) => p.id}
+                        dense
+                        zebra
+                      />
+                    </>
+                  )}
+                </>
+              </LoadPanel>
             </>
           )}
           {tab === "integrations" && (
             <>
-              <h3 className="fs-14" style={{ margin: "0 0 14px" }}>
-                {__t("workspace.integrations") || "Integrations"}
-              </h3>
-              {integrations.map((i) => (
-                <div
-                  key={i.name}
-                  className="flex items-center gap-12 border-line rounded-r2"
-                  style={{ padding: 12, marginBottom: "var(--sp-2)" }}
-                >
-                  <span
-                    className="w-32 h-32 rounded-r2 bg-sunk inline-flex items-center justify-center font-mono fs-16 fg-2"
-                    aria-hidden="true"
-                  >
-                    {i.glyph}
-                  </span>
-                  <div className="flex-1">
-                    <div className="fw-600 fs-12">{i.name}</div>
-                    <div className="font-mono fs-10 fg-3">{i.desc}</div>
-                  </div>
-                  <StatusPill
-                    tone={i.connected ? "success" : "neutral"}
-                    label={
-                      i.connected
-                        ? __t("workspace.connected") || "Connected"
-                        : __t("workspace.notConnected") || "Not connected"
-                    }
-                  />
-                  <Button
-                    variant={i.connected ? "secondary" : "primary"}
-                    size="sm"
-                    onClick={() =>
-                      toast(
-                        i.connected
-                          ? i.name +
-                              (__t("workspace.disconnectedSuffix") ||
-                                " disconnected")
-                          : i.name +
-                              (__t("workspace.connectedSuffix") ||
-                                " connected"),
-                        { kind: i.connected ? "warn" : "success" },
-                      )
-                    }
-                  >
-                    {i.connected
-                      ? __t("workspace.disconnect") || "Disconnect"
-                      : __t("workspace.connect") || "Connect"}
-                  </Button>
-                </div>
-              ))}
+              <div className="flex justify-between items-center" style={{ marginBottom: "var(--sp-4)" }}>
+                <h3 className="fs-14 m-0">{__t("workspace.integrations") || "Integrations"}</h3>
+                <Button variant="secondary" size="sm" onClick={() => navigateTo("integrations")}>
+                  {__t("workspace.manageIntegrations") || "Manage"}
+                </Button>
+              </div>
+              <LoadPanel loading={integrationsState.loading} error={integrationsState.error} empty={!integrationsState.loading && !integrationsState.error && integrations.length === 0}>
+                <>
+                  {integrations.map((i) => (
+                    <div
+                      key={i.provider}
+                      className="flex items-center gap-12 border-line rounded-r2"
+                      style={{ padding: 12, marginBottom: "var(--sp-2)" }}
+                    >
+                      <div className="flex-1">
+                        <div className="fw-600 fs-12">{i.provider}</div>
+                        <div className="font-mono fs-10 fg-3">
+                          {i.last_error || (i.has_credentials ? "Configured" : "No credentials")}
+                        </div>
+                      </div>
+                      <StatusPill
+                        tone={i.is_enabled && i.status === "healthy" ? "success" : "neutral"}
+                        label={i.status || (i.is_enabled ? "Enabled" : "Disabled")}
+                      />
+                    </div>
+                  ))}
+                </>
+              </LoadPanel>
             </>
           )}
           {tab === "billing" && (
@@ -590,114 +360,12 @@ export default function SettingsModal({ open, onClose }) {
               <h3 className="fs-14" style={{ margin: "0 0 14px" }}>
                 {__t("workspace.billing") || "Billing"}
               </h3>
-              <Card
-                title={__t("workspace.currentPlan") || "Current plan"}
-                className="mb-12"
-              >
-                <div
-                  className="flex items-baseline"
-                  style={{ gap: "var(--sp-2)" }}
-                >
-                  <span className="fs-22 fw-700">
-                    {__t("workspace.teamPlan") || "Team"}
-                  </span>
-                  <span className="font-mono fg-3">
-                    {__t("workspace.planPriceDetail") ||
-                      "₹19,920/mo · 24 seats"}
-                  </span>
-                </div>
-                <div className="font-mono fs-11 fg-3" style={{ marginTop: 6 }}>
-                  {__t("workspace.nextInvoice") ||
-                    "Next invoice: 2026-06-12 · Visa **** 4242"}
-                </div>
-              </Card>
-              <div className="flex gap-8">
-                <Button
-                  variant="secondary"
-                  onClick={() =>
-                    toast(
-                      __t("workspace.openingBillingPortal") ||
-                        "Opening billing portal…",
-                    )
-                  }
-                >
-                  {__t("workspace.manageSubscription") || "Manage subscription"}
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() =>
-                    toast(
-                      __t("workspace.openingInvoices") ||
-                        "12 invoices · opening…",
-                    )
-                  }
-                >
-                  {__t("workspace.viewInvoices") || "View invoices"}
-                </Button>
-              </div>
-            </>
-          )}
-          {tab === "danger" && (
-            <>
-              <h3
-                className="fs-14"
-                style={{ margin: "0 0 14px", color: "var(--status-danger-text)" }}
-              >
-                {__t("workspace.dangerZone") || "Danger zone"}
-              </h3>
-              <Card
-                title={__t("workspace.exportAllData") || "Export all data"}
-                className="mb-12"
-                style={{ borderColor: "var(--status-danger)" }}
-                footer={
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() =>
-                      toast(
-                        __t("workspace.preparingExport") ||
-                          "Preparing full export · email link when ready",
-                        { kind: "success" },
-                      )
-                    }
-                  >
-                    {__t("common.export") || "Export"}
-                  </Button>
+              <EmptyState
+                message={
+                  __t("workspace.billingUnavailable") ||
+                  "Billing isn't available in this deployment — there is no billing backend configured."
                 }
-              >
-                <p className="fs-11" style={{ color: "var(--text-muted)", margin: 0 }}>
-                  {__t("workspace.exportAllDataDesc") ||
-                    "Download an archive of BOMs, vendors, documents, and audit logs."}
-                </p>
-              </Card>
-              <Card
-                title={
-                  <span style={{ color: "var(--status-danger-text)" }}>
-                    {__t("workspace.deleteWorkspace") || "Delete workspace"}
-                  </span>
-                }
-                style={{ borderColor: "var(--status-danger)" }}
-                footer={
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() =>
-                      toast(
-                        __t("workspace.confirmDeletionToast") ||
-                          "Type the workspace name to confirm deletion",
-                        { kind: "warn" },
-                      )
-                    }
-                  >
-                    {__t("workspace.deleteWorkspace") || "Delete workspace"}
-                  </Button>
-                }
-              >
-                <p className="fs-11" style={{ color: "var(--text-muted)", margin: 0 }}>
-                  {__t("workspace.deleteWorkspaceDesc") ||
-                    "This action cannot be undone. All data will be permanently deleted."}
-                </p>
-              </Card>
+              />
             </>
           )}
         </div>

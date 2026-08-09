@@ -21,6 +21,7 @@ from app.core.rbac import require_engineering, require_viewer
 from app.core.tenant_context import get_tenant_id
 from app.db.session import get_db
 from app.models.mbom import MbomHeader, MbomItem, MbomOperation
+from app.models.part import Part
 from app.models.user import User
 from app.services import bom_service
 
@@ -78,6 +79,18 @@ async def _get_header_or_404(db: AsyncSession, mbom_id: int) -> MbomHeader:
     if not header:
         raise HTTPException(status_code=404, detail="MBOM not found")
     return header
+
+
+async def _require_part(db: AsyncSession, part_id: int, tid: Optional[int]) -> None:
+    """MbomItem.part_id is a NOT NULL FK to parts.id with no ORM relationship,
+    so an invalid or cross-tenant id would otherwise either 500 on commit
+    (IntegrityError) or silently attach another tenant's part. Match the
+    existence+tenant check bom_service.create_bom_item already does."""
+    stmt = select(Part).where(Part.id == part_id)
+    if tid is not None:
+        stmt = stmt.where(Part.tenantId == tid)
+    if not (await db.execute(stmt)).scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Part not found")
 
 
 class MbomHeaderCreateRequest(BaseModel):
@@ -252,6 +265,7 @@ async def create_mbom_item(
     current_user: User = Depends(require_engineering),
 ):
     await _get_header_or_404(db, mbom_id)
+    await _require_part(db, request.part_id, current_user.tenantId)
     item = MbomItem(mbom_id=mbom_id, tenantId=current_user.tenantId, **request.model_dump())
     db.add(item)
     await db.commit()
@@ -275,7 +289,10 @@ async def update_mbom_item(
     item = (await db.execute(stmt)).scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="MBOM item not found")
-    for field, value in request.model_dump(exclude_unset=True).items():
+    payload = request.model_dump(exclude_unset=True)
+    if "part_id" in payload:
+        await _require_part(db, payload["part_id"], tid)
+    for field, value in payload.items():
         setattr(item, field, value)
     await db.commit()
     await db.refresh(item)

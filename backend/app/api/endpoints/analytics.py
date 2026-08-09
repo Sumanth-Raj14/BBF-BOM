@@ -67,18 +67,21 @@ async def analytics_dashboard(
         for row in vendor_breakdown.fetchall()
     ]
 
-    monthly_spend = await db.execute(
-        text(f"""
-                SELECT TO_CHAR("poDate"::date, 'YYYY-MM') as month, COALESCE(SUM("poTotal"), 0) as spend
-                FROM "po_headers"
-                WHERE {tf} AND "poDate" IS NOT NULL
-                GROUP BY TO_CHAR("poDate"::date, 'YYYY-MM')
-                ORDER BY month DESC LIMIT 12
-            """),
+    # TO_CHAR(...::date, 'YYYY-MM') is Postgres-only (SQLite has neither the
+    # "::" cast nor TO_CHAR). "poDate" is stored as an ISO "YYYY-MM-DD" string,
+    # so bucket by its first 7 characters in Python instead — portable and
+    # dialect-free.
+    po_dates = await db.execute(
+        text(f'SELECT "poDate", "poTotal" FROM "po_headers" WHERE {tf} AND "poDate" IS NOT NULL'),
         tf_params,
     )
+    spend_by_month: dict[str, float] = {}
+    for po_date, po_total in po_dates.fetchall():
+        month = str(po_date)[:7]
+        spend_by_month[month] = spend_by_month.get(month, 0.0) + float(po_total or 0)
     result["monthlySpend"] = [
-        {"month": row[0], "spend": float(row[1])} for row in monthly_spend.fetchall()
+        {"month": month, "spend": spend}
+        for month, spend in sorted(spend_by_month.items(), reverse=True)[:12]
     ]
 
     recent_pos = await db.execute(

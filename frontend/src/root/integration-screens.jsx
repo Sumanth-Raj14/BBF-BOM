@@ -997,6 +997,13 @@ function BulkImportScreen() {
 function SupplierPortalScreen() {
   const [users, setUsers] = React.useState([]);
   const [priceUpdates, setPriceUpdates] = React.useState([]);
+  // GET /supplier-portal/price-updates is scoped to a supplier's own
+  // login (get_current_supplier_user) by design — an admin session
+  // genuinely has no supplier role and always gets 403 here (see
+  // backend/app/api/endpoints/supplier_portal.py + its tests). Render an
+  // honest "not available" panel instead of a failed request pretending
+  // to be an empty list.
+  const [priceUpdatesForbidden, setPriceUpdatesForbidden] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [showCreateUser, setShowCreateUser] = React.useState(false);
   const [newUser, setNewUser] = React.useState({
@@ -1019,7 +1026,8 @@ function SupplierPortalScreen() {
       supplierPortalAPI?.listUsers().catch(() => {
         return [];
       }),
-      supplierPortalAPI?.listPriceUpdates().catch(() => {
+      supplierPortalAPI?.listPriceUpdates().catch((err) => {
+        if (err?.status === 403) setPriceUpdatesForbidden(true);
         return [];
       }),
     ])
@@ -1246,6 +1254,18 @@ function SupplierPortalScreen() {
             }) || "Price Update Submissions (" + priceUpdates.length + ")"
           }
         >
+          {priceUpdatesForbidden ? (
+            <EmptyState
+              title={
+                __t("integrations.supplierPortal.notAvailableTitle") ||
+                "Not available for your role"
+              }
+              message={
+                __t("integrations.supplierPortal.notAvailableMessage") ||
+                "Price update submissions are visible from a supplier login, not an admin session. Log in through the supplier portal to review them."
+              }
+            />
+          ) : (
           <table className="bom-table">
             <thead>
               <tr>
@@ -1334,6 +1354,7 @@ function SupplierPortalScreen() {
               )}
             </tbody>
           </table>
+          )}
         </Card>
       </div>
     </div>

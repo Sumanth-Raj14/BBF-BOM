@@ -82,12 +82,27 @@ async def _get_unit(db: AsyncSession, code: str, tenant_id: Optional[int]) -> Op
 
 
 async def _factor_to_base(db: AsyncSession, unit: UomUnit, tenant_id: Optional[int]) -> Decimal:
-    """Amount of the dimension's base unit equal to 1 of `unit`."""
+    """Amount of the dimension's base unit equal to 1 of `unit`.
+
+    Joins to UomUnit on to_uom and requires is_base + matching dimension so
+    a from_uom with more than one recorded conversion row (the DB only
+    enforces uniqueness per (from_uom, to_uom), not per from_uom) can't pick
+    the wrong target unit's factor — always the one that actually reaches
+    this dimension's base unit.
+    """
     if unit.is_base:
         return Decimal(1)
-    stmt = select(UomConversion).where(UomConversion.from_uom == unit.code)
+    stmt = (
+        select(UomConversion)
+        .join(UomUnit, UomUnit.code == UomConversion.to_uom)
+        .where(
+            UomConversion.from_uom == unit.code,
+            UomUnit.dimension == unit.dimension,
+            UomUnit.is_base.is_(True),
+        )
+    )
     if tenant_id is not None:
-        stmt = stmt.where(UomConversion.tenantId == tenant_id)
+        stmt = stmt.where(UomConversion.tenantId == tenant_id, UomUnit.tenantId == tenant_id)
     row = (await db.execute(stmt)).scalars().first()
     if row is None:
         # Known unit, but nobody ever recorded how it relates to its base —
@@ -204,26 +219,43 @@ async def rollup_quantities(
     the raw string, instead of crashing the whole roll-up or being summed
     as if they matched some other unit.
 
-    This is the exact hook bom_service.get_quantity_rollup needs for a
-    cross-part, cross-unit total; see the WS writeup for the call site
-    (bom_service.py is out of scope for this feature — owned elsewhere).
+    Available as a cross-part, cross-unit total (all parts pooled by
+    dimension). bom_service.get_quantity_rollup needs a PER-PART total
+    instead, so it calls try_convert()/extended_cost() directly per line
+    rather than this function — see the per-part anchor-unit merge there.
     """
     tid = tenant_id if tenant_id is not None else get_tenant_id()
     by_dimension: dict[str, DimensionTotal] = {}
     unconverted: dict[str, Decimal] = {}
 
+    # ponytail: N+1 fix — a BOM's lines overwhelmingly repeat a handful of
+    # uom codes/dimensions, so cache each lookup for the life of this one
+    # call instead of re-querying per line. Not a cross-request cache (would
+    # go stale the moment units/conversions change), just a local dict.
+    unit_cache: dict[str, Optional[UomUnit]] = {}
+    factor_cache: dict[str, Decimal] = {}
+    base_cache: dict[str, Optional[UomUnit]] = {}
+
     for line in lines:
         qty = Decimal(str(line.get("quantity") or 0))
         uom = _norm(line.get("uom"))
-        unit = await _get_unit(db, uom, tid) if uom else None
+        unit = None
+        if uom:
+            if uom not in unit_cache:
+                unit_cache[uom] = await _get_unit(db, uom, tid)
+            unit = unit_cache[uom]
         if unit is None:
             key = uom or "(none)"
             unconverted[key] = unconverted.get(key, Decimal(0)) + qty
             continue
-        factor = await _factor_to_base(db, unit, tid)
+        if unit.code not in factor_cache:
+            factor_cache[unit.code] = await _factor_to_base(db, unit, tid)
+        factor = factor_cache[unit.code]
         dim = by_dimension.get(unit.dimension)
         if dim is None:
-            base_unit = await _base_unit_for_dimension(db, unit.dimension, tid)
+            if unit.dimension not in base_cache:
+                base_cache[unit.dimension] = await _base_unit_for_dimension(db, unit.dimension, tid)
+            base_unit = base_cache[unit.dimension]
             dim = DimensionTotal(unit.dimension, base_unit.code if base_unit else unit.code, Decimal(0), 0)
             by_dimension[unit.dimension] = dim
         dim.total += qty * factor
