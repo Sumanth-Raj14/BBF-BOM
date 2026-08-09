@@ -204,7 +204,6 @@ function AppCtxProvider({ children }) {
         {
           toast(__t("common.apiConnected"), { kind: "success" });
         }
-        dataService.migrateToBackend();
       } catch (e) {
         if (cancelled) return;
         dataService.setOnline(false);
