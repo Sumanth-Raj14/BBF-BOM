@@ -130,6 +130,7 @@ All backend configuration flows through a single pydantic-settings class (`backe
 | `DATABASE_URL` | Full DSN override, `postgresql+asyncpg://...` | The desktop launcher exports this directly to the backend child process. |
 | `SKIP_CREATE_ALL` | When set, the lifespan skips the deprecated `Base.metadata.create_all` | **Set `true` on every migration-managed deployment** (the Docker entrypoint already does). Leaving it off can create tables outside Alembic and mask migration drift. See §5. |
 | `ENABLE_RLS` | Opt-in PostgreSQL Row-Level Security as a second tenant-isolation layer | **Trap:** migration `040_postgres_rls_tenant_isolation` only applies RLS if `ENABLE_RLS` is true **at the time the migration runs**. Flipping it on later does nothing — you must `alembic downgrade 039` then re-upgrade with the flag set. Decide *before* first migration. Strongly recommended for any multi-tenant server deployment (see §12.2). |
+| `TEST_DATABASE_URL` | Test/dev-only override, takes precedence over `DATABASE_URL` | `app/db/session.resolve_database_url()` resolution order is `TEST_DATABASE_URL > DATABASE_URL > settings.DATABASE_URI` (fixed 2026-08-09 after an incident where it was ignored and a fixture/reset script hit the live database). Never set this to a production DSN, and never run fixture/seed scripts without it pointing at sqlite or an obviously-named scratch/test/e2e database — `backend/scripts/_db_guard.py` enforces this for scripts that call it. Not used in normal production deployment (leave unset). |
 
 ### 3.3 Frontend serving (single-process mode)
 
@@ -160,8 +161,10 @@ All backend configuration flows through a single pydantic-settings class (`backe
 |---|---|---|
 | `REDIS_URL` | Redis connection for slowapi rate limits, JWT blacklist, backup mutex | Optional; in-memory fallback. **Caveat:** if `REDIS_URL` points at a *non-localhost* host, availability is assumed without a ping — a down remote Redis leaves the limiter built against unreachable storage (`rate_limit.py`). Keep Redis co-located and monitored. |
 | `REDIS_PASSWORD` | Compose sets `requirepass` on the redis:7 container | |
+| `RATE_LIMIT_USER_PER_MINUTE` | Per-authenticated-user request cap (`app/core/deps.py`) | Default **1200**. Previously hardcoded; now tunable via `.env`. |
+| `RATE_LIMIT_API_KEY_PER_MINUTE` | Per-API-key request cap (`app/core/deps.py`) | Default **600**. Previously hardcoded; now tunable via `.env`. |
 
-Built-in limits (no tuning vars documented): per-IP default **60/min**, per-user **300/min**, per-API-key **120/min**, per-IP WebSocket **30/min**.
+Other limits remain fixed (no tuning var yet): per-IP default **60/min**, per-IP WebSocket **30/min**.
 
 ### 3.7 Reverse proxy
 
@@ -253,7 +256,7 @@ Useful flags (documented in `desktop/DESKTOP_PACKAGING.md` §6):
 
 ### 5.1 The one rule: bootstrap with `init_db`, never bare `alembic upgrade head` on an empty database
 
-The Alembic chain is 50 files with a **single linear head: `050_rfq_headers_created_by_nullable`** (verified — one root `001_initial`, no branches; see `backend/docs/data-dictionary.md` for the full table/column reference these migrations build). However, **migrations `004+` reference ~74 tables that historically only exist via `Base.metadata.create_all`** — running `alembic upgrade head` against an *empty* database fails partway. That is exactly why `.github/workflows/postgres-ci.yml` exists as the fresh-install gate.
+The Alembic chain is 56 files with a **single linear head: `056_cad_connections`** (verified — one root `001_initial`, no branches; see `backend/docs/data-dictionary.md` for the full table/column reference these migrations build). However, **migrations `004+` reference ~74 tables that historically only exist via `Base.metadata.create_all`** — running `alembic upgrade head` against an *empty* database fails partway. That is exactly why `.github/workflows/postgres-ci.yml` exists as the fresh-install gate.
 
 The supported bootstrap is `backend/scripts/init_db.py`:
 
@@ -270,7 +273,7 @@ flowchart TD
 - **Fresh database** → `create_all` + `alembic stamp head`. The DB is born at the current schema and future upgrades apply incrementally.
 - **Existing, previously-stamped database** → normal `alembic upgrade head`.
 - The Docker entrypoint (`backend/scripts/docker-entrypoint.sh`) runs this automatically: `pg_isready` wait → `python -m scripts.init_db` → conditional RBAC seed → `exec uvicorn`.
-- `postgres-ci.yml` proves this bootstrap is idempotent against an empty PostgreSQL 16, and it asserts the stamped revision equals a hardcoded `EXPECTED_HEAD` (currently `'050_rfq_headers_created_by_nullable'`, correctly in sync with the actual head). **You must bump `EXPECTED_HEAD` in that workflow every time you add a new head migration**, or the CI gate will fail (by design) on the next PR that adds one.
+- `postgres-ci.yml` proves this bootstrap is idempotent against an empty PostgreSQL 16, and it asserts the stamped revision equals a hardcoded `EXPECTED_HEAD` (currently `'056_cad_connections'`, correctly in sync with the actual head). **You must bump `EXPECTED_HEAD` in that workflow every time you add a new head migration**, or the CI gate will fail (by design) on the next PR that adds one.
 
 **Set `SKIP_CREATE_ALL=true` in every deployment that uses `init_db`.** Otherwise the FastAPI lifespan *also* runs `create_all` at every startup (a deprecated legacy behavior kept for the desktop bundle), which can silently create tables outside Alembic's knowledge and mask drift.
 
@@ -278,7 +281,7 @@ Two previously-tracked Postgres-only Alembic bugs are **confirmed fixed** in `ba
 
 ### 5.2 Migration hygiene notes for operators
 
-- **Numbering trap:** three files share the `041_` prefix (`041_compliance_pack_tables`, `041_part11_esignatures`, `041_zoho_books_sync_tables`), and the Zoho one actually revises `044`. The real order is `040 → 041_compliance → 041_part11 → 042 → 043 → 044 → 041_zoho → 045 → 046 → 047 → 048_index_foreign_keys → 049_restore_check_constraints → 050_rfq_headers_created_by_nullable`. **Never infer chain order from filenames**; use `alembic history`.
+- **Numbering trap:** three files share the `041_` prefix (`041_compliance_pack_tables`, `041_part11_esignatures`, `041_zoho_books_sync_tables`), and the Zoho one actually revises `044`. The real order is `040 → 041_compliance → 041_part11 → 042 → 043 → 044 → 041_zoho → 045 → 046 → 047 → 048_index_foreign_keys → 049_restore_check_constraints → 050_rfq_headers_created_by_nullable → 051_export_templates → 052_bom_types → 053_bom_effectivity → 054_uom_conversion → 055_requirements → 056_cad_connections`. **Never infer chain order from filenames**; use `alembic history`.
 - **RLS (`ENABLE_RLS`) must be decided before migrating.** Migration `040` no-ops unless the dialect is PostgreSQL *and* `ENABLE_RLS` is true at migration time. Enabling it later requires `alembic downgrade 039` + re-upgrade with the flag set (documented in the migration's own docstring; covered by `app/tests/test_rls_flag.py`).
 - RLS policies attach only to tables that have a `tenantId` column. The deliberately global tables (substance reference data from `042`, `compliance_packs`/`part_certifications` from `041_compliance_pack_tables`) sit outside RLS by design.
 
@@ -628,7 +631,7 @@ docker compose up -d
 
 ### 11.4 CI/CD caution — do not cargo-cult `.github/workflows/ci.yml`
 
-The audited CI has several deploy-relevant defects: the `test-backend` job runs bare `alembic upgrade head` against an empty Postgres (the exact anti-pattern §5.1 forbids — `postgres-ci.yml` is the correct gate); `build-and-push` points docker/build-push-action at the repo root where **no Dockerfile exists**; and the deploy jobs run `docker compose pull api` while the checked-in compose files name the service **`backend`**. If you stand up CD from this repo, fix those first and keep `postgres-ci.yml`'s fresh-install job as your migration gate — its `EXPECTED_HEAD` is currently correctly in sync at `050_rfq_headers_created_by_nullable`, but every future migration must bump it or the gate correctly fails the PR. Also note `desktop/tests/test_updater.py` (24 updater unit tests) is not wired into any workflow — run it manually before desktop releases.
+The audited CI has several deploy-relevant defects: the `test-backend` job runs bare `alembic upgrade head` against an empty Postgres (the exact anti-pattern §5.1 forbids — `postgres-ci.yml` is the correct gate); `build-and-push` points docker/build-push-action at the repo root where **no Dockerfile exists**; and the deploy jobs run `docker compose pull api` while the checked-in compose files name the service **`backend`**. If you stand up CD from this repo, fix those first and keep `postgres-ci.yml`'s fresh-install job as your migration gate — its `EXPECTED_HEAD` is currently correctly in sync at `056_cad_connections`, but every future migration must bump it or the gate correctly fails the PR. Also note `desktop/tests/test_updater.py` (24 updater unit tests) is not wired into any workflow — run it manually before desktop releases.
 
 ---
 
@@ -762,4 +765,4 @@ python desktop/build.py --skip-installer    # fast iteration
 
 ---
 
-*This guide is grounded in a code-level audit of the repository, refreshed 2026-08 against migration head `050_rfq_headers_created_by_nullable` and the fixes tracked in `docs/audit-2026-08/FIX_COVERAGE.md`. Where behavior is described as broken, stubbed, or mock, that reflects the audited code — verify against the current source before assuming a fix has landed. For gaps and their tracking, see `frontend/OPEN_ITEMS.md`, `desktop/DURABILITY.md`, `DISASTER_RECOVERY_RUNBOOK.md`, and `docs/audit-2026-08/FIX_COVERAGE.md`.*
+*This guide is grounded in a code-level audit of the repository, refreshed 2026-08-09 against migration head `056_cad_connections` and the fixes tracked in `docs/audit-2026-08/FIX_COVERAGE.md`. Where behavior is described as broken, stubbed, or mock, that reflects the audited code — verify against the current source before assuming a fix has landed. For gaps and their tracking, see `frontend/OPEN_ITEMS.md`, `desktop/DURABILITY.md`, `DISASTER_RECOVERY_RUNBOOK.md`, and `docs/audit-2026-08/FIX_COVERAGE.md`.*
