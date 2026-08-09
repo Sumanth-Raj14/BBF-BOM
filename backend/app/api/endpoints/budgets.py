@@ -81,16 +81,21 @@ async def _compute_workspace_budget(
     projects_result = await db.execute(select(Project))
     project_codes = [p.code for p in projects_result.scalars().all()]
 
+    # "poDate" is a plain String column (not a real date type), so casting it
+    # with Postgres's "::date" is unnecessary and breaks on SQLite (no "::"
+    # cast operator there). Bind the bounds as ISO strings instead and compare
+    # as text — identical to the ::date comparison since poDate is always
+    # "YYYY-MM-DD", and portable across both dialects.
     spend_rows = await db.execute(
         text(f"""
             SELECT COALESCE(project, 'Unassigned') as project,
                    COALESCE(SUM("poTotal") FILTER (WHERE status IN ('received', 'closed')), 0) as spent,
                    COALESCE(SUM("poTotal") FILTER (WHERE status NOT IN ('received', 'closed', 'cancelled', 'Rejected')), 0) as committed
             FROM po_headers
-            WHERE {tf} AND "poDate" IS NOT NULL AND "poDate"::date BETWEEN :start AND :end
+            WHERE {tf} AND "poDate" IS NOT NULL AND "poDate" BETWEEN :start AND :end
             GROUP BY COALESCE(project, 'Unassigned')
         """),
-        {**tf_params, "start": start, "end": end},
+        {**tf_params, "start": start.isoformat(), "end": end.isoformat()},
     )
     spend_by_project = {
         row[0]: {"spent": float(row[1] or 0), "committed": float(row[2] or 0)}
@@ -111,16 +116,20 @@ async def _compute_workspace_budget(
 
     # Monthly trend is a whole-current-year view, independent of the period
     # selector (matches the dashboard's separate "Monthly Spend" tile).
+    # EXTRACT(... FROM "poDate"::date) is Postgres-only; bucket by the
+    # "YYYY-MM-DD" string's own year/month digits instead, in Python.
     monthly_rows = await db.execute(
-        text(f"""
-            SELECT EXTRACT(MONTH FROM "poDate"::date)::int as month, COALESCE(SUM("poTotal"), 0) as spend
-            FROM po_headers
-            WHERE {tf} AND "poDate" IS NOT NULL AND EXTRACT(YEAR FROM "poDate"::date) = :year
-            GROUP BY EXTRACT(MONTH FROM "poDate"::date)
-        """),
-        {**tf_params, "year": today.year},
+        text(f'SELECT "poDate", "poTotal" FROM po_headers WHERE {tf} AND "poDate" IS NOT NULL'),
+        tf_params,
     )
-    monthly_by_month = {int(row[0]): float(row[1] or 0) for row in monthly_rows.fetchall()}
+    monthly_by_month: dict[int, float] = {}
+    year_str = str(today.year)
+    for po_date, po_total in monthly_rows.fetchall():
+        po_date = str(po_date)
+        if po_date[:4] != year_str:
+            continue
+        month_num = int(po_date[5:7])
+        monthly_by_month[month_num] = monthly_by_month.get(month_num, 0.0) + float(po_total or 0)
     monthly = [round(monthly_by_month.get(m, 0.0) / 1e7, 2) for m in range(1, 13)]
 
     return {

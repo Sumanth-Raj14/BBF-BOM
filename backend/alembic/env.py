@@ -11,17 +11,27 @@ from alembic import context
 # access to the values within the .ini file in use.
 config = context.config
 
-# Override sqlalchemy.url from environment if set. TEST_DATABASE_URL takes
-# precedence -- same rule as app.db.session.resolve_database_url() -- so that
-# `alembic upgrade head` run with only TEST_DATABASE_URL set (e.g. from a test
-# harness) migrates the test database, not whatever DATABASE_URL/settings
-# would otherwise resolve to. INCIDENT (2026-08-09): this used to check only
-# DATABASE_URL/DATABASE_URI, so TEST_DATABASE_URL was silently ignored here.
+# Override sqlalchemy.url from environment if set.
+#
+# The precedence here is DELIBERATELY the reverse of
+# app.db.session.resolve_database_url(), which puts TEST_DATABASE_URL first.
+# Alembic is a CLI aimed at one specific target: callers run it as a subprocess
+# with DATABASE_URL pointed at a particular throwaway file while
+# TEST_DATABASE_URL still names the pytest *session* database (see
+# test_regulated_foundation.py and test_zoho_books_foundation.py, which stamp a
+# fresh file then upgrade it). Preferring TEST_DATABASE_URL made those upgrades
+# run against the session DB that conftest had already create_all()'d, failing
+# with "table substance_groups already exists". An explicitly-set DATABASE_URL
+# is the more specific, deliberate instruction, so it wins for the CLI.
+#
+# TEST_DATABASE_URL is still consulted (INCIDENT 2026-08-09: it used to be
+# ignored here entirely), so `alembic upgrade head` with only that variable set
+# migrates the test database instead of falling through to live Postgres.
 import os
 
 db_url = (
-    os.environ.get("TEST_DATABASE_URL")
-    or os.environ.get("DATABASE_URL")
+    os.environ.get("DATABASE_URL")
+    or os.environ.get("TEST_DATABASE_URL")
     or os.environ.get("DATABASE_URI")
 )
 if not db_url:

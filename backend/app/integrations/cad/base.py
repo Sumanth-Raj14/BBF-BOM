@@ -107,6 +107,15 @@ class CadConnector(ABC):
         self.credentials = credentials or {}
         self.config = config or {}
 
+    def current_credentials(self) -> dict:
+        """Current credential state, for the caller to detect vendor-side
+        token rotation (a refresh call minting a new refresh_token) and
+        persist it back to the stored connection. Default: unchanged — most
+        connectors never mutate anything beyond what was passed in. Override
+        when the vendor client caches/rotates tokens in memory (Fusion, Altium
+        cloud) so a rotated refresh_token isn't silently lost."""
+        return self.credentials
+
     @abstractmethod
     async def verify_connection(self) -> dict:
         """Lightweight, read-only credential check. Raises `CadAuthError` /

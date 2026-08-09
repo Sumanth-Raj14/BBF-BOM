@@ -1271,6 +1271,36 @@
         "title": "Body_extract_from_uploaded_file_api_v1_ocr_extract_file_post",
         "type": "object"
       },
+      "Body_import_altium_file_api_v1_cad_connectors_altium_import_file_post": {
+        "properties": {
+          "bom_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bom Name"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "file": {
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_altium_file_api_v1_cad_connectors_altium_import_file_post",
+        "type": "object"
+      },
       "Body_upload_document_api_v1_documents_upload_post": {
         "properties": {
           "accessLevel": {
@@ -25605,6 +25635,51 @@
         ]
       }
     },
+    "/api/v1/cad-connectors/altium/import-file": {
+      "post": {
+        "description": "Import an Altium BOM export (.csv/.xlsx) \u2014 the ONLY CAD import that needs\nno vendor credentials, so there is no stored CadConnection to load here.\n\nDesignator grouping survives: R1/R2/R5 arrive as one component with\nquantity 3, written as one BOM line whose reference_designator keeps the\nlist. Writing goes through the same `_import_assembly_into_bom` helper the\nstored-connection route uses.\n\n`dry_run=true` parses and reports what WOULD be created without writing a\nsingle row (the preview half of the import-mapping/commit split the bulk\nimport already uses). A file that cannot be parsed is a 400 with the parse\nerror \u2014 never a partial or fabricated success.",
+        "operationId": "import_altium_file_api_v1_cad_connectors_altium_import_file_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_altium_file_api_v1_cad_connectors_altium_import_file_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Import Altium File",
+        "tags": [
+          "cad-connectors"
+        ]
+      }
+    },
     "/api/v1/cad-connectors/types": {
       "get": {
         "operationId": "list_types_api_v1_cad_connectors_types_get",
@@ -27616,9 +27691,9 @@
         ]
       }
     },
-    "/api/v1/compliance/compliance": {
+    "/api/v1/compliance": {
       "get": {
-        "operationId": "list_compliance_api_v1_compliance_compliance_get",
+        "operationId": "list_compliance_api_v1_compliance_get",
         "responses": {
           "200": {
             "content": {
@@ -27640,7 +27715,7 @@
         ]
       },
       "post": {
-        "operationId": "create_compliance_api_v1_compliance_compliance_post",
+        "operationId": "create_compliance_api_v1_compliance_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -27682,9 +27757,9 @@
         ]
       }
     },
-    "/api/v1/compliance/compliance/dashboard": {
+    "/api/v1/compliance/dashboard": {
       "get": {
-        "operationId": "compliance_dashboard_api_v1_compliance_compliance_dashboard_get",
+        "operationId": "compliance_dashboard_api_v1_compliance_dashboard_get",
         "responses": {
           "200": {
             "content": {
@@ -27706,9 +27781,9 @@
         ]
       }
     },
-    "/api/v1/compliance/compliance/packs": {
+    "/api/v1/compliance/packs": {
       "get": {
-        "operationId": "list_packs_api_v1_compliance_compliance_packs_get",
+        "operationId": "list_packs_api_v1_compliance_packs_get",
         "responses": {
           "200": {
             "content": {
@@ -27730,7 +27805,7 @@
         ]
       },
       "post": {
-        "operationId": "create_pack_api_v1_compliance_compliance_packs_post",
+        "operationId": "create_pack_api_v1_compliance_packs_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -27772,9 +27847,9 @@
         ]
       }
     },
-    "/api/v1/compliance/compliance/packs/{pack_id}": {
+    "/api/v1/compliance/packs/{pack_id}": {
       "get": {
-        "operationId": "get_pack_api_v1_compliance_compliance_packs__pack_id__get",
+        "operationId": "get_pack_api_v1_compliance_packs__pack_id__get",
         "parameters": [
           {
             "in": "path",
@@ -27817,9 +27892,9 @@
         ]
       }
     },
-    "/api/v1/compliance/compliance/parts/{part_id}": {
+    "/api/v1/compliance/parts/{part_id}": {
       "get": {
-        "operationId": "get_part_compliance_api_v1_compliance_compliance_parts__part_id__get",
+        "operationId": "get_part_compliance_api_v1_compliance_parts__part_id__get",
         "parameters": [
           {
             "in": "path",
@@ -27862,9 +27937,9 @@
         ]
       }
     },
-    "/api/v1/compliance/compliance/parts/{part_id}/certify": {
+    "/api/v1/compliance/parts/{part_id}/certify": {
       "post": {
-        "operationId": "certify_part_api_v1_compliance_compliance_parts__part_id__certify_post",
+        "operationId": "certify_part_api_v1_compliance_parts__part_id__certify_post",
         "parameters": [
           {
             "in": "path",
@@ -27917,9 +27992,9 @@
         ]
       }
     },
-    "/api/v1/compliance/compliance/{compliance_id}": {
+    "/api/v1/compliance/{compliance_id}": {
       "delete": {
-        "operationId": "delete_compliance_api_v1_compliance_compliance__compliance_id__delete",
+        "operationId": "delete_compliance_api_v1_compliance__compliance_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -27962,7 +28037,7 @@
         ]
       },
       "get": {
-        "operationId": "get_compliance_api_v1_compliance_compliance__compliance_id__get",
+        "operationId": "get_compliance_api_v1_compliance__compliance_id__get",
         "parameters": [
           {
             "in": "path",
@@ -28005,7 +28080,7 @@
         ]
       },
       "patch": {
-        "operationId": "patch_compliance_api_v1_compliance_compliance__compliance_id__patch",
+        "operationId": "patch_compliance_api_v1_compliance__compliance_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -28058,7 +28133,7 @@
         ]
       },
       "put": {
-        "operationId": "update_compliance_api_v1_compliance_compliance__compliance_id__put",
+        "operationId": "update_compliance_api_v1_compliance__compliance_id__put",
         "parameters": [
           {
             "in": "path",
@@ -33926,33 +34001,9 @@
         "summary": "Detailed Health"
       }
     },
-    "/api/v1/import/all/status": {
-      "get": {
-        "operationId": "get_all_import_status_api_v1_import_all_status_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "summary": "Get All Import Status",
-        "tags": [
-          "bulk-import"
-        ]
-      }
-    },
     "/api/v1/import/jobs": {
       "get": {
-        "description": "Tenant-scoped import job history (used by the Bulk Import screen).\n\nDistinct from /all/status above, which is not tenant-scoped and returns\nevery tenant's jobs \u2014 kept as-is for backward compatibility, but not\nsafe for a tenant-facing UI to call.",
+        "description": "Tenant-scoped import job history (used by the Bulk Import screen).\n\nA route named /all/status used to live here, deliberately unscoped\nacross every tenant, returning every tenant's filenames/mappingConfig to\nany authenticated caller. It had no caller anywhere in the codebase (the\nfrontend only calls /mapping, /commit and this /jobs route) and its own\ndocstring admitted it was \"not safe for a tenant-facing UI to call\" \u2014\ndead, dangerous surface, so it was deleted rather than scoped.",
         "operationId": "list_import_jobs_api_v1_import_jobs_get",
         "responses": {
           "200": {

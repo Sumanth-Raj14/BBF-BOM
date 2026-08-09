@@ -70,6 +70,7 @@ import {
   RequirementsScreen,
   BomVariantsScreen,
   MbomScreen,
+  CadConnectorsScreen,
 } from "../components/LazyScreens.jsx";
 
 const ErrBD = (p) =>
@@ -158,7 +159,7 @@ function DiffScreenWrapper() {
   const ctx = React.useContext(AppContext);
   return (
     <ErrBD>
-      <DiffScreen data={ctx.data} openModal={ctx.openModal} />
+      <DiffScreen data={ctx.data} openModal={ctx.openModal} bomId={ctx.bomId} />
     </ErrBD>
   );
 }
@@ -613,6 +614,10 @@ function AppShell() {
             <Route
               path="/mbom"
               element={<GenericScreen Component={MbomScreen} />}
+            />
+            <Route
+              path="/cad-connectors"
+              element={<GenericScreen Component={CadConnectorsScreen} />}
             />
             <Route path="*" element={<FourOhFour />} />
           </Routes>

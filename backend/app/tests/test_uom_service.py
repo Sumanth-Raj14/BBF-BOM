@@ -106,6 +106,47 @@ class TestRollupQuantities:
         assert length["total"] == Decimal("2")
 
 
+class TestFactorToBaseIgnoresWrongToUom:
+    """_factor_to_base used to query only on from_uom, trusting the
+    docstring convention "one row per non-base unit, straight to its
+    dimension's base" — a convention the DB schema does NOT enforce
+    (UniqueConstraint is on (tenantId, from_uom, to_uom), so a second row
+    for the same from_uom pointing at a different to_uom is legal). If a
+    second, non-base-targeting row exists and sorts first, the old code
+    silently returned the wrong factor instead of erroring or ignoring it.
+    """
+
+    async def test_extra_non_base_conversion_row_does_not_hijack_the_factor(
+        self, db_session, tenant_id
+    ):
+        # Fully custom dimension/units so insertion order is under our own
+        # control (SQLite's `.first()` with no ORDER BY tends to return rows
+        # in insertion/rowid order, so the WRONG row must be inserted first
+        # for a test relying on the pre-fix "whichever comes back first"
+        # behaviour to actually exercise it).
+        db_session.add_all(
+            [
+                UomUnit(tenantId=tenant_id, code="BASEU", name="Base", dimension="testdim", is_base=True),
+                UomUnit(tenantId=tenant_id, code="OTHERU", name="Other", dimension="testdim", is_base=False),
+                UomUnit(tenantId=tenant_id, code="SRCU", name="Src", dimension="testdim", is_base=False),
+            ]
+        )
+        await db_session.flush()
+        # WRONG row inserted first: SRCU -> OTHERU (not the dimension's base).
+        db_session.add(
+            UomConversion(tenantId=tenant_id, from_uom="SRCU", to_uom="OTHERU", factor=Decimal("99"))
+        )
+        # Correct row: SRCU -> BASEU, inserted second.
+        db_session.add(
+            UomConversion(tenantId=tenant_id, from_uom="SRCU", to_uom="BASEU", factor=Decimal("3"))
+        )
+        await db_session.commit()
+
+        # 1 SRCU == 3 BASEU (the correct row), so 2 SRCU == 6 BASEU.
+        result = await uom_service.convert(db_session, 2, "SRCU", "BASEU")
+        assert result == Decimal("6")
+
+
 class TestExtendedCost:
     async def test_same_unit_no_conversion_needed(self, db_session):
         cost, warning = await uom_service.extended_cost(db_session, 10, "EA", 2.5, "EA")

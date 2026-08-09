@@ -147,14 +147,42 @@ def _resolve_alembic_env_url(monkeypatch, **env_vars):
     return fake_config.url
 
 
-def test_alembic_env_test_database_url_wins_over_everything(monkeypatch):
+def test_alembic_env_explicit_database_url_wins_over_test_database_url(monkeypatch):
+    """Alembic's precedence is deliberately the REVERSE of the app's.
+
+    app.db.session.resolve_database_url() puts TEST_DATABASE_URL first, because
+    the app must never escape the test database. Alembic is different: it is a
+    CLI aimed at one specific target, and callers run it as a subprocess with
+    DATABASE_URL set to a particular throwaway file while TEST_DATABASE_URL
+    still names the pytest *session* database (see
+    test_regulated_foundation.py / test_zoho_books_foundation.py, which stamp a
+    fresh sqlite file then upgrade it).
+
+    Preferring TEST_DATABASE_URL here made those upgrades run against the
+    session DB that conftest had already create_all()'d, failing with
+    "table substance_groups already exists". So an explicit DATABASE_URL — the
+    more specific, deliberate instruction — wins for the CLI.
+    """
     monkeypatch.setattr(
         db_session.settings, "DATABASE_URI", "postgresql+asyncpg://u:p@nonexistent.invalid/bom_db"
     )
     url = _resolve_alembic_env_url(
         monkeypatch,
-        TEST_DATABASE_URL="sqlite+aiosqlite:///./scratch_alembic.db",
-        DATABASE_URL="postgresql+asyncpg://u:p@nonexistent.invalid/other_db",
+        TEST_DATABASE_URL="sqlite+aiosqlite:///./session.db",
+        DATABASE_URL="sqlite+aiosqlite:///./explicit_target.db",
+    )
+    assert url == "sqlite+aiosqlite:///./explicit_target.db"
+
+
+def test_alembic_env_uses_test_database_url_when_no_database_url(monkeypatch):
+    """The safety half of the incident fix still holds: with only
+    TEST_DATABASE_URL set, alembic migrates the test DB rather than falling
+    through to live Postgres from settings."""
+    monkeypatch.setattr(
+        db_session.settings, "DATABASE_URI", "postgresql+asyncpg://u:p@nonexistent.invalid/bom_db"
+    )
+    url = _resolve_alembic_env_url(
+        monkeypatch, TEST_DATABASE_URL="sqlite+aiosqlite:///./scratch_alembic.db"
     )
     assert url == "sqlite+aiosqlite:///./scratch_alembic.db"
 

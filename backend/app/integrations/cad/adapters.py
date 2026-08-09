@@ -95,10 +95,13 @@ def _to_node(d: dict) -> CadNode:
     """Vendor dict node -> CadNode. `is_assembly` is derived from having
     children — neither vendor's tree carries an explicit part/assembly flag."""
     children = [_to_node(c) for c in d.get("children") or []]
+    quantity = d.get("quantity")
     return CadNode(
         id=str(d.get("external_id") or ""),
         name=d.get("name") or "",
-        quantity=float(d.get("quantity") or 1),
+        # `or 1` would turn an explicit 0 (Altium DNP -- Do Not Populate) into
+        # a fitted quantity of 1. Only missing (None) defaults to 1.
+        quantity=float(quantity) if quantity is not None else 1.0,
         part_number=d.get("part_number"),
         is_assembly=bool(children),
         metadata=_to_metadata(d),
@@ -141,6 +144,11 @@ class FusionCadConnector(CadConnector):
     def __init__(self, credentials: dict, config: dict | None = None):
         super().__init__(credentials, config)
         self._vendor = FusionConnector(auth_blob=self.credentials)
+
+    def current_credentials(self) -> dict:
+        # APS may rotate the refresh_token on any authenticate() call; the
+        # rotated value only lives on `self._vendor` until this is read back.
+        return self._vendor.auth_blob()
 
     def _scope(self) -> tuple[str, str]:
         hub_id, project_id = self.config.get("hub_id"), self.config.get("project_id")
@@ -213,6 +221,11 @@ class AltiumCadConnector(CadConnector):
     def __init__(self, credentials: dict, config: dict | None = None):
         super().__init__(credentials, config)
         self._cached = None
+
+    def current_credentials(self) -> dict:
+        # Altium 365 may rotate the refresh_token on any authenticate() call;
+        # only the built client (not `self.credentials`) sees the new value.
+        return self._cached.auth_blob() if self._cached is not None else self.credentials
 
     def _client(self) -> AltiumCloudConnector:
         # Built lazily: a missing workspace_domain must surface as CadAuthError

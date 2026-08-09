@@ -32,8 +32,10 @@ _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
+from app.core.tenant_context import TenantContext  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.models.po_models import POHeader, POLineItem  # noqa: E402
+from app.models.tenant import Tenant  # noqa: E402
 from scripts._db_guard import require_non_production_db  # noqa: E402
 
 EXCEL_PATH = r"C:\Users\tsuma\Downloads\bom tool\Cleaned_Purchase_Orders.xlsx"
@@ -46,6 +48,28 @@ ALLOW_FULL_PO_WIPE = os.environ.get("ALLOW_FULL_PO_WIPE", "").strip().lower() in
     "yes",
     "on",
 )
+
+
+async def _tenant_id(session) -> int:
+    """Id of the tenant to seed into (mirrors scripts/seed_e2e_fixture.py).
+
+    POHeader/POLineItem are TenantAwareMixin with tenantId NOT NULL; without
+    an ambient tenant context the before_insert listener in
+    app.core.tenant_events never populates it and every insert below fails
+    the NOT NULL constraint. Also required so the "clear existing data" step
+    can scope its delete to this tenant only -- poNumber is unique only per
+    tenant (uq_po_headers_tenant_poNumber), so a same-numbered PO belonging
+    to a different tenant must never be touched by this script.
+    """
+    tid = (await session.execute(select(Tenant.id).order_by(Tenant.id))).scalars().first()
+    if tid is not None:
+        return tid
+    tenant = Tenant(tenant_name="Blackbox BOM", tenant_code="DEFAULT")
+    session.add(tenant)
+    await session.commit()
+    await session.refresh(tenant)
+    print(f"Created default tenant id={tenant.id} (database had none)")
+    return tenant.id
 
 
 async def seed():
@@ -113,67 +137,87 @@ async def seed():
 
     # Insert into database
     async with async_session() as session:
-        async with session.begin():
-            # Scope the "clear existing data" step to exactly the PO numbers
-            # this run is about to re-insert, so a re-run of this fixture
-            # script cannot touch any other PO ever written to this database.
-            po_numbers = [po_data["number"] for po_data in pos]
-            if po_numbers:
-                existing_header_ids = (
+        tid = await _tenant_id(session)
+        token = TenantContext.set(tenant_id=tid)
+        try:
+            async with session.begin():
+                # Scope the "clear existing data" step to exactly the PO
+                # numbers this run is about to re-insert, AND to this tenant
+                # only -- poNumber is unique per tenant, not globally, so an
+                # unscoped-by-tenant delete could remove another tenant's PO
+                # that happens to share a number with one in this Excel file.
+                po_numbers = [po_data["number"] for po_data in pos]
+                if po_numbers:
+                    existing_header_ids = (
+                        await session.execute(
+                            select(POHeader.id).where(
+                                POHeader.tenantId == tid,
+                                POHeader.poNumber.in_(po_numbers),
+                            )
+                        )
+                    ).scalars().all()
+                    if existing_header_ids:
+                        await session.execute(
+                            delete(POLineItem).where(
+                                POLineItem.tenantId == tid,
+                                POLineItem.headerId.in_(existing_header_ids),
+                            )
+                        )
+                        await session.execute(
+                            delete(POHeader).where(
+                                POHeader.tenantId == tid,
+                                POHeader.id.in_(existing_header_ids),
+                            )
+                        )
+                elif ALLOW_FULL_PO_WIPE:
+                    # No PO numbers parsed from the Excel file, so there is
+                    # nothing to scope to. Only wipe this tenant's POs, and
+                    # only if the operator explicitly opted in.
                     await session.execute(
-                        select(POHeader.id).where(POHeader.poNumber.in_(po_numbers))
+                        delete(POLineItem).where(POLineItem.tenantId == tid)
                     )
-                ).scalars().all()
-                if existing_header_ids:
-                    await session.execute(
-                        delete(POLineItem).where(POLineItem.headerId.in_(existing_header_ids))
+                    await session.execute(delete(POHeader).where(POHeader.tenantId == tid))
+                else:
+                    print(
+                        "No PO numbers parsed from Excel -- skipping delete "
+                        "(set ALLOW_FULL_PO_WIPE=true to force a full wipe instead)."
                     )
-                    await session.execute(
-                        delete(POHeader).where(POHeader.id.in_(existing_header_ids))
-                    )
-            elif ALLOW_FULL_PO_WIPE:
-                # No PO numbers parsed from the Excel file, so there is
-                # nothing to scope to. Only wipe everything if the operator
-                # explicitly opted in.
-                await session.execute(delete(POLineItem))
-                await session.execute(delete(POHeader))
-            else:
-                print(
-                    "No PO numbers parsed from Excel -- skipping delete "
-                    "(set ALLOW_FULL_PO_WIPE=true to force a full wipe instead)."
-                )
 
-            for po_data in pos:
-                header = POHeader(
-                    poNumber=po_data["number"],
-                    poDate=po_data["date"],
-                    vendorName=po_data["vendor"],
-                    project=po_data["project"],
-                    poTotal=po_data["po_total"],
-                    status=po_data["status"],
-                )
-                session.add(header)
-                await session.flush()  # Get the ID
-
-                for item_data in po_data["items"]:
-                    item = POLineItem(
-                        headerId=header.id,
-                        itemName=item_data["name"],
-                        itemDesc=item_data["desc"],
-                        quantity=item_data["qty"],
-                        itemPrice=item_data["price"],
-                        amount=item_data["amount"],
-                        gst=item_data["gst"],
-                        total=item_data["total"],
+                for po_data in pos:
+                    header = POHeader(
+                        tenantId=tid,
+                        poNumber=po_data["number"],
+                        poDate=po_data["date"],
+                        vendorName=po_data["vendor"],
+                        project=po_data["project"],
+                        poTotal=po_data["po_total"],
+                        status=po_data["status"],
                     )
-                    session.add(item)
+                    session.add(header)
+                    await session.flush()  # Get the ID
 
-        # Verify
-        result = await session.execute(text("SELECT COUNT(*) FROM po_headers"))
-        po_count = result.scalar()
-        result = await session.execute(text("SELECT COUNT(*) FROM po_line_items"))
-        item_count = result.scalar()
-        print(f"Inserted {po_count} PO headers and {item_count} line items")
+                    for item_data in po_data["items"]:
+                        item = POLineItem(
+                            tenantId=tid,
+                            headerId=header.id,
+                            itemName=item_data["name"],
+                            itemDesc=item_data["desc"],
+                            quantity=item_data["qty"],
+                            itemPrice=item_data["price"],
+                            amount=item_data["amount"],
+                            gst=item_data["gst"],
+                            total=item_data["total"],
+                        )
+                        session.add(item)
+
+            # Verify
+            result = await session.execute(text("SELECT COUNT(*) FROM po_headers"))
+            po_count = result.scalar()
+            result = await session.execute(text("SELECT COUNT(*) FROM po_line_items"))
+            item_count = result.scalar()
+            print(f"Inserted {po_count} PO headers and {item_count} line items")
+        finally:
+            TenantContext.reset(token)
 
     await engine.dispose()
 

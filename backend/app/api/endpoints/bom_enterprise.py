@@ -122,6 +122,7 @@ async def list_boms(
         "items": [
             {
                 "id": b.id,
+                "bom_number": b.bom_number,
                 "name": b.name,
                 "description": b.description,
                 "status": b.status,
@@ -147,6 +148,7 @@ async def create_bom(
     )
     return {
         "id": bom.id,
+        "bom_number": bom.bom_number,
         "name": bom.name,
         "description": bom.description,
         "status": bom.status,

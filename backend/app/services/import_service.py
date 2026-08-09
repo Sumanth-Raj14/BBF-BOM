@@ -13,7 +13,11 @@ import csv
 import io
 
 import openpyxl
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
+from app.models.bulk_import import BulkImportRow
 from app.models.part import Part
 
 # ponytail: flat in-memory limits, not a per-tenant config. Bump the
@@ -211,3 +215,70 @@ def validate_row(entity: str, mapped: dict) -> tuple[dict | None, list[str]]:
     if errors:
         return None, errors
     return cleaned, []
+
+
+async def commit_rows(
+    db: AsyncSession,
+    import_rows: list[BulkImportRow],
+    mapping: dict[str, str],
+    entity: str,
+    tenant_id: int,
+) -> dict:
+    """Shared write path: map + validate + upsert every row, tenant-scoped.
+
+    The ONE place that actually creates/updates entity rows for a bulk
+    import — both /commit and /process call this so there is exactly one
+    write implementation to keep honest, instead of one real path and one
+    that only rewrites BulkImportRow and claims success.
+
+    Mutates each row's .status/.errors in place; does not commit — caller
+    owns the transaction/job bookkeeping. Returns
+    {"created", "updated", "failed", "errors": [(row_index, message), ...]}.
+    """
+    spec = ENTITY_SPECS[entity]
+    model = spec["model"]
+    natural_key = spec["natural_key"]
+
+    created = 0
+    updated = 0
+    failed = 0
+    errors: list[tuple[int, str]] = []
+
+    for idx, row in enumerate(import_rows, start=1):
+        mapped = map_row(row.rowData or {}, mapping)
+        cleaned, row_errors = validate_row(entity, mapped)
+        if row_errors:
+            failed += 1
+            errors.append((idx, "; ".join(row_errors)))
+            row.status = "error"
+            row.errors = "; ".join(row_errors)
+            continue
+
+        key_val = cleaned.get(natural_key)
+        try:
+            async with db.begin_nested():
+                existing_result = await db.execute(
+                    select(model).where(
+                        getattr(model, natural_key) == key_val,
+                        model.tenantId == tenant_id,
+                    )
+                )
+                existing = existing_result.scalar_one_or_none()
+                if existing:
+                    for field, value in cleaned.items():
+                        setattr(existing, field, value)
+                    updated += 1
+                else:
+                    db.add(model(tenantId=tenant_id, **cleaned))
+                    created += 1
+                await db.flush()
+            row.status = "processed"
+            row.errors = None
+        except IntegrityError as exc:
+            failed += 1
+            message = f"{natural_key} '{key_val}': {exc.orig}"
+            errors.append((idx, message))
+            row.status = "error"
+            row.errors = message
+
+    return {"created": created, "updated": updated, "failed": failed, "errors": errors}

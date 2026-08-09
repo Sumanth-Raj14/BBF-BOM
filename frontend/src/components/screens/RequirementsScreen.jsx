@@ -79,6 +79,7 @@ export default function RequirementsScreen() {
 
   const [selected, setSelected] = React.useState(null);
   const [linkedParts, setLinkedParts] = React.useState([]);
+  const [linkedPartsError, setLinkedPartsError] = React.useState(null);
   const [linkPartId, setLinkPartId] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
@@ -136,11 +137,17 @@ export default function RequirementsScreen() {
   const openRow = async (row) => {
     setSelected(row);
     setLinkPartId("");
+    setLinkedPartsError(null);
     try {
       const parts = await api.requirement.linkedParts(row.id);
       setLinkedParts(Array.isArray(parts) ? parts : []);
-    } catch {
+    } catch (e) {
+      // A fetch failure here is NOT the same as "zero links" — a masked
+      // failure would make a fully-covered requirement look uncovered to a
+      // quality/regulatory reviewer. Show the error instead of an empty list
+      // (matches CadConnectorsScreen's docsError pattern).
       setLinkedParts([]);
+      setLinkedPartsError(e?.message || "Could not load linked parts.");
     }
   };
 
@@ -151,6 +158,7 @@ export default function RequirementsScreen() {
       await api.requirement.linkPart(selected.id, Number(linkPartId));
       toast(__t("requirements.linked") || "Part linked", { kind: "success" });
       setLinkPartId("");
+      setLinkedPartsError(null);
       const parts = await api.requirement.linkedParts(selected.id);
       setLinkedParts(Array.isArray(parts) ? parts : []);
     } catch (e) {
@@ -420,7 +428,21 @@ export default function RequirementsScreen() {
           <h4 className="fs-12 fw-600 mt-14 mb-8">
             {__t("requirements.linkedParts") || "Parts satisfying this requirement"}
           </h4>
-          {linkedParts.length === 0 ? (
+          {linkedPartsError ? (
+            <div
+              role="alert"
+              className="mb-14 fs-12"
+              style={{
+                padding: "8px 12px",
+                borderRadius: "var(--r-2, 6px)",
+                background: "color-mix(in oklch, var(--status-danger, red) 10%, transparent)",
+              }}
+            >
+              {(__t("requirements.linkedPartsFailed") || "Could not load linked parts") +
+                ": " +
+                linkedPartsError}
+            </div>
+          ) : linkedParts.length === 0 ? (
             <p className="fs-12 fg-3">
               {__t("requirements.noLinkedParts") || "No parts linked yet — this requirement is uncovered."}
             </p>

@@ -425,6 +425,19 @@ class AltiumCloudConnector:
             http=http,
         )
 
+    def auth_blob(self) -> dict:
+        """Current in-memory credential state, for the caller to persist back
+        after `authenticate()` rotates a refresh_token (mirrors
+        `fusion.FusionConnector.auth_blob`)."""
+        return {
+            "workspace_domain": self._workspace_domain,
+            "access_token": self._access_token,
+            "access_token_expires_at": self._access_token_expires_at,
+            "refresh_token": self._refresh_token,
+            "client_id": self._client_id,
+            "client_secret": self._client_secret,
+        }
+
     def _base_url(self) -> str:
         domain = self._workspace_domain
         if not domain.startswith("http"):

@@ -326,3 +326,53 @@ backend. Separately and genuinely: when the server is unreachable, the local-fir
 `App.jsx:323` admits any credentials — `offlineAuth.js` says that is for "a previously-known
 user" but the code never checks that they are known. Real residual gap in the A10 fix,
 bounded by whatever is cached locally.
+
+---
+
+## ADDENDUM 2 — build campaign (later 2026-08-02 / 08-09 session)
+
+Branch `wip/gap-closing-2026-08-02` on **origin = github.com/Sumanth-Raj14/BBF-BOM.git**.
+`master` untouched + protected (enforce_admins). All older branches verified to have
+ZERO file differences vs this branch, so everything is in one place: one PR closes it all.
+PR #10 (`test/e2e-ci-and-write-flows`) is fully contained here and can be closed.
+
+### Committed
+- `23ceca0` every page renders — poisoned sync queue + unusable rate limits
+- `4735c13` configurable export system, real CSV/XLSX import, ops gaps
+- `4c4d19f` OpenBOM parity (xBOM, effectivity, multi-UOM, requirements) + CAD connectors
+- `79e2718` DB safety: TEST_DATABASE_URL/DATABASE_URL honoured + seed guard
+
+### UNCOMMITTED in the tree (done, verified by their own tests)
+- Wave 4: CAD Connectors screen, UOM wired into BOM rollup, fabricated-data components
+  fixed, PROJECT_REFERENCE + DEPLOYMENT_GUIDE refreshed.
+- Wave 5: compliance doubled-path fixed AT SOURCE (routes repeated the router's own
+  prefix; the frontend had been patched to call the broken path deliberately), and all
+  Postgres-only SQL made PORTABLE (TO_CHAR/::date/::text/::json/json_agg/EXTRACT/NOW()/
+  INTERVAL) so the five broken screens work on SQLite too — matters because the product
+  is local-first and SQLite is a legitimate small deployment.
+
+### IN FLIGHT
+Fix wave for the new-code audit (workflow wf_d5fc2f6b-e03): 3 CRITICAL cross-tenant
+IDOR in bulk_import (status/errors/process), /all/status leak, a CHECK-constraint 500,
+Altium qty-0 -> 1 corruption, unpersisted OAuth token rotation, add_variant_item leak.
+
+### KEY FACT FOR WHOEVER PICKS THIS UP
+A second audit of the ~14.7k lines written today found **21 defects incl. 3 critical
+cross-tenant leaks** — in code whose own agents all reported green. Self-reported green
+means nothing; the happy-path tests passed. Always run an independent adversarial audit
+over agent-written code, and require every security fix to have a test that fails
+against the OLD code.
+
+### Still blocked on the user
+- Live CAD verification: Onshape API key/secret; Autodesk APS app (client id/secret,
+  callback, scopes); Altium 365 workspace creds. The Altium FILE import needs none.
+- UI consolidation (user parked it): 50 routes / 13 nav items -> should be 8-10.
+- Whether to open the PR to master.
+
+### Environment gotchas
+- `seed_e2e_fixture` + the app now honour TEST_DATABASE_URL (fixed). Verify isolation
+  empirically before trusting it — it silently wrote to live Postgres earlier today.
+- The route sweep needs a QUIET machine: running it alongside parallel agents makes
+  auth.setup time out and every route gets skipped.
+- `RATE_LIMIT_AUTH_PER_MINUTE=5` locally will block repeated sweep runs; raise it for
+  test runs.

@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -163,12 +165,15 @@ async def tracking_stats(db: AsyncSession = Depends(get_db)):
     for row in result.fetchall():
         by_stage[row[0]] = row[1]
 
+    # NOW()::text is Postgres-only cast syntax (SQLite errors on the "::"
+    # token); bind the current time as a plain string instead so the
+    # comparison works identically on both dialects.
     result = await db.execute(
         text(
-            'SELECT COUNT(*) FROM "order_tracking" WHERE "estimatedDelivery" < NOW()::text '
+            'SELECT COUNT(*) FROM "order_tracking" WHERE "estimatedDelivery" < :_now '
             f"AND \"currentStage\" NOT IN ('delivered', 'completed') {tc}"
         ),
-        tp,
+        {**tp, "_now": datetime.now(timezone.utc).isoformat()},
     )
     overdue = result.scalar() or 0
 

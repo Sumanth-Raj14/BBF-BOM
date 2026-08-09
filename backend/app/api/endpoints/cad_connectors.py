@@ -87,6 +87,23 @@ def _build(conn: CadConnection):
     return build_connector(conn.connector_type, creds, conn.config or {})
 
 
+async def _sync_rotated_credentials(db: AsyncSession, conn: CadConnection, connector) -> None:
+    """Some vendors (APS/Fusion, Altium 365) rotate the refresh_token on every
+    token refresh. The connector only holds the new value in memory — read it
+    back and persist it here, or the very next call uses the now-invalidated
+    old refresh_token and the connection breaks permanently (mirrors
+    app.api.endpoints.zoho_books' `conn.auth = dump_auth_blob(...)` pattern).
+    Called unconditionally (success or failure) since auth can rotate before a
+    later step in the same call fails for an unrelated reason."""
+    get_current = getattr(connector, "current_credentials", None)
+    if get_current is None:
+        return
+    current = get_current()
+    if current != connector.credentials:
+        conn.credentials = json.dumps(current)
+        await db.commit()
+
+
 @router.get("/types")
 async def list_types(current_user: User = Depends(get_current_user)):
     return {"types": list_connector_types()}
@@ -154,27 +171,30 @@ async def test_connection(
     conn = await _get_connection_or_404(db, connection_id, current_user.tenantId)
     connector = _build(conn)
     try:
-        result = await connector.verify_connection()
-    except CadAuthError as e:
-        conn.status, conn.last_error = "error", str(e)
-        await db.commit()
-        return {"ok": False, "reason": "auth_failed", "detail": str(e)}
-    except CadRateLimitError as e:
-        conn.status, conn.last_error = "error", str(e)
-        await db.commit()
-        return {"ok": False, "reason": "rate_limited", "detail": str(e)}
-    except CadNotFoundError as e:
-        conn.status, conn.last_error = "error", str(e)
-        await db.commit()
-        return {"ok": False, "reason": "not_found", "detail": str(e)}
-    except CadConnectorError as e:
-        conn.status, conn.last_error = "error", str(e)
-        await db.commit()
-        return {"ok": False, "reason": "error", "detail": str(e)}
+        try:
+            result = await connector.verify_connection()
+        except CadAuthError as e:
+            conn.status, conn.last_error = "error", str(e)
+            await db.commit()
+            return {"ok": False, "reason": "auth_failed", "detail": str(e)}
+        except CadRateLimitError as e:
+            conn.status, conn.last_error = "error", str(e)
+            await db.commit()
+            return {"ok": False, "reason": "rate_limited", "detail": str(e)}
+        except CadNotFoundError as e:
+            conn.status, conn.last_error = "error", str(e)
+            await db.commit()
+            return {"ok": False, "reason": "not_found", "detail": str(e)}
+        except CadConnectorError as e:
+            conn.status, conn.last_error = "error", str(e)
+            await db.commit()
+            return {"ok": False, "reason": "error", "detail": str(e)}
 
-    conn.status, conn.last_error = "ok", None
-    await db.commit()
-    return {"ok": True, "reason": "ok", "detail": result}
+        conn.status, conn.last_error = "ok", None
+        await db.commit()
+        return {"ok": True, "reason": "ok", "detail": result}
+    finally:
+        await _sync_rotated_credentials(db, conn, connector)
 
 
 @router.get("/{connection_id}/documents")
@@ -186,12 +206,15 @@ async def list_documents(
     conn = await _get_connection_or_404(db, connection_id, current_user.tenantId)
     connector = _build(conn)
     try:
-        docs = await connector.list_documents()
-    except CadAuthError as e:
-        raise HTTPException(status_code=401, detail=str(e)) from e
-    except CadConnectorError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    return {"items": [d.__dict__ for d in docs]}
+        try:
+            docs = await connector.list_documents()
+        except CadAuthError as e:
+            raise HTTPException(status_code=401, detail=str(e)) from e
+        except CadConnectorError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
+        return {"items": [d.__dict__ for d in docs]}
+    finally:
+        await _sync_rotated_credentials(db, conn, connector)
 
 
 # Normalised CadPartMetadata.custom_properties key -> the Part column that
@@ -309,31 +332,34 @@ async def import_assembly(
     conn = await _get_connection_or_404(db, connection_id, current_user.tenantId)
     connector = _build(conn)
     try:
-        assembly = await connector.get_assembly_structure(req.document_id)
-    except CadAuthError as e:
-        conn.status, conn.last_error = "error", str(e)
+        try:
+            assembly = await connector.get_assembly_structure(req.document_id)
+        except CadAuthError as e:
+            conn.status, conn.last_error = "error", str(e)
+            await db.commit()
+            raise HTTPException(status_code=401, detail=str(e)) from e
+        except CadNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        except CadConnectorError as e:
+            conn.status, conn.last_error = "error", str(e)
+            await db.commit()
+            raise HTTPException(status_code=502, detail=str(e)) from e
+
+        bom, total_items, total_parts = await _import_assembly_into_bom(
+            db, assembly, req.document_id, current_user.tenantId, bom_id=req.bom_id, bom_name=req.bom_name
+        )
+
+        conn.status, conn.last_error, conn.last_sync_at = "ok", None, datetime.now(UTC)
         await db.commit()
-        raise HTTPException(status_code=401, detail=str(e)) from e
-    except CadNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except CadConnectorError as e:
-        conn.status, conn.last_error = "error", str(e)
-        await db.commit()
-        raise HTTPException(status_code=502, detail=str(e)) from e
 
-    bom, total_items, total_parts = await _import_assembly_into_bom(
-        db, assembly, req.document_id, current_user.tenantId, bom_id=req.bom_id, bom_name=req.bom_name
-    )
-
-    conn.status, conn.last_error, conn.last_sync_at = "ok", None, datetime.now(UTC)
-    await db.commit()
-
-    return {
-        "bom_id": bom.id,
-        "document_id": req.document_id,
-        "items_created": total_items,
-        "parts_created": total_parts,
-    }
+        return {
+            "bom_id": bom.id,
+            "document_id": req.document_id,
+            "items_created": total_items,
+            "parts_created": total_parts,
+        }
+    finally:
+        await _sync_rotated_credentials(db, conn, connector)
 
 
 @router.post("/altium/import-file")

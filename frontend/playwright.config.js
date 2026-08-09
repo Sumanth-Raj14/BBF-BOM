@@ -35,6 +35,12 @@ export default defineConfig({
     command: 'npm run build && npm run preview',
     url: 'http://localhost:4173',
     reuseExistingServer: !process.env.CI,
-    timeout: 30000,
+    // 30s was too tight: this command does a full production build BEFORE the
+    // preview server starts listening, and the build alone takes ~10-20s on a
+    // quiet machine and considerably longer on a loaded one or a CI runner.
+    // When it expired, every spec was skipped with "Timed out waiting from
+    // config.webServer" -- which reads like a broken app rather than a slow
+    // build. Runs that appeared to work were reusing an already-running server.
+    timeout: 180000,
   },
 });

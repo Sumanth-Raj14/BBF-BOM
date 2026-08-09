@@ -8,13 +8,16 @@ to-do list item. See RequirementPartLink / RequirementBomLink.
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
 from app.core.pagination import PageParams, get_page_params, paginate
 from app.core.rbac import require_parts_read, require_parts_write
 from app.db.session import get_db
+from app.models.bom import BOM
+from app.models.part import Part
 from app.models.requirement import Requirement, RequirementBomLink, RequirementPartLink
 from app.models.user import User
 from app.schemas.requirement import (
@@ -73,8 +76,9 @@ async def coverage(
     result = await db.execute(stmt)
     uncovered = result.scalars().all()
 
-    total_result = await db.execute(select(Requirement))
-    total = len(total_result.scalars().all())
+    # ponytail: was `len((await db.execute(select(Requirement))).scalars().all())`
+    # — loaded every column of every row just to count them. COUNT(*) instead.
+    total = (await db.execute(select(func.count()).select_from(Requirement))).scalar_one()
 
     return {
         "total": total,
@@ -110,7 +114,13 @@ async def create_requirement(
         **payload.model_dump(), createdBy=current_user.id, tenantId=current_user.tenantId
     )
     db.add(obj)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409, detail=f"Requirement key '{payload.key}' already exists"
+        )
     await db.refresh(obj)
     return obj
 
@@ -134,7 +144,13 @@ async def update_requirement(
     obj = await _get_or_404(db, requirement_id)
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(obj, k, v)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409, detail=f"Requirement key '{payload.key}' already exists"
+        )
     await db.refresh(obj)
     return obj
 
@@ -183,6 +199,11 @@ async def link_part(
     current_user: User = Depends(require_parts_write),
 ):
     await _get_or_404(db, requirement_id)
+    part_stmt = select(Part).where(Part.id == payload.partId)
+    if current_user.tenantId is not None:
+        part_stmt = part_stmt.where(Part.tenantId == current_user.tenantId)
+    if not (await db.execute(part_stmt)).scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Part not found")
     existing = await db.execute(
         select(RequirementPartLink).where(
             RequirementPartLink.requirement_id == requirement_id,
@@ -245,6 +266,11 @@ async def link_bom(
     current_user: User = Depends(require_parts_write),
 ):
     await _get_or_404(db, requirement_id)
+    bom_stmt = select(BOM).where(BOM.id == payload.bomId)
+    if current_user.tenantId is not None:
+        bom_stmt = bom_stmt.where(BOM.tenantId == current_user.tenantId)
+    if not (await db.execute(bom_stmt)).scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="BOM not found")
     existing = await db.execute(
         select(RequirementBomLink).where(
             RequirementBomLink.requirement_id == requirement_id,

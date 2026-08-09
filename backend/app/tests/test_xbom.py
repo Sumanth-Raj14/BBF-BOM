@@ -225,6 +225,30 @@ async def test_derive_mbom_copies_structure_without_mutating_source(db_session, 
 
 
 @pytest.mark.asyncio
+async def test_derive_mbom_preserves_explicit_zero_quantity(db_session, test_tenant):
+    """`item.quantity or 1` silently turned an explicit 0 into 1 (same bug
+    class fixed in the CAD adapter). A quantity of 0 is legitimate (e.g. a
+    reference-only/do-not-build line) and must survive derivation as 0, not
+    get coerced to 1.
+    """
+    tid = test_tenant.id
+    ebom = await bom_service.create_bom(db_session, {"name": "ZERO-Q", "bom_type": "EBOM"}, tenant_id=tid)
+    part = await _make_part(db_session, tid, "ZERO-Q-PN")
+    db_session.add(BOMItem(bom_id=ebom.id, part_id=part.id, quantity=0, unit="EA", tenantId=tid))
+    await db_session.commit()
+
+    header = await bom_service.derive_mbom_from_ebom(db_session, ebom.id, tenant_id=tid)
+
+    mbom_items = (
+        (await db_session.execute(select(MbomItem).where(MbomItem.mbom_id == header.id)))
+        .scalars()
+        .all()
+    )
+    assert len(mbom_items) == 1
+    assert float(mbom_items[0].quantity) == 0
+
+
+@pytest.mark.asyncio
 async def test_derive_mbom_rejects_non_ebom_source(db_session, test_tenant):
     tid = test_tenant.id
     mbom_tagged = await bom_service.create_bom(
@@ -328,3 +352,151 @@ async def test_mbom_header_not_visible_cross_tenant_via_http(client, db_session,
 
 async def _add_user_to_tenant(db_session, tenant_id, email):
     await _scoped_user(db_session, tenant_id, email)
+
+
+async def _grant_parts_permissions(db_session, tenant_id, user):
+    """mbom_api's RoleChecker (require_engineering) is satisfied by the
+    "engineering" Role from _scoped_user, but parts.py's create_part uses
+    PermissionChecker (require_parts_write), which checks Permission rows
+    reached through Role.permissions — a separate grant.
+
+    Linked via the raw association tables (like _scoped_user does for
+    user_roles), not ORM relationship assignment: assigning role.users=[user]
+    marks `user` dirty, and before_flush's cross-tenant-update guard then
+    blocks the flush because the ambient (autouse) tenant context differs
+    from this user's own tenant.
+    """
+    from app.models.permission import Permission
+    from app.models.role import role_permissions
+
+    role = Role(name=f"parts-writer-{user.id}", tenantId=tenant_id)
+    read_perm = Permission(name="parts:read", resource="parts", action="read", tenantId=tenant_id)
+    write_perm = Permission(
+        name="parts:write", resource="parts", action="write", tenantId=tenant_id
+    )
+    db_session.add_all([role, read_perm, write_perm])
+    await db_session.commit()
+    await db_session.execute(
+        role_permissions.insert().values(role_id=role.id, permission_id=read_perm.id)
+    )
+    await db_session.execute(
+        role_permissions.insert().values(role_id=role.id, permission_id=write_perm.id)
+    )
+    await db_session.execute(user_roles.insert().values(user_id=user.id, role_id=role.id))
+    await db_session.commit()
+
+
+# ============ 6. mbom_api.py part_id validation (audit finding) ============
+#
+# create_mbom_item/update_mbom_item wrote MbomItem.part_id (a NOT NULL FK to
+# parts.id) with no existence/tenant check at all. A bad id used to reach an
+# unhandled IntegrityError -> generic 500 on commit; a real id belonging to
+# another tenant would have been accepted outright, creating a cross-tenant
+# reference. Both now validate via the same Part+tenant check bom_service's
+# create_bom_item/update_bom_item already use.
+
+
+@pytest.mark.asyncio
+async def test_create_mbom_item_rejects_nonexistent_part(client, auth_headers):
+    header_resp = await client.post(
+        "/api/v1/mbom/headers", json={"name": "MBOM Bad Part"}, headers=auth_headers
+    )
+    mbom_id = header_resp.json()["id"]
+
+    resp = await client.post(
+        f"/api/v1/mbom/headers/{mbom_id}/items",
+        json={"part_id": 999999},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404, resp.text
+
+
+@pytest.mark.asyncio
+async def test_create_mbom_item_rejects_cross_tenant_part(client, db_session, test_tenant):
+    tid_a = test_tenant.id
+    tid_b = tid_a + 3000
+    tenant_b = Tenant(id=tid_b, tenant_name=f"Tenant {tid_b}", tenant_code=f"T{tid_b}")
+    db_session.add(tenant_b)
+    await db_session.commit()
+    user_b = await _scoped_user(db_session, tid_b, "mbom-part-tenant-b@example.com")
+    await _grant_parts_permissions(db_session, tid_b, user_b)
+    user_a = await _scoped_user(db_session, tid_a, "mbom-part-tenant-a@example.com")
+    await _grant_parts_permissions(db_session, tid_a, user_a)
+    headers_a = await _login(client, "mbom-part-tenant-a@example.com")
+    headers_b = await _login(client, "mbom-part-tenant-b@example.com")
+
+    part_b_resp = await client.post(
+        "/api/v1/parts/",
+        json={"pn": "MBOM-SECRET-B", "name": "Tenant B secret part"},
+        headers=headers_b,
+    )
+    part_b_id = part_b_resp.json()["id"]
+
+    header_resp = await client.post(
+        "/api/v1/mbom/headers", json={"name": "MBOM Tenant A"}, headers=headers_a
+    )
+    mbom_id = header_resp.json()["id"]
+
+    # Tenant A tries to attach tenant B's real part.
+    resp = await client.post(
+        f"/api/v1/mbom/headers/{mbom_id}/items",
+        json={"part_id": part_b_id},
+        headers=headers_a,
+    )
+    assert resp.status_code == 404, resp.text
+
+    items_resp = await client.get(
+        f"/api/v1/mbom/headers/{mbom_id}/items", headers=headers_a
+    )
+    assert items_resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_update_mbom_item_rejects_cross_tenant_part(client, db_session, test_tenant):
+    tid_a = test_tenant.id
+    tid_b = tid_a + 4000
+    tenant_b = Tenant(id=tid_b, tenant_name=f"Tenant {tid_b}", tenant_code=f"T{tid_b}")
+    db_session.add(tenant_b)
+    await db_session.commit()
+    user_b = await _scoped_user(db_session, tid_b, "mbom-upd-tenant-b@example.com")
+    await _grant_parts_permissions(db_session, tid_b, user_b)
+    user_a = await _scoped_user(db_session, tid_a, "mbom-upd-tenant-a@example.com")
+    await _grant_parts_permissions(db_session, tid_a, user_a)
+    headers_a = await _login(client, "mbom-upd-tenant-a@example.com")
+    headers_b = await _login(client, "mbom-upd-tenant-b@example.com")
+
+    part_a_resp = await client.post(
+        "/api/v1/parts/",
+        json={"pn": "MBOM-OWN-A", "name": "Tenant A own part"},
+        headers=headers_a,
+    )
+    part_a_id = part_a_resp.json()["id"]
+    part_b_resp = await client.post(
+        "/api/v1/parts/",
+        json={"pn": "MBOM-SECRET-B-2", "name": "Tenant B secret part 2"},
+        headers=headers_b,
+    )
+    part_b_id = part_b_resp.json()["id"]
+
+    header_resp = await client.post(
+        "/api/v1/mbom/headers", json={"name": "MBOM Tenant A 2"}, headers=headers_a
+    )
+    mbom_id = header_resp.json()["id"]
+    item_resp = await client.post(
+        f"/api/v1/mbom/headers/{mbom_id}/items",
+        json={"part_id": part_a_id},
+        headers=headers_a,
+    )
+    item_id = item_resp.json()["id"]
+
+    resp = await client.put(
+        f"/api/v1/mbom/headers/{mbom_id}/items/{item_id}",
+        json={"part_id": part_b_id},
+        headers=headers_a,
+    )
+    assert resp.status_code == 404, resp.text
+
+    unchanged = await client.get(
+        f"/api/v1/mbom/headers/{mbom_id}/items", headers=headers_a
+    )
+    assert unchanged.json()[0]["part_id"] == part_a_id
