@@ -32,6 +32,11 @@ from app.schemas.should_cost import (
     ShouldCostResponse,
     ShouldCostUpdate,
 )
+from app.schemas.requirement import (
+    RequirementCreate,
+    RequirementResponse,
+    RequirementUpdate,
+)
 from app.schemas.supplier_scorecard import (
     SupplierScorecardCreate,
     SupplierScorecardResponse,

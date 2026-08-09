@@ -29,6 +29,12 @@ class BOM(Base, TenantAwareMixin):
     name = Column(String, nullable=False)
     description = Column(Text)
     status = Column(String, default="draft")
+    # xBOM discriminator (migration 052) — EBOM (engineering, the historical
+    # default so every pre-existing BOM keeps working unchanged) / MBOM
+    # (manufacturing) / SBOM (service). The MBOM structure itself still lives
+    # in mbom_headers/mbom_items (see app/models/mbom.py + app/api/endpoints/
+    # mbom_api.py) — this column only tags what kind of BOM a `boms` row is.
+    bom_type = Column(String(10), nullable=False, default="EBOM", server_default="EBOM")
     version = Column(String, default="1.0")
     revision = Column(Integer, default=1)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), index=True)
@@ -48,6 +54,7 @@ class BOM(Base, TenantAwareMixin):
         Index("idx_boms_tenant_status", "tenantId", "status"),
         UniqueConstraint("tenantId", "bom_number", name="uq_boms_tenant_bom_number"),
         CheckConstraint("status IN ('draft', 'active', 'archived')", name="ck_boms_status"),
+        CheckConstraint("bom_type IN ('EBOM', 'MBOM', 'SBOM')", name="ck_boms_bom_type"),
     )
 
     def __repr__(self):

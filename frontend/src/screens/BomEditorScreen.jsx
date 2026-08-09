@@ -4,6 +4,7 @@ import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import { ComplianceReportPanel } from "../components/ComplianceReportPanel.jsx";
 import ExportDialog from "../components/modals/ExportDialog.jsx";
+import UomConverterModal from "../components/modals/UomConverterModal.jsx";
 import {
   BomEditor,
   BomShell,
@@ -41,6 +42,7 @@ function BomEditorScreen({
   // Parts-backed row source currently threads a real bom_id through.
   const bomId = ctx?.bomId || p?.id || p?.bomId || 1;
   const [exportOpen, setExportOpen] = React.useState(false);
+  const [uomConverterOpen, setUomConverterOpen] = React.useState(false);
 
   const allCats = [
     "Assembly",
@@ -153,6 +155,12 @@ function BomEditorScreen({
                 icon: <Icon.Diff size={11} />,
                 label: __t("bomShell.rollbackRevision"),
                 onClick: () => openModal("rollback"),
+              },
+              "divider",
+              {
+                icon: <Icon.Sparkles size={11} />,
+                label: __t("uom.title") || "Unit Converter",
+                onClick: () => setUomConverterOpen(true),
               },
             ]}
           />
@@ -536,6 +544,10 @@ function BomEditorScreen({
         onClose={() => setExportOpen(false)}
         entity="bom"
         bomId={bomId}
+      />
+      <UomConverterModal
+        open={uomConverterOpen}
+        onClose={() => setUomConverterOpen(false)}
       />
     </>
   );

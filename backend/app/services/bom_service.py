@@ -17,6 +17,7 @@ from app.core.s3_storage import s3_storage
 from app.core.tenant_context import get_tenant_id
 from app.models.bom import BOM, BOMItem
 from app.models.bom_closure import BomClosure
+from app.models.mbom import MbomHeader, MbomItem
 from app.models.bom_item import BomItem as TemplateBomItem
 from app.models.bom_item_custom_value import BomItemCustomValue
 from app.models.bom_snapshot import BomBaseline, BomSnapshot
@@ -52,13 +53,20 @@ def _cache_part(tid: Optional[int], pid: int, pn: str, name: str):
 # ============ Basic CRUD ============
 
 
-async def list_boms(db: AsyncSession, skip: int = 0, limit: int = 100) -> tuple[list[BOM], int]:
+async def list_boms(
+    db: AsyncSession, skip: int = 0, limit: int = 100, bom_type: Optional[str] = None
+) -> tuple[list[BOM], int]:
     tid = get_tenant_id()
     base = select(BOM)
     count_base = select(func.count()).select_from(BOM)
     if tid is not None:
         base = base.where(BOM.tenantId == tid)
         count_base = count_base.where(BOM.tenantId == tid)
+    # xBOM (migration 052): optional EBOM/MBOM/SBOM filter. None (the default)
+    # preserves every existing caller's behavior exactly.
+    if bom_type is not None:
+        base = base.where(BOM.bom_type == bom_type)
+        count_base = count_base.where(BOM.bom_type == bom_type)
     total = (await db.execute(count_base)).scalar() or 0
     result = await db.execute(base.offset(skip).limit(limit).order_by(BOM.id))
     return result.scalars().all(), total
@@ -128,6 +136,73 @@ async def create_bom(db: AsyncSession, data: dict, tenant_id: Optional[int] = No
     await db.commit()
     await db.refresh(bom)
     return bom
+
+
+# ============ xBOM: EBOM -> MBOM derivation ============
+
+
+async def derive_mbom_from_ebom(
+    db: AsyncSession,
+    ebom_id: int,
+    tenant_id: Optional[int] = None,
+    name: Optional[str] = None,
+) -> MbomHeader:
+    """Create a new MBOM (mbom_headers/mbom_items) by copying an existing
+    EBOM's structure — the actual value of xBOM: a manufacturing view that
+    can then diverge from engineering. Read-only against the source: the
+    EBOM header (`boms`) and its lines (`bom_items_master`) are never
+    written to.
+    """
+    tid = tenant_id if tenant_id is not None else get_tenant_id()
+    ebom = await get_bom_or_404(db, ebom_id)
+    if ebom.bom_type != "EBOM":
+        raise HTTPException(
+            status_code=400,
+            detail=f"BOM {ebom_id} is a {ebom.bom_type}, not an EBOM — cannot derive an MBOM from it",
+        )
+
+    items_stmt = select(BOMItem).where(BOMItem.bom_id == ebom_id)
+    if tid is not None:
+        items_stmt = items_stmt.where(BOMItem.tenantId == tid)
+    ebom_items = (await db.execute(items_stmt)).scalars().all()
+
+    # mbom_headers.mbom_number has no DB default — auto-generate a
+    # tenant-scoped number the same way create_bom does for bom_number.
+    count_stmt = select(func.count()).select_from(MbomHeader)
+    if tid is not None:
+        count_stmt = count_stmt.where(MbomHeader.tenantId == tid)
+    count = (await db.execute(count_stmt)).scalar() or 0
+    mbom_number = f"MBOM-{datetime.now(UTC).year}-{count + 1:04d}"
+
+    header = MbomHeader(
+        mbom_number=mbom_number,
+        ebom_id=ebom.id,
+        name=name or f"{ebom.name} (MBOM)",
+        description=ebom.description,
+        tenantId=tid,
+    )
+    db.add(header)
+    await db.flush()  # assigns header.id for the items below
+
+    # mbom_items.part_id is NOT NULL — an EBOM line with no part assigned has
+    # nothing to manufacture against, so it's skipped rather than faked.
+    for item in ebom_items:
+        if item.part_id is None:
+            continue
+        db.add(
+            MbomItem(
+                mbom_id=header.id,
+                part_id=item.part_id,
+                quantity=item.quantity or 1,
+                unit=item.unit or "EA",
+                notes=item.notes,
+                tenantId=tid,
+            )
+        )
+
+    await db.commit()
+    await db.refresh(header)
+    return header
 
 
 # ============ Instance-line CRUD (X1 canonical-BOM model) ============

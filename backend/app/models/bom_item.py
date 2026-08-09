@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -27,6 +27,19 @@ class BomItem(Base, TenantAwareMixin):
     # Cost snapshot at time of BOM creation
     unitCostSnapshot = Column(Numeric(18, 4))
     extendedCost = Column(Numeric(18, 4))
+
+    # Effectivity: which revision of this line applies to a given build.
+    # A line is *always* effective when every one of these is null (the
+    # backward-compatible default for existing rows). Otherwise it is
+    # effective on exactly ONE axis — date range, serial range, or lot —
+    # enforced by app.services.bom_effectivity_service.validate_effectivity_fields
+    # at write time (see that module for why a single explicit "type" column
+    # was skipped in favor of inferring the axis from which fields are set).
+    effectiveFrom = Column(Date, nullable=True)
+    effectiveTo = Column(Date, nullable=True)
+    effectiveSerialFrom = Column(String, nullable=True)
+    effectiveSerialTo = Column(String, nullable=True)
+    effectiveLot = Column(String, nullable=True)  # comma-separated lot codes
 
     # Timestamps
     createdAt = Column(DateTime(timezone=True), server_default=func.now())

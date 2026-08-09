@@ -67,7 +67,9 @@ import {
   CatalogsScreen,
   TraceabilityScreen,
   DeviationsScreen,
+  RequirementsScreen,
   BomVariantsScreen,
+  MbomScreen,
 } from "../components/LazyScreens.jsx";
 
 const ErrBD = (p) =>
@@ -601,8 +603,16 @@ function AppShell() {
               element={<GenericScreen Component={DeviationsScreen} />}
             />
             <Route
+              path="/requirements"
+              element={<GenericScreen Component={RequirementsScreen} />}
+            />
+            <Route
               path="/bom-variants"
               element={<GenericScreen Component={BomVariantsScreen} />}
+            />
+            <Route
+              path="/mbom"
+              element={<GenericScreen Component={MbomScreen} />}
             />
             <Route path="*" element={<FourOhFour />} />
           </Routes>

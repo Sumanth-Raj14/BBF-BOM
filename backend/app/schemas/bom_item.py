@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,6 +15,13 @@ class BomItemBase(BaseModel):
     parentItemId: Optional[int] = None
     unitCostSnapshot: Optional[float] = None
     extendedCost: Optional[float] = None
+    # Effectivity — at most one axis is set; null on all five means "always
+    # effective". See app.services.bom_effectivity_service for validation.
+    effectiveFrom: Optional[date] = None
+    effectiveTo: Optional[date] = None
+    effectiveSerialFrom: Optional[str] = None
+    effectiveSerialTo: Optional[str] = None
+    effectiveLot: Optional[str] = None
 
 
 class BomItemCreate(BomItemBase):
@@ -28,6 +35,11 @@ class BomItemUpdate(BaseModel):
     notes: Optional[str] = None
     sortOrder: Optional[int] = None
     parentItemId: Optional[int] = None
+    effectiveFrom: Optional[date] = None
+    effectiveTo: Optional[date] = None
+    effectiveSerialFrom: Optional[str] = None
+    effectiveSerialTo: Optional[str] = None
+    effectiveLot: Optional[str] = None
 
 
 class BomItemResponse(BomItemBase):
