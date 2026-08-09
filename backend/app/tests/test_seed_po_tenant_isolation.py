@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from app.models.po_models import POHeader
 from app.models.tenant import Tenant
+from app.tests.conftest import no_tenant_filter
 
 
 def _write_po_workbook(path, po_number):
@@ -51,7 +52,7 @@ def _write_po_workbook(path, po_number):
             22.0,
             22.0,
             "Proj X",
-            "open",
+            "Open",
         ]
     )
     wb.save(path)
@@ -70,7 +71,9 @@ async def test_seed_po_sets_tenant_and_does_not_cross_tenant_delete(
     await db_session.commit()
     await db_session.refresh(other_tenant)
 
-    other_header = POHeader(tenantId=other_tenant.id, poNumber="PO-SHARED", status="open")
+    other_header = POHeader(
+        tenantId=other_tenant.id, poNumber="PO-SHARED", vendorName="Other Vendor", status="Open"
+    )
     db_session.add(other_header)
     await db_session.commit()
     other_header_id = other_header.id
@@ -89,21 +92,26 @@ async def test_seed_po_sets_tenant_and_does_not_cross_tenant_delete(
     # it must not raise (Finding 1: used to hit a NOT NULL violation here).
     await seed_po.seed()
 
-    # The other tenant's row must survive untouched.
-    still_there = (
-        await db_session.execute(select(POHeader).where(POHeader.id == other_header_id))
-    ).scalar_one_or_none()
-    assert still_there is not None
-    assert still_there.tenantId == other_tenant.id
+    # The other tenant's row must survive untouched. Bypass the ambient
+    # tenant-SELECT auto-filter (pinned to `tenant_id` by the autouse
+    # setup_tenant_context fixture) -- this assertion is deliberately
+    # checking a DB-level fact about a DIFFERENT tenant's row.
+    with no_tenant_filter():
+        still_there = (
+            await db_session.execute(select(POHeader).where(POHeader.id == other_header_id))
+        ).scalar_one_or_none()
+        assert still_there is not None
+        assert still_there.tenantId == other_tenant.id
 
-    # The seeded row for the *resolved* tenant must have a real tenantId set
-    # (Finding 1) and must be a separate row from the other tenant's.
-    seeded = (
-        await db_session.execute(
-            select(POHeader).where(
-                POHeader.poNumber == "PO-SHARED", POHeader.id != other_header_id
+        # The seeded row for the *resolved* tenant must have a real tenantId
+        # set (Finding 1) and must be a separate row from the other tenant's.
+        seeded = (
+            await db_session.execute(
+                select(POHeader).where(
+                    POHeader.poNumber == "PO-SHARED", POHeader.id != other_header_id
+                )
             )
-        )
-    ).scalar_one_or_none()
-    assert seeded is not None
-    assert seeded.tenantId is not None
+        ).scalar_one_or_none()
+        assert seeded is not None
+        assert seeded.tenantId is not None
+        assert seeded.tenantId != other_tenant.id

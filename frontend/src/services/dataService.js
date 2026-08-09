@@ -422,18 +422,6 @@ export const dataService = {
       throw err;
     }
   },
-
-  async migrateToBackend() {
-    // ponytail: bomRows/ecrs/templates below were always hardcoded to null
-    // (no localStorage source ever populated them), so every migration
-    // branch was dead — this always resolved to {migrated:[],skipped:[],
-    // errors:[]}. Collapsed to what it actually always evaluated to;
-    // restore the real per-domain branches if/when a legacy localStorage
-    // migration source exists again.
-    if (!_online) return { migrated: false, reason: 'offline' };
-    if (!api) return { migrated: false, reason: 'no-api' };
-    return { migrated: [], skipped: [], errors: [] };
-  },
 };
 
 function getLocal(domain) {

@@ -60,14 +60,18 @@ async def _tenant_id(session) -> int:
     can scope its delete to this tenant only -- poNumber is unique only per
     tenant (uq_po_headers_tenant_poNumber), so a same-numbered PO belonging
     to a different tenant must never be touched by this script.
+
+    Called from inside the caller's `async with session.begin():` block --
+    uses flush(), not commit(), so it doesn't end that outer transaction
+    (AsyncSession.begin() raises "a transaction is already begun" if called
+    after an earlier commit() auto-began a new one).
     """
     tid = (await session.execute(select(Tenant.id).order_by(Tenant.id))).scalars().first()
     if tid is not None:
         return tid
     tenant = Tenant(tenant_name="Blackbox BOM", tenant_code="DEFAULT")
     session.add(tenant)
-    await session.commit()
-    await session.refresh(tenant)
+    await session.flush()
     print(f"Created default tenant id={tenant.id} (database had none)")
     return tenant.id
 
@@ -137,10 +141,16 @@ async def seed():
 
     # Insert into database
     async with async_session() as session:
-        tid = await _tenant_id(session)
-        token = TenantContext.set(tenant_id=tid)
+        token = None
         try:
             async with session.begin():
+                # Resolved (and, if necessary, created) inside this
+                # transaction via flush() rather than commit() -- calling
+                # session.begin() after an earlier commit() would raise "a
+                # transaction is already begun on this Session".
+                tid = await _tenant_id(session)
+                token = TenantContext.set(tenant_id=tid)
+
                 # Scope the "clear existing data" step to exactly the PO
                 # numbers this run is about to re-insert, AND to this tenant
                 # only -- poNumber is unique per tenant, not globally, so an
@@ -217,7 +227,8 @@ async def seed():
             item_count = result.scalar()
             print(f"Inserted {po_count} PO headers and {item_count} line items")
         finally:
-            TenantContext.reset(token)
+            if token is not None:
+                TenantContext.reset(token)
 
     await engine.dispose()
 
