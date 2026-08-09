@@ -1,8 +1,12 @@
-# PATCHES_APPLIED.md — Fix Cycle of 2026-07-19
+# PATCHES_APPLIED.md — Fix Cycles of 2026-07-19 and 2026-08-02
 
-> **Scope of this document.** This is the engineering record of the bug fixes that were **already applied and committed** in the 2026-07-19 fix cycle, across four commits (`a8ba8d0`, `beaac10`, `ed58494`, `de7f376`), plus a **"Pending safe patches"** section listing verified-but-not-yet-fixed items so the next session can pick them up without re-auditing. Everything in this document is grounded in the committed diffs and the read-only subsystem audits; where a feature is a **mock or stub**, that is stated plainly rather than glossed over.
+> **Scope of this document.** This is the engineering record of bug fixes that were **already applied and committed**, across two fix cycles:
+> 1. **2026-07-19** — four commits (`a8ba8d0`, `beaac10`, `ed58494`, `de7f376`) fixing the desktop-installer launch path, a Vite bundling crash, and three API-routing/security bugs found by live-testing the desktop build.
+> 2. **2026-08-02** — a full-repo, line-by-line scan (`docs/audit-2026-08/FINDINGS_FULL_SCAN.md`, 74 findings) followed by a four-commit fix campaign (`c6d4565`, `dbcab0d`, `12f0736`, `d351863`) that closed 43 of those findings. See section 9.
 >
-> **Related documents:** `OPEN_ITEMS.md` (running backlog), `desktop/DESKTOP_PACKAGING.md` (build/install pipeline), `desktop/DURABILITY.md` (backup/PITR verification status), `INSTALL.md` (Docker path), `frontend/OPEN_ITEMS.md` and `frontend/MIGRATION_MAP.md` (window.* → ESM migration state), `backend/TEST_FAILURES_TRIAGE.md` (known pre-existing SQLite test failures).
+> Both cycles share a **"Pending / deferred safe patches"** section listing verified-but-not-yet-fixed items so the next session can pick them up without re-auditing. Everything in this document is grounded in the committed diffs and the underlying audit write-ups; where a feature is a **mock, stub, or dead layer**, that is stated plainly rather than glossed over.
+>
+> **Related documents:** `OPEN_ITEMS.md` (running backlog), `desktop/DESKTOP_PACKAGING.md` (build/install pipeline), `desktop/DURABILITY.md` (backup/PITR verification status), `INSTALL.md` (Docker path), `frontend/OPEN_ITEMS.md` and `frontend/MIGRATION_MAP.md` (window.* → ESM migration state), `backend/TEST_FAILURES_TRIAGE.md` (known pre-existing SQLite test failures). For the 2026-08-02 cycle specifically: `docs/audit-2026-08/FINDINGS_FULL_SCAN.md` (all 74 findings), `docs/audit-2026-08/FIX_COVERAGE.md` (the 43-fixed/31-deferred ledger this section is built from), `docs/audit-2026-08/fix_*.md` / `fix2_*.md` / `fixfe_*.md` (per-cluster engineering write-ups with red/green test evidence), and `frontend/OPENBOM_GAP_ANALYSIS.md` (competitive gap — largely unaffected by this cycle, since almost every fix here is correctness/security/honesty, not new-feature UI work).
 
 ---
 
@@ -16,6 +20,7 @@
 6. [Commit `de7f376` — CSP https-upgrade over http, slash-less POST 405 middleware, supplier-portal 403, seed BOMs](#6-commit-de7f376)
 7. [Pending safe patches (NOT yet applied)](#7-pending-safe-patches-not-yet-applied)
 8. [Residual known issues documented elsewhere](#8-residual-known-issues-documented-elsewhere)
+9. [2026-08-02 — Full-repo scan fix campaign](#9-2026-08-02-full-repo-scan-fix-campaign)
 
 ---
 
@@ -549,6 +554,473 @@ Not patches and not pending patches — just the most important adjacent finding
 | CI | Several `ci.yml` jobs are broken as written (alembic-vs-create_all bootstrap, missing root Dockerfile for build-push, junit path, compose service name), and **no CI covers the desktop path** at all. (high/medium) | Packaging/CI audit |
 | Mock inventory | Roughly a third of frontend screens/modals remain **MOCK** (fabricated data: QMS dashboard, NCR screen, inventory synthesis, price alerts, RFQ compare, AI assistant canned replies, PDM vault tree, activity feed with fake events, dashboard budget) — most have real endpoints already exposed in `frontend/api.js`/`screenDataBridge.js` awaiting UI rewiring. | Frontend UI audit; `frontend/OPEN_ITEMS.md` |
 
+> **Update, 2026-08-02:** the "NCR screen" and "WorkOrders" halves of the "Mock inventory" row above, and the compose-service-name / build-push-Dockerfile / alembic-bootstrap parts of the "CI" row, were fixed in the campaign documented in section 9 below. The rest of both rows (QMS dashboard, inventory synthesis, price alerts, RFQ compare, AI assistant, PDM vault tree, activity feed, dashboard budget; the dead-routers, backups, desktop-migration/PITR, and circuit-breaker items) were **not** touched by that campaign — see section 9.5 for the itemized carry-forward list.
+
 ---
 
 *Document generated for the 2026-07-19 fix cycle. All applied-fix details are taken from the committed diffs of `a8ba8d0`, `beaac10`, `ed58494`, `de7f376`; all pending-item details are taken verbatim from the read-only subsystem audits. No source code was modified in producing this document.*
+
+---
+
+<a name="9-2026-08-02-full-repo-scan-fix-campaign"></a>
+## 9. 2026-08-02 — Full-repo scan fix campaign
+
+> **How this section was built.** On 2026-08-02 a full, line-by-line scan of the entire repository (backend, frontend, migrations, CI, desktop, SolidWorks plugin, docs) produced `docs/audit-2026-08/FINDINGS_FULL_SCAN.md` — **74 findings**, each with a confirmed file:line location. A fix campaign then worked through them, tracked in `docs/audit-2026-08/FIX_COVERAGE.md`: **43 fixed, 31 deferred**. The fixes landed in four commits, each with its own engineering write-up(s) under `docs/audit-2026-08/` (`fix_*.md` for backend clusters, `fix2_*.md` for a second backend wave, `fixfe_*.md` for frontend clusters). This section is a synthesis of those write-ups plus the actual commit messages (`git log`), organized by commit and by the same file-level "cluster" groupings the fix agents used — grouping is by **patch/cluster**, not by all 43 individual one-line findings, because many findings in the same file share one root cause and one diff; every finding is still traceable via the **Status/Finding/Location** table at the end of each subsection (reproduced from `FIX_COVERAGE.md`).
+>
+> Beginner note on vocabulary used throughout this section:
+> - **Raw `text()` SQL** — a SQLAlchemy query written as a literal SQL string instead of the ORM (`select(Model)...`). The codebase's automatic tenant-isolation guard (`app/core/tenant_events.py`, described in `DATA_HANDLING.md`) only watches ORM statements; raw SQL and bulk `Core` `delete()`/`update()` statements sail past it untouched, so every raw-SQL endpoint must scope itself explicitly.
+> - **Dead layer** — a React component that exists in the source tree and may even be fully wired to real APIs, but is never imported from `frontend/src/main.jsx`'s import chain, so it never renders in the shipped app. Fixing fabricated data in a dead layer is safe but has zero user-visible effect until someone wires it in; the ledger below flags these plainly rather than implying they're live.
+> - **Red/green testing** — write a test that fails against the pre-fix code ("red," proving the bug is real and the test actually detects it), then confirm it passes against the fix ("green"). Nearly every cluster below did this rather than only testing the happy path.
+
+```mermaid
+flowchart LR
+    S["5136b38<br/>docs(audit): full line-by-line<br/>repo scan — 74 findings"] --> C1["c6d4565<br/>backend security/infra/<br/>schema/CI wave<br/>(19 findings)"]
+    C1 --> C2["dbcab0d<br/>frontend: stop LIVE screens<br/>showing fabricated data<br/>(16 findings)"]
+    C2 --> C3["12f0736<br/>docs: correct verified<br/>doc/reality mismatches<br/>(5 findings)"]
+    C3 --> C4["d351863<br/>backend: API-key security,<br/>BOM integrity, valuation,<br/>tenant inserts<br/>(3 findings)"]
+    C4 --> L["097d7ac<br/>docs(audit): fix-coverage<br/>ledger + resume state"]
+```
+
+Branch: all five commits landed on `wip/gap-closing-2026-08-02` (not yet merged to `master` as of this writing — check `git log master..wip/gap-closing-2026-08-02` before assuming these are on the deployed branch). CI status for this wave: the hard gate is `postgres-ci.yml` per `PROJECT_ARCHITECTURE.md`/`DEPLOYMENT_GUIDE.md`; the campaign's own testing was per-cluster `pytest`/`vitest` runs against throwaway SQLite files (documented per cluster below), not a full CI run.
+
+### 9.1 Commit `c6d4565` — backend security/infra/schema/CI wave (19 findings)
+
+> **Commit message (verbatim summary):** *"Fixes the confirmed backend findings from FINDINGS_FULL_SCAN.md, each with a red-before/green-after test where testable. 44 backend tests pass (10 new + 34 touched endpoint suites)."*
+
+This is the largest single commit in the campaign. It covers four clusters, each documented in its own `docs/audit-2026-08/fix_*.md` file.
+
+#### 9.1.1 Cluster: tenant-security (raw-SQL / bulk-Core tenant leaks)
+
+**Problem.** Several endpoints let one tenant read or delete another tenant's rows by id — a direct multi-tenancy breach in a system whose entire security model depends on tenant isolation (see `DATA_HANDLING.md` for the isolation model this violates).
+
+**Root cause.** `app/core/tenant_events.py` auto-filters ORM `select()` calls and blocks cross-tenant ORM `update`/`delete` at `before_flush` — but by its own logged warning, it does **not** and structurally **cannot** filter raw `text()` SQL or bulk `Core`-style `delete()`/`update()` statements (those never pass through the ORM's unit-of-work, so there is no flush event to intercept). Every finding in this cluster was exactly that: an endpoint or service function that used one of those two unguarded patterns against a tenant-scoped table.
+
+**Impact.** Critical. A malicious or merely careless caller in tenant A could delete tenant B's parts or BOM items by id (`bulk_delete_parts`, `bulk_delete_bom_items` — both Core `delete()` statements filtered only by `id.in_(...)`), or read tenant B's compliance standards, routing tables, work centers/schedules/labor rates/timesheets, service BOMs, or order-tracking stats (all raw `text()` reads with no tenant predicate).
+
+**Files modified.** `backend/app/services/part_service.py` (`bulk_delete_parts`); `backend/app/api/endpoints/bom_items.py` (`bulk_delete_bom_items`); `backend/app/api/endpoints/compliance_api.py` (`list_compliance`, `get_compliance`, `update_compliance`, `delete_compliance`, `get_part_compliance`, `certify_part`); `backend/app/api/endpoints/routing_api.py` (`list_routings`, `get_routing` — reads only; **not** `create_process_plan`'s insert, which was left as a known gap for the next cluster, see 9.4.1); `backend/app/api/endpoints/resource_api.py` (`list_work_centers`, `capacity_overview`, `list_schedules`, `list_labor_rates`, `list_timesheets`, `labor_cost_summary`); `backend/app/api/endpoints/service_bom.py` (`list_service_boms`, `get_service_bom`, the `bom_items` read inside `merge_boms`); `backend/app/api/endpoints/order_tracking.py` (`tracking_stats`); new test `backend/app/tests/test_tenant_isolation_bulk.py`.
+
+**Reason for change.** Close the multi-tenancy gap without touching `tenant_events.py` itself (a shared, already-relied-upon module) or duplicating its logic per endpoint — reused the existing `app/core/tenant_context.get_tenant_id()` / `tenant_sql_clause()` helper (already used by `app/core/encryption.py`), the smallest correct fix for a raw-SQL statement: append a `tenantId = :tid` predicate when a tenant context is set, and leave behavior unchanged when it's `None` (superuser/no-context calls).
+
+**Previous behaviour.** `bulk_delete_parts([id_from_tenant_A, id_from_tenant_B])` deleted both rows regardless of caller. `list_compliance()` returned every tenant's compliance standards mixed together. Same shape for routing/resource/service-BOM/order-tracking reads.
+
+**New behaviour.** Every listed statement now carries an explicit `tenantId` predicate sourced from the request's tenant context; cross-tenant ids are silently excluded rather than acted on. Two tables (`compliance_packs`, `compliance_pack_items`) and `part_certifications` were deliberately **left unscoped** — confirmed via `app/models/compliance.py` (with an inline comment there stating this) that they have no `tenantId` column at all, so there is nothing to filter by; scoping them would require a schema change, out of scope for this fix.
+
+**Risk level.** Low. The change is additive (a `WHERE` clause appended, never removed), and behavior is unchanged for the common no-tenant-context (superuser) path.
+
+**Testing performed.** New `app/tests/test_tenant_isolation_bulk.py`, 3 tests, each **red-before/green-after** (fix reverted one at a time, test re-run, then restored): `test_bulk_delete_parts_does_not_delete_other_tenants_rows` (pre-fix: `deleted == 2` instead of `1`), `test_bulk_delete_bom_items_does_not_delete_other_tenants_rows` (pre-fix: `{'deleted': 2}`), `test_compliance_raw_sql_does_not_leak_other_tenants_rows` (pre-fix: both tenants' standard names returned). Full regression run across every touched endpoint's existing suite plus the pre-existing `test_tenant_select_isolation.py`: **33 passed**, run against an isolated throwaway SQLite file, never the live `bom_db`.
+
+#### 9.1.2 Cluster: infra-secrets-health
+
+**Problem 1 — secrets baked into Docker images.** `backend/Dockerfile` does `COPY . .`; `backend/.dockerignore` excluded only `test.db`/`bom.db`, so `backend/rsa_keys/private.pem`, `rsa_keys/public.pem`, and `backend/.secret_key` (all present on disk, confirmed via file glob) would be baked into any image built from this Dockerfile — along with 15 stray `test_*.db` files left over from prior dev sessions.
+
+**Root cause.** `.dockerignore` patterns were incomplete; nobody had audited it against what actually exists in the working tree.
+
+**Impact.** Critical if this image is ever pushed anywhere: the RSA keypair that signs every JWT, and the app's secret key, would ship inside a container image — a full authentication-bypass/token-forgery risk for anyone who obtains the image.
+
+**Files modified.** `backend/.dockerignore` (added `test_*.db`, `private.pem`, `public.pem`, `.secret_key`, `rsa_keys/`, all unanchored patterns so they match at any depth).
+
+**Reason for change.** Additive-only fix; no code path changes, just what the build context excludes.
+
+**Previous behaviour → New behaviour.** Building the image would include the live keypair and secret key → building the image now excludes them (verified by reading the file back, not by an actual Docker build — no Docker engine available in the fix sandbox).
+
+**Risk level.** Minimal — cannot regress anything at runtime, only affects what a future `docker build` copies in.
+
+**Testing performed.** Read-back verification only (no Docker available in the sandbox that produced the fix); no automated test is possible for a `.dockerignore` file's effect.
+
+**Problem 2 — `GET /health/detailed` was unauthenticated and lied about security status.** Confirmed in `backend/app/api/api_v1.py`: the neighboring `/metrics` route requires `Depends(get_current_user)`, but `/health/detailed` had no auth dependency at all, and its handler (`app/monitoring/health.py::get_detailed_health`) runs `SELECT COUNT(*)` over `users`, `parts`, `boms`, `vendors`, `po_headers`, and more — all visible to any anonymous caller — **and** always returned hardcoded `"security": {"csrf_protection": true, "rate_limiting_enabled": true, ...}` / `"authentication": {"mfa_available": true, ...}` blocks that were never actually probed, i.e. fabricated status fields on a monitoring endpoint.
+
+**Root cause.** Missing auth dependency (likely an oversight when `/metrics` got its auth added and `/health/detailed` didn't); the fabricated security/auth block predates this fix cycle entirely.
+
+**Impact.** High — anonymous information disclosure of internal row counts/business volume, plus a monitoring endpoint that would tell an operator "CSRF protection: true" even if it were, hypothetically, false.
+
+**Files modified.** `backend/app/api/api_v1.py` (added `Depends(get_current_user)`, and pops the `"security"`/`"authentication"` keys off the response dict before returning — `app/monitoring/health.py` itself was out of this fix's file scope, so the fabricated computation still runs internally but its output is no longer surfaced to callers); new test `backend/app/tests/test_health_auth.py`.
+
+**Reason for change.** Match the existing `/metrics` precedent exactly (same dependency, same file, same pattern) rather than inventing a new auth scheme; suppress fabricated fields at the boundary since the computing code itself was off-limits for this fix.
+
+**Previous behaviour.** `curl http://host/api/v1/health/detailed` (no auth header) → `200` with row counts and fabricated security flags.
+
+**New behaviour.** Same call → `401`. With a valid bearer token → `200`, but the response body no longer contains `"security"` or `"authentication"` keys at all.
+
+**Risk level.** Low — this only *adds* a gate to a previously-open GET endpoint; no legitimate authenticated caller loses access. `/health` (the plain liveness probe, unauthenticated by design for load-balancer health checks) was explicitly left untouched.
+
+**Testing performed.** `test_health_auth.py::test_detailed_health_requires_auth` — **red confirmed**: with the auth dependency reverted, `assert 200 in (401, 403)` failed (`200` returned). **Green**: restored, returns `401`. `::test_detailed_health_ok_with_auth` confirms `200` with a token and the absence of the fabricated keys. Pre-existing `test_monitoring.py::test_detailed_health` (already sends auth headers) stayed green, unaffected.
+
+**Problem 3 — `create_admin.py` always crashed.** `backend/app/scripts/create_admin.py` imported `AsyncSessionLocal` from `app/db/session.py` and called it directly — but that module-level name is a placeholder set to `None` until `init_engine()` runs and rebinds it (which normally happens inside FastAPI's app startup/lifespan, never triggered by running the script standalone). Every standalone run of the admin-bootstrap script crashed with `TypeError: 'NoneType' object is not callable`, immediately after password validation, before touching the database.
+
+**Root cause.** The script imported the lazily-initialized module attribute directly instead of the accessor function designed for exactly this situation.
+
+**Impact.** High — this is the script an operator runs to create the first admin user on a fresh deployment; it never worked when run outside the running app process.
+
+**Files modified.** `backend/app/scripts/create_admin.py` (swapped the import for `get_session_maker`, the same lazy-init accessor `app/db/session.py` already exposes, which calls `init_engine()` itself if needed); new test in `backend/app/tests/test_health_auth.py` (`test_create_admin_uses_real_session_maker`).
+
+**Reason for change.** Reuse the existing lazy-init accessor rather than duplicating `init_engine()`-calling logic in the script.
+
+**Previous behaviour → New behaviour.** `python -m app.scripts.create_admin` → immediate crash → now reaches the database query and exits cleanly (`SystemExit(0)`) via the "user already exists" branch in the test scenario, or would proceed to create the user in a real run.
+
+**Risk level.** Low. One known, explicitly-not-fixed adjacent bug: the "create new admin" insert branch of `create_admin.py` constructs `User(...)` without `tenantId`, a `NOT NULL` FK — untouched here because it's a separate, unrelated defect and exercising it in the test would have muddied the red/green signal for this specific fix.
+
+**Testing performed.** `test_health_auth.py`, 4 tests total (the 2 above plus `test_plain_health_stays_unauth`, `test_create_admin_uses_real_session_maker`) — **4 passed**, run against an isolated throwaway SQLite file (chosen specifically to avoid lock contention with a concurrent sibling agent's test run against the shared default `test.db` — a real collision was observed and documented, not hypothetical).
+
+#### 9.1.3 Cluster: migrations-ci-build (Alembic + CI YAML + build file)
+
+Four independent, unrelated-to-each-other findings verified by static analysis (`py_compile`, YAML parse, XML parse) and cross-referencing the actual `docker-compose.yml`/`postgres-ci.yml`, since none of these are exercised by pytest (they run against live Postgres, live CI, or MSBuild).
+
+**Problem A.** `backend/alembic/versions/009_backup_and_schema_fixes.py` used `ALTER TABLE po_headers ADD CONSTRAINT IF NOT EXISTS ...` — invalid PostgreSQL syntax (`IF NOT EXISTS` is not supported for `ADD CONSTRAINT`, only for `ADD COLUMN`/`DROP CONSTRAINT`). **Root cause:** the author assumed a syntax Postgres doesn't have. **Impact:** migration 009 hard-fails with a syntax error on any database that runs `alembic upgrade head` from before revision 009 (fresh installs bootstrap via `create_all` + stamp-head instead, per `FIRST_TIME_SETUP.md`, so this specifically affects upgrading an *existing pre-009* database). **Fix:** replaced with a `DO $$ BEGIN ... EXCEPTION WHEN duplicate_object THEN NULL; END $$;` block — valid PL/pgSQL, same pattern already used elsewhere in this migration set for the "already exists" case. **Risk:** low, pure DDL syntax fix. **Testing:** `py_compile` passes; no live Postgres available in the fix sandbox to execute the DDL directly — this is a static-verification-only fix, flagged honestly as such.
+
+**Problem B.** `backend/alembic/versions/033_money_columns_numeric.py` wrapped **every** `op.alter_column` call (~30 of them) in its own `contextlib.suppress(Exception)` — but all 30 run inside **one** Postgres transaction (Alembic's default). The first failure aborts the whole transaction; every subsequent statement (including ones that looked "successful" from Python's point of view) is silently discarded by Postgres, and `contextlib.suppress` hides all of it. **Root cause:** per-statement exception suppression inside a single shared transaction gives no actual per-statement isolation. **Impact:** the migration could report full success while having changed nothing beyond (at most) the columns before the first failure — a silent data-integrity risk on the money columns this migration exists to fix. **Fix:** removed the blanket suppress; added `_alter_column_guarded()`, wrapping each column's `alter_column` in its own `SAVEPOINT`/`RELEASE SAVEPOINT` (success) or `ROLLBACK TO SAVEPOINT` (failure) — a genuine per-statement isolation boundary within the one transaction. **Risk:** low; table/column names are drawn from a fixed dict literal in the same file, not external input, so the f-string-built `SAVEPOINT` names are safe. **Testing:** `py_compile` passes; same "no live Postgres in sandbox" caveat as Problem A.
+
+**Problem C.** `.github/workflows/ci.yml` had four real defects: (a) `deploy-staging`/`deploy-production` ran `docker compose ... api`, but the actual service in `docker-compose.yml` is named `backend`; (b) `build-and-push` built Docker context `.` (repo root) with no Dockerfile argument, but there is no Dockerfile at repo root (real ones are `backend/Dockerfile`/`frontend/Dockerfile`); (c)/(d) the `test-backend` job ran bare `alembic upgrade head` against a brand-new, empty Postgres container (migrations 004+ assume tables that only formally existed via `create_all` until revision 022 — this is documented as an expected-to-fail path in `postgres-ci.yml`'s own header comment) and then ran the **legacy** 5-file/882-line `backend/tests/` suite rather than the current ~140-file `backend/app/tests/` suite — making a green result on this job actively misleading. **Root cause:** the deploy/build jobs drifted from the real compose/Dockerfile layout; `test-backend` was never updated after the test suite moved to `app/tests/`. **Impact:** high — deploy jobs would fail on a real run (wrong service name), the build job has no valid Dockerfile to build, and the "Test Backend" gate was testing the wrong, smaller suite while getting the bootstrap wrong. **Fix:** (a) `api` → `backend` (6 occurrences across both deploy jobs); (b) `context: ./backend`, `file: ./backend/Dockerfile`; (c)/(d) **deleted** the `test-backend` job entirely rather than patch it in place, because `postgres-ci.yml`'s `fresh-install-postgres` + `pytest-postgres` jobs already do this correctly (documented bootstrap via `python -m scripts.init_db`, full `app/tests/` suite, real Postgres) and keeping both would mean two gates that can drift out of sync — removed `test-backend` from the `needs:` lists of `build-and-push` and `notify`, and pointed the `notify` summary at `postgres-ci.yml` instead. **Risk:** low-moderate; deleting a CI job is the kind of change worth a second look, but the replacement gate (`postgres-ci.yml`) was already the documented hard merge gate per `PROJECT_ARCHITECTURE.md`, so this removes a redundant/misleading gate rather than any actual coverage. **Testing:** `python -c "import yaml; yaml.safe_load(...)"` parses the edited file cleanly; grepped for remaining `needs: [test-backend]` references — none found.
+
+**Problem D.** `solidworks-plugin/BlackboxBOM.SolidWorks/BlackboxBOM.SolidWorks.csproj` referenced `EmbeddedResource Include="Resources\BlackboxBOM.ico"`, but no `Resources` directory exists anywhere in that project (confirmed via glob) — MSBuild fails with MSB3030 (missing embedded resource) on any build. **Root cause:** a resource reference left over from before (or without) the actual icon file ever being added. **Impact:** high for anyone building the SolidWorks add-in from source — the build simply fails. **Fix:** removed the `EmbeddedResource` line (chose removal over a `Condition="Exists(...)"` guard, since a conditional would just be permanent dead code for a file that will never appear). **Risk:** minimal — build-file-only change. **Testing:** `xml.dom.minidom.parse()` confirms the edited `.csproj` is still well-formed XML.
+
+**Files modified (this cluster).** `backend/alembic/versions/009_backup_and_schema_fixes.py`, `backend/alembic/versions/033_money_columns_numeric.py`, `.github/workflows/ci.yml`, `solidworks-plugin/BlackboxBOM.SolidWorks/BlackboxBOM.SolidWorks.csproj`.
+
+#### 9.1.4 Cluster: schema-gates
+
+**Problem 1 — `RfqHeader.created_by` was `nullable=False` with `ondelete="SET NULL"`.** A foreign key with `ondelete="SET NULL"` promises the row survives its referenced user being deleted, by nulling the column — but `nullable=False` makes that impossible: on Postgres, deleting a user fires `UPDATE rfq_headers SET created_by = NULL ...`, which then violates the `NOT NULL` constraint and aborts the entire user-delete transaction. **Root cause:** contradictory column definition in `app/models/supplier_portal.py`. **Impact:** high — any attempt to delete a user who has ever created an RFQ would fail with an integrity error, instead of the RFQ being orphaned as the FK action intends. **Fix:** `nullable=False` → `nullable=True` in the model, plus new migration `alembic/versions/050_rfq_headers_created_by_nullable.py` (the current Alembic head — confirmed by tracing the `down_revision` chain from `001_initial`; there are duplicate `041_*` filename prefixes in the tree, but the chain itself resolves uniquely) doing `ALTER COLUMN created_by DROP NOT NULL` on Postgres, with a `downgrade()` that restores `SET NOT NULL`. A repo-wide grep of all 23 `ondelete="SET NULL"` foreign keys in `app/models/` confirmed `rfq_headers.created_by` was the *only* one with this contradiction. **Risk:** low — this is a targeted nullability relaxation on one column. **Testing:** covered indirectly by the eco-gates test run below (same commit, same cluster write-up).
+
+**Problem 2 — `create_ecr`/`create_ecn` skipped the engineering gate every sibling ECO mutation uses.** In `app/api/endpoints/eco_api.py`, `create_eco`, `add_eco_item`, `eco_action`, and `implement_eco` all depend on `require_engineering`; `create_ecr` and `create_ecn` only depended on `get_current_user`. **Root cause:** an inconsistently-applied dependency across otherwise-parallel endpoints. **Impact:** high — any authenticated user who merely clears the router-level `require_viewer` gate (e.g. a plain "viewer" role, which should have read-only access) could file Engineering Change Requests/Notices. **Fix:** added `Depends(require_engineering)` to both endpoints, matching every sibling mutation. **Risk:** low — this only *tightens* access; no legitimate engineering-role caller loses anything. **Testing:** see below.
+
+**Problem 3 — audit-log creation trusted a client-supplied `userId`.** `app/api/endpoints/audit_logs.py::create_audit_log` built the row via `AuditLog(**log.model_dump())`, and `AuditLogCreate.userId` is a required, client-supplied field — any authenticated user could POST `{"userId": <someone else's id>, ...}` and have it written verbatim, forging an audit-trail entry under another identity. **Root cause:** the schema exposes a field that should be server-derived as a client input instead. **Impact:** high — audit-trail integrity is the whole point of an audit log; a forgeable actor field defeats it. **Fix:** the row is still built from `log.model_dump()`, but `userId` is overwritten with `current_user.id` (the authenticated caller) immediately before constructing the `AuditLog`, ignoring whatever the client sent. **Risk:** low — this can only make the recorded actor *more* accurate, never less. **Testing:** see below.
+
+**Files modified.** `backend/app/models/supplier_portal.py`; `backend/alembic/versions/050_rfq_headers_created_by_nullable.py` (new — **this is the migration that made 050 the current Alembic head**, referenced throughout this project's other docs); `backend/app/api/endpoints/eco_api.py`; `backend/app/api/endpoints/audit_logs.py`; new test `backend/app/tests/test_eco_gates.py`.
+
+**Testing performed (problems 2 and 3 together).** New `test_eco_gates.py`, 3 tests, all **red-before/green-after**: with the fixes reverted, `POST /api/v1/eco/ecr` as a "viewer"-role user returned `201` (created) instead of the expected `403`; `POST /api/v1/eco/ecn` as the same user returned `404` instead of `403` (the request reached the ECO-lookup code instead of being gated before it); a forged `userId=999999` on `POST /api/v1/audit-logs/` was written verbatim (`999999 == 999999`) instead of being overwritten with the real caller's id. All three fixes restored → **3 passed**. Combined regression run with `test_eco_api.py`, `test_eco_change_control.py`, `test_eco_implement.py`, `test_audit_logs.py` → **22 passed** (one flaky, unrelated `no such table: timesheet_entries` SQLite error was reproduced, confirmed unrelated to this change, and disappeared on an identical immediate rerun — documented rather than hidden).
+
+**Full finding-level ledger for commit `c6d4565`** (Status/Finding/Location, reproduced from `FIX_COVERAGE.md`; all ✅):
+
+| Cluster | Location |
+|---|---|
+| infra-secrets-health | `backend/.dockerignore:1` (secrets), `:8` (test_*.db pattern) |
+| tenant-security | `backend/app/services/part_service.py:122`; `backend/app/api/endpoints/bom_items.py:166`; `backend/app/api/endpoints/compliance_api.py:102`; `backend/app/api/endpoints/routing_api.py:61` (reads) |
+| infra-secrets-health | `backend/app/api/api_v1.py:373` (`/health/detailed` auth) |
+| migrations-ci-build | `.github/workflows/ci.yml:283, :254, :96, :111, :65`; `backend/alembic/versions/009_backup_and_schema_fixes.py:60`; `backend/alembic/versions/033_money_columns_numeric.py:80`; `solidworks-plugin/.../BlackboxBOM.SolidWorks.csproj:95` |
+| infra-secrets-health | `backend/app/scripts/create_admin.py:54` |
+| schema-gates | `backend/app/models/supplier_portal.py:77`; `backend/app/api/endpoints/eco_api.py:322`; `backend/app/api/endpoints/audit_logs.py:79` |
+
+### 9.2 Commit `dbcab0d` — frontend: stop LIVE screens showing fabricated data (16 findings)
+
+> **Commit message (verbatim summary):** *"Frontend wave from the full-repo scan. Every target confirmed rendered in the live app first; each fix either wires to an EXISTING api/screenData route or shows an honest empty/unknown state — no new fake data introduced. Production build passes; 216 unit tests pass."*
+
+The unifying theme, and the unifying discipline every `fixfe_*.md` write-up applied before touching anything: **first trace the component from `frontend/src/main.jsx`'s import chain to confirm it is actually rendered** (per this project's mid-migration architecture, described in `PROJECT_ARCHITECTURE.md` — a file can be fully wired and still be a **dead layer** if nothing on the live import path ever reaches it). Every finding fixed in this commit was confirmed live; the deferred ones in `FIX_COVERAGE.md` tagged "dead layer" were left alone specifically because they aren't reachable yet.
+
+#### 9.2.1 Cluster: final-polish.jsx (`printPO`, `ApprovalsScreen`)
+
+**Problem.** `printPO()` (the "Print PDF" action on a Purchase Order, called from `PODetailModal.jsx`) labeled a line "Tax (GST 18%)" but computed it at 8%, and silently substituted fabricated values whenever real data was missing: unit cost defaulted to `12`, vendor name defaulted to `"Mean Well"`, vendor address was hardcoded to `"1234 Industrial Park"` (vendors have no address field in the schema at all — this was never real data), vendor country defaulted to `"TW"`, and the authorizing signatory was hardcoded to `"K. Singh, Procurement Lead"` regardless of who was actually logged in. Separately, `ApprovalsScreen` (routed at `/approvals`) permanently rendered 5 hardcoded fake approval rows (fake PO numbers, fake company names, fake requester names, fake dates and rupee amounts) alongside any real data, and its Approve/Reject action only worked for one row type ("BOM Revision") — every other row silently did nothing when acted on.
+
+**Root cause.** Both are the same pattern: earlier development stubbed in demo-plausible constants "for now" and nothing ever replaced them with real data or a real "unknown" state; `ApprovalsScreen`'s `act()` function was only ever written to handle the one row kind (`"BOM Revision"`) that came from real context state.
+
+**Impact.** Critical (printed, customer/vendor-facing PO documents with a wrong tax rate and fabricated vendor details — this is a compliance/financial-accuracy issue on a document that leaves the building) and high (an approvals workflow screen that silently no-ops on 5/6 of its content).
+
+**Files modified.** `frontend/src/root/final-polish.jsx`.
+
+**Reason for change.** For the tax rate: matched the rate already used elsewhere in the app (`power-features.jsx`'s landed-cost calculator uses `0.18`), fixing the math to match the label rather than relaxing the label to match wrong math. For the fabricated fallbacks: replaced each with an honest `"—"` (no known value) rather than any other invented default — a fabricated fallback is still fabrication no matter how plausible the number looks. For the signatory: pulled the real logged-in user's name/role from `storage.auth.get()` (the app's own non-secret session-profile store), which was sitting right there unused. For `ApprovalsScreen`: found a real, already-used backend source (`api.approvals` — the same `Approval` model and endpoints already consumed by `dashboard.jsx`'s `ApprovalsTile`) and wired to that instead of inventing anything new.
+
+**Previous behaviour.** PO printouts showed "Tax (GST 18%): ₹X" where X was computed at 8%; unknown vendors printed as "Mean Well" at "1234 Industrial Park, TW"; unknown costs printed as $12 line items; every PO was "authorized by K. Singh" regardless of who clicked print. `/approvals` always showed the same 5 fake rows; clicking Approve/Reject on any of them changed nothing anywhere.
+
+**New behaviour.** Tax math matches its label (18%). Unknown cost/vendor/address/country render `"—"` instead of a plausible-looking fake value. The signatory line shows the real logged-in user (or `"—"` if none). `ApprovalsScreen` fetches `api.approvals.list({status:"pending", per_page:500})` on mount (loading spinner while pending, honest empty array on fetch failure — never a fallback to fake rows) and merges those with the existing real BOM-Revision approval rows; Approve/Reject on any row now calls `api.approvals.update(id, {status})` and removes the row from view on success, or toasts a failure instead of silently doing nothing.
+
+**Risk level.** Low. This is strictly a "show real data / honest unknown" change with no new write paths beyond the pre-existing `api.approvals.update` call.
+
+**Testing performed.** No dedicated unit test exists for this file (none under `**/__tests__` for it); verified by a full re-read of the edited file confirming no dangling references to the removed fake constants (`"Mean Well"`, `12`, `"K. Singh"`, `"TW"`, `"1234 Industrial Park"`, the 5 fake approval rows) and balanced JSX/braces. Covered by the commit-wide "216 unit tests pass" run and a production build check.
+
+#### 9.2.2 Cluster: power-features.jsx (`WorkOrdersScreen`, `NCRScreen`)
+
+**Problem.** `WorkOrdersScreen` (`/work-orders`) substituted 5 hardcoded fake work orders (`DEFAULT_ORDERS`) whenever the real API call returned empty or errored, and its "Report build"/"Report defect"/"Create Work Order" actions only ever called a local `persist()` helper that updated React state and nothing else — no request ever reached the server. `NCRScreen` (`/ncr`) had the identical shape: 4 hardcoded fake Non-Conformance Reports seeded permanently into state, and its create action never called any backend.
+
+**Root cause.** Same "demo seed never replaced, mutations never wired" pattern as 9.2.1, in a different pair of screens.
+
+**Impact.** High — two entire operational screens (production work orders, quality non-conformance reports) that looked functional but persisted nothing; any real usage of "Report build"/"Report defect"/"Create Work Order"/create-NCR was silently lost on refresh.
+
+**Files modified.** `frontend/src/root/power-features.jsx`.
+
+**Reason for change.** Both screens already had real backend routes exposed via the existing `screenData.workOrders.*` / `screenData.quality.ncr.*` wrappers (`PUT/POST /work-orders`, `POST /quality/ncrs`) — reused those rather than inventing new ones. `DataTable`'s existing `empty` prop already renders an honest "No work orders"/"No non-conformance reports" `EmptyState`, so an empty real list needed no new UI.
+
+**Previous behaviour.** Fresh load with no backend data → 5 fake work orders or 4 fake NCRs always appeared. Every mutating action updated only local state.
+
+**New behaviour.** `useEffect` loads real data on mount; `setOrders([])`/`setNcrs([])` on empty/error (rendering the existing honest empty state, not fake rows). "Report build"/"Report defect"/"Create Work Order" apply the change optimistically in local state, then call the real `screenData.workOrders.update`/`.create`; `createNcr()` calls the real `screenData.quality.ncr.create`. A related fabrication caught while wiring `createNcr()` — it built a `wo:` (work-order reference) field from a counter (`"WO-2026-" + ...`) with no relation to any real work order — was also fixed to send an honest empty string instead of carrying a second fabrication into a now-real API call.
+
+**Risk level.** Low-moderate. Both API calls are `.catch(() => {})`'d deliberately, not silently — `screenDataBridge`'s underlying `saveToAPI` helper already toasts an error and writes to localStorage on failure (a pre-existing "R9 fix" per its own comment), so this isn't swallowing errors, it's avoiding a duplicate error path.
+
+**Testing performed.** No test file exists under `src/root/__tests__` for this file (checked — none run, per the file-scoped instructions of the fix pass). Verified via full re-read: no dangling references to the removed `DEFAULT_ORDERS` constant or `persist()` helper (confirmed zero remaining call sites by grep), both `useEffect` hooks correctly scoped, `window` exports unchanged.
+
+#### 9.2.3 Cluster: ModalsHost.jsx
+
+**Problem 1.** The "Release" confirmation modal's `onConfirm` only called local `setProject`/`setNotifications` and toasted success — no request ever left the browser — despite its own copy claiming a server-side lock, an immutable snapshot, and a changelog sent to engineering, procurement, and finance. **Problem 2.** The revision-increment logic, `String.fromCharCode(project.rev.charCodeAt(0) + 1)`, only read the *first character* of the revision string (silently corrupting any multi-character revision like `"AA"`) and had no rollover past `'Z'` (`'Z'.charCodeAt(0)+1` produces `'['`, not a valid letter).
+
+**Root cause.** Problem 1: the modal was written before (or without) the real snapshot endpoint being wired in. Problem 2: a one-character-only increment with no wraparound logic — a classic off-by-assumption bug (assumed revisions are always exactly one letter).
+
+**Impact.** High for both: Release claimed guarantees (server-side lock, immutable snapshot, cross-department notification) it never delivered; the revision bug would silently corrupt any BOM's revision string past single-letter/`Z` values.
+
+**Files modified.** `frontend/src/components/ModalsHost.jsx`.
+
+**Reason for change.** A real, already-wired endpoint exists for exactly the "immutable snapshot" half of the claim (`api.bomEnterprise.snapshots.create(bomId, data)` → `POST /bom/{bomId}/snapshots`) — wired to that. No endpoint anywhere sends cross-department notifications (`notificationsAPI` only has `list`/`update`, no `create`), so rather than fabricate that half too, the modal's body copy was edited to drop the unsupported claim and keep only the part that's now true. For the revision bug: wrote a small pure `nextRev(rev)` helper that increments the whole string like a spreadsheet column (`A→B…Y→Z→AA→AB…`), since no existing utility in `src/utils` did this.
+
+**Previous behaviour.** Clicking Release always "succeeded" locally regardless of any real persistence; a BOM at revision "Z" or "AA" would advance to an invalid or wrong revision string.
+
+**New behaviour.** Release now `await`s `api.bomEnterprise.snapshots.create(...)` inside a try/catch — the local state update, in-app notification, and success toast only run on a real success; a failure shows an error toast and does **not** mutate local state, so the UI no longer claims success when the persist call fails. Revisions increment correctly through single- and multi-character values with proper `Z`-rollover.
+
+**Risk level.** Low. Both changes are strictly "make the claimed behavior true" or "fix an incrementer to be correct," with no new failure modes introduced.
+
+**Testing performed.** No dedicated test file for this component; verified via full re-read, confirming the try/catch structure and the new `nextRev` helper are syntactically sound and don't disturb the file's other confirm-modal handlers (left untouched). A near-identical revision-increment bug was found to also exist in `src/root/detail-drawer.jsx:1640`, owned by a different fix cluster in this same commit and explicitly left untouched here to keep this diff scoped — flagged for anyone reading this doc as a known **not-yet-fixed** twin bug.
+
+#### 9.2.4 Cluster: AppCtx.jsx
+
+**Problem.** The app-wide `comments` and `approvals` context state was permanently seeded from `INITIAL_COMMENTS`/`INITIAL_APPROVALS` constants — fake names ("E. Chen", "M. Park", "R. Sato") keyed against fake demo part numbers — and never replaced by real data, even though the real API calls existed and were being fetched. `AppCtx.jsx` is the context provider mounted in the live render tree and consumed directly by `ModalsHost.jsx` (`ctx.comments[row.pn]`, `ctx.approvals[approvalKey]`).
+
+**Root cause.** `dataService.refresh('comments')`/`dataService.refresh('approvals')` (which reshape real `commentsAPI`/`approvalsAPI` data into the exact `{[partNumber]: [...]}` shape the fake constants used) were already being called inside `dataService.syncAll()`'s `Promise.allSettled`, but the result was never captured — the real data was fetched every load and then silently discarded, leaving the fake seed as the only thing ever rendered.
+
+**Impact.** High — comments and approval statuses shown throughout the app (via `ModalsHost.jsx`) were permanently fake, on every load, for every tenant, regardless of what real data existed.
+
+**Files modified.** `frontend/src/context/AppCtx.jsx`.
+
+**Reason for change.** The fetch-and-reshape logic already existed and was already being triggered (just discarded) — the fix is to actually capture and use the result, following the exact pattern the file already uses for `parts`/`vendors`/`projects` (an explicit `dataService.refresh(...)` call, `try/catch`, `if (!cancelled) setX(...)`, `console.warn` on failure without breaking the outer load).
+
+**Previous behaviour.** `comments`/`approvals` state initialized to the fake constants and stayed that way for the life of the session, regardless of what the API returned.
+
+**New behaviour.** State initializes to `{}` (matching the file's own pattern for other real-data fields) and two new `try/catch` blocks in the existing `loadFromAPI` effect populate it from the real, already-fetched-but-previously-discarded `dataService.refresh('comments')`/`refresh('approvals')` results. On failure or genuinely empty backend data, state stays `{}` — an honest empty state, never a fabricated one. `ModalsHost.jsx`'s consumers already guard with `|| []`/`|| {}`, so an empty object is a safe default with no additional defensive code needed.
+
+**Risk level.** Low. `utils/constants.js` (which still exports the now-unused `INITIAL_COMMENTS`/`INITIAL_APPROVALS`) was deliberately left untouched — pruning unused exports there is another file's owner's call, out of scope here.
+
+**Testing performed.** No test file exists for this context provider (context providers aren't unit-tested in this codebase); verified by a full re-read confirming no dangling references to the removed import and that the `ctxValue` object's exposed shape (`comments`/`setComments`/`approvals`/`setApprovals`) is unchanged downstream.
+
+#### 9.2.5 Cluster: auth-onboarding.jsx (`AuthScreen`, `OnboardingWizard`, `MobileScanView`)
+
+All three components were traced and confirmed live (rendered directly from `App.jsx`'s main render tree, not behind any dead-layer boundary).
+
+**Problem 1 — fake "forgot password."** The forgot-password submit handler used a `setTimeout` to fake a "reset link sent" toast with no network call at all.
+
+**Problem 2 — fabricated SSO identity.** All three SSO buttons (Google, Microsoft, SAML) unconditionally called the sign-in handler with a hardcoded fake identity (`admin@blackbox.com`, empty password, "Admin User") after a fake delay — which, since the real login rejects an empty password, meant the buttons were dead (looked clickable, did nothing that worked) while also fabricating an identity in the attempt.
+
+**Problem 3 — fake barcode scan.** `MobileScanView`'s scan action (`fakeScan()`) picked a random entry from 4 hardcoded parts with fabricated location/stock/status fields on every tap, rather than looking anything up for real.
+
+**Root cause.** All three: demo-era stand-ins that were never replaced once real endpoints existed (or, for SSO, never fully replaced because completing it needs frontend routing infrastructure this fix's scope didn't include).
+
+**Impact.** High for all three: users had no working password-recovery path; the SSO buttons fabricated an admin identity in an attempt that then failed; the "scanner" never scanned anything real, undermining the mobile-scan feature's entire purpose.
+
+**Files modified.** `frontend/src/root/auth-onboarding.jsx`.
+
+**Reason for change.** Problem 1: a real endpoint exists (`POST /api/v1/auth/forgot-password`, confirmed in `frontend/openapi.json`) with no dedicated `authAPI` wrapper for it — called the underlying shared `apiRequest` directly rather than wait on another agent's `api.js` file. Problem 2: a real SSO backend flow does exist (`GET /sso/authorize/{provider}`, `POST /sso/callback/{provider}` — though SAML specifically was confirmed to have **no** backend provider registered at all), but completing an OAuth redirect round-trip requires a frontend route/page to read `?code&state` back and complete the callback — no such consumer exists anywhere in the frontend, and building one is app-routing infrastructure outside a single-file fix's scope. Redirecting a user into a real OAuth screen with no way to complete the round trip would be a *worse* UX than today's inert button (a user stranded on a blank page, versus a button that visibly does nothing) — so the honest fix is to disable the buttons with a clear "not configured" state rather than half-wire a flow that can't complete. Problem 3: a real, already-wired sibling implementation of exactly this idea exists in `BarcodeScanModal.jsx` (`api.barcodes.lookup(barcode)` → real `GET /barcodes/lookup/{barcode}`) — reused that pattern instead of inventing a new one; confirmed no camera/barcode-decoding hardware integration exists anywhere in this codebase, so manual-code-entry is the only honest scan input available.
+
+**Previous behaviour.** Forgot-password always "succeeded" with no email ever sent. SSO buttons attempted a doomed fake login on every click. Mobile scan always returned one of 4 fixed fake parts with fake location/stock data.
+
+**New behaviour.** Forgot-password calls the real endpoint; success toasts and returns to sign-in only after the promise resolves, failure shows the existing error-banner state. SSO buttons are `disabled` with an honest "SSO not configured" tooltip — no fabricated login attempt. Mobile scan now has a manual-code-entry field that calls the real barcode-lookup endpoint, with loading and error states, and its result card renders only fields the real API actually returns (`vendor`/`cost`/`status`) instead of the fabricated `loc`/stock-severity fields.
+
+**Risk level.** Low-moderate. Disabling the SSO buttons is a **feature regression from "looks like it might work" to "honestly doesn't"** — a legitimate trade-off given the alternative (a stranded OAuth redirect) is worse, but worth knowing this is a UX downgrade in service of honesty, not an upgrade. The other two changes are pure "wire to a real, already-existing endpoint."
+
+**Testing performed.** No automated test run (no test infra for JSX parsing beyond build checks in this cluster); the edited file was verified to parse as valid JSX via `esbuild.buildSync`. Covered by the commit-wide production-build and 216-unit-test run.
+
+#### 9.2.6 Cluster: bom-editor-screen.jsx
+
+**Problem.** `BomEditorScreen.jsx` (confirmed, via a full import trace through `LazyScreens.jsx`'s `React.lazy` wrapper, to be the actual live component rendered at route `/bom` — despite a misleading comment elsewhere calling it "orphaned") rendered several fabricated statistics on its ribbon/tabs: hardcoded tab-count badges (`87`/`64`) that duplicated real numbers already available elsewhere in the same component, a fabricated "critical-lead delta" (`"▲ +3d STM32H7"`), a fabricated "risk-flags delta" (`"▲ 1 supplier · 1 dup · 1 origin"`), and a fabricated "3 of 4 sub-assys approved" status line.
+
+**Root cause.** Demo-era placeholder text for stats that either duplicated real data under a different literal, or referenced data shapes (trend deltas, an "approved" boolean) that don't exist anywhere in the BOM row schema.
+
+**Impact.** High — a core, highly-visible screen (the BOM editor itself) showing invented numbers that look like real analytics (a lead-time trend, a risk breakdown, an approval count) but track nothing.
+
+**Files modified.** `frontend/src/screens/BomEditorScreen.jsx`.
+
+**Reason for change.** Where a real number already existed in scope (`r.parts`, `r.unique` from the existing rollup object), reused it instead of a hardcoded duplicate. Where no backing field exists at all — no prior lead-time value, no risk-cause breakdown, no `approved` boolean on BOM rows — replaced the fabricated text with an honest `"—"` rather than inventing a definition for a field the data model doesn't have (which would just be a different flavor of the same fabrication problem).
+
+**Previous behaviour.** Tab badges always showed literal `87`/`64` regardless of the real BOM's size; the ribbon always showed a fabricated lead-time trend, risk breakdown, and approval fraction on every BOM, real or not.
+
+**New behaviour.** Tab badges and the filter-bar hint now render the real `r.parts`/`r.unique` values. The lead-time-delta, risk-breakdown, and approval-status cells render `"—"` — an honest "no such metric exists yet" rather than a number.
+
+**Risk level.** Low — purely a rendering change reusing already-in-scope variables or replacing fabricated text with an em dash; no new state, no new API calls.
+
+**Testing performed.** No test file exists under `src/screens/__tests__` for this component; verified by a full re-read confirming `r.parts`/`r.unique`/`r.risk` are pre-existing local variables already in scope, with balanced JSX. One pre-existing, unrelated bug was spotted but explicitly left alone (a literal `·` middot escape sequence in JSX text that likely renders as literal text rather than the intended character) — out of scope for this specific fabricated-stats finding.
+
+#### 9.2.7 Cluster: low-trio (`integration-screens.jsx`, `prod-additions.jsx`, `modals-extra.jsx`)
+
+Three small, unrelated, one-file-each fixes, all confirmed live (lazy-loaded/side-effect-imported from the real router or `main.jsx`).
+
+**Problem 1 — non-cryptographic webhook secret.** `integration-screens.jsx` generated webhook secrets with `Math.random().toString(36).slice(2)` — `Math.random()` is not a cryptographically secure RNG and produces a low-entropy, potentially predictable secret for something used to authenticate inbound webhook calls. **Fix:** `crypto.randomUUID().replace(/-/g, "")` — the browser's built-in CSPRNG, no new dependency, ~122 bits of real entropy.
+
+**Problem 2 — fabricated 12% failure injection.** `prod-additions.jsx`'s `optimistic()` helper (used across many optimistic-UI mutations) deliberately called `Math.random() < 0.12` to fake a save failure "for demo purposes" and invoke the caller's `undo()` **even when the real mutation had actually succeeded** — actively lying about outcomes roughly 1 in 8 times. **Fix:** removed the injected-failure branch entirely; the helper now awaits the real mutation promise (if one is returned) and only shows a failure toast / calls `undo()` on an actual rejection, success toast only on actual resolution.
+
+**Problem 3 — fake clipboard-copy success.** `modals-extra.jsx`'s API-key "Copy" buttons (two call sites — the newly-generated-key toast action and a per-row key-prefix icon button) toasted "Copied…" unconditionally without ever calling `navigator.clipboard.writeText` — nothing was actually placed on the clipboard. **Fix:** both now call `navigator.clipboard?.writeText(...)` and toast success only in `.then()` after the write genuinely resolves, with a `.catch()` error toast on failure — matching an existing real-copy pattern already used elsewhere in the codebase (`overlays.jsx`'s document-preview copy-link action).
+
+**Files modified.** `frontend/src/root/integration-screens.jsx`, `frontend/src/root/prod-additions.jsx`, `frontend/src/root/modals-extra.jsx`.
+
+**Impact.** Problem 1: medium/high (a forgeable-adjacent webhook secret is a real security weakening, even if not a full compromise on its own). Problem 2: high (a UI that lies about whether your action succeeded, roughly 12% of the time, by design). Problem 3: medium (a security feature — copying an API key — that appeared to work but silently didn't, meaning a user could believe they'd copied a secret they never actually got).
+
+**Risk level.** Low for all three — each is a targeted, single-purpose fix with no behavior change on the success path beyond "now actually verified," and no new dependencies were added.
+
+**Testing performed.** No dedicated test files for any of the three; verified via full re-read of each file confirming the replaced logic is syntactically complete and the removed constructs (`Math.random()` secret generation, the 12%-failure branch, the unconditional copy toasts) have no remaining references.
+
+**Full finding-level ledger for commit `dbcab0d`** (Status/Finding/Location, reproduced from `FIX_COVERAGE.md`; all ✅):
+
+| Cluster | Location |
+|---|---|
+| final-polish | `frontend/src/root/final-polish.jsx:961` (tax rate), `:25` (fake approvals), `:826` (fabricated fallbacks) |
+| power-features | `frontend/src/root/power-features.jsx:383` (WorkOrders persist), `:720` (NCR fake seed/create), `:310` (WorkOrders fake seed) |
+| ModalsHost | `frontend/src/components/ModalsHost.jsx:249` (fake release), `:252` (rev increment) |
+| AppCtx | `frontend/src/context/AppCtx.jsx:231` |
+| auth-onboarding | `frontend/src/root/auth-onboarding.jsx:72` (forgot password), `:87` (SSO), `:724` (mobile scan) |
+| bom-editor-screen | `frontend/src/screens/BomEditorScreen.jsx:264` |
+| low-trio | `frontend/src/root/modals-extra.jsx:538` (copy), `frontend/src/root/prod-additions.jsx:980` (fake failure), `frontend/src/root/integration-screens.jsx:470` (webhook secret) |
+
+### 9.3 Commit `12f0736` — docs: correct verified doc/reality mismatches (5 findings)
+
+> **Commit message (verbatim):** *"README: frontend dir is `frontend`, not `BOM and PRD`; there is no docker-compose.prod.yml — the stack runs from the repo-root docker-compose.yml (point production hardening at DEPLOYMENT_GUIDE.md). MODULE_REFERENCE: the Alembic VARCHAR(32) issue is resolved (fresh installs bootstrap via init_db; postgres-ci proves a from-nothing install reaches head 050), not an open "fix pending". Cross-reference table now links files that exist (API.md/DATABASE.md/DEPLOYMENT.md/TESTING.md/OPERATIONS.md never did). RELEASE_NOTES: docker/postgres/init.sql does NOT run an ALTER on alembic_version — it only enables extensions. Corrected the claim and described the real resolution path."*
+
+**Problem.** Three long-lived project docs (`README.md`, `MODULE_REFERENCE.md`, `RELEASE_NOTES.md`) each contained a claim that no longer matched (or perhaps never matched) the actual repository: `README.md` told readers to `cd "BOM and PRD"` and referenced `docker-compose.prod.yml`, neither of which exist (the frontend directory is `frontend/`, and there's only one `docker-compose.yml` at repo root); `MODULE_REFERENCE.md`'s "Known Limitations" section described the historic Alembic `VARCHAR(32)` `alembic_version` column issue as an open, unfixed problem, when the current bootstrap path (`python -m scripts.init_db`, verified end-to-end by `postgres-ci.yml`'s `fresh-install-postgres` job reaching head 050) already resolves it; and its cross-reference table linked to `API.md`/`DATABASE.md`/`DEPLOYMENT.md`/`TESTING.md`/`OPERATIONS.md`, none of which exist in this repo. `RELEASE_NOTES.md` separately claimed `docker/postgres/init.sql` runs an `ALTER TABLE` to widen `alembic_version` — it doesn't; it only enables Postgres extensions.
+
+**Root cause.** Documentation drift — each doc described either an earlier/aspirational state of the repo, or a fix that landed by a different mechanism than the doc described, and nobody re-verified the claims against the current tree.
+
+**Impact.** Medium/low individually (these are docs, not code — nothing breaks at runtime), but cumulatively high for a "beginner-friendly, explain what and why" documentation set: a new engineer following `README.md` literally would `cd` into a directory that doesn't exist and look for a compose file that was never there.
+
+**Files modified.** `README.md`, `MODULE_REFERENCE.md`, `RELEASE_NOTES.md`.
+
+**Reason for change.** Each doc was corrected to match the verified, current reality of the repository — no code was touched or needed to be; this is a pure "doc catches up to code" pass, the exact discipline this document (`PATCHES_APPLIED.md`) itself is trying to model.
+
+**Previous behaviour → New behaviour.** `README.md`: `cd "BOM and PRD"` / `docker-compose.prod.yml` references → `cd frontend` / points at the real single `docker-compose.yml` with production hardening notes redirected to `DEPLOYMENT_GUIDE.md`. `MODULE_REFERENCE.md`: "Alembic VARCHAR(32) — fix pending" → described as resolved via the `init_db` bootstrap path with `postgres-ci.yml` cited as the proof; its cross-reference table now only links docs that exist. `RELEASE_NOTES.md`: "init.sql widens alembic_version via ALTER" → corrected to "init.sql only enables extensions," with the real resolution path described instead.
+
+**Risk level.** Minimal — documentation-only, no code or migration touched.
+
+**Testing performed.** None applicable (prose corrections); verified by reading the current filesystem layout, `docker-compose.yml`, and `postgres-ci.yml` directly rather than trusting the prior doc text.
+
+**Full finding-level ledger for commit `12f0736`** (all ✅): `MODULE_REFERENCE.md:1361` (known-limitations claim), `MODULE_REFERENCE.md:1396` (dead cross-reference links), `README.md:101` (docker-compose.prod.yml), `README.md:31` (`"BOM and PRD"` directory), `RELEASE_NOTES.md:297` (init.sql ALTER claim).
+
+### 9.4 Commit `d351863` — API-key security, BOM closure integrity, valuation, tenant inserts (3 findings)
+
+> **Commit message (verbatim summary):** *"Final backend wave from the full-repo scan. 42 affected tests pass."* Covers API-key security (plugin-login scope bypass + colliding key prefixes — these two were found and fixed together but are additional hardening beyond the 3 findings tracked in `FIX_COVERAGE.md` for this commit; documented here since they're real, committed, and security-relevant), BOM closure integrity, and stock valuation/tenant-insert fixes.
+
+#### 9.4.1 Cluster: tenant-insert-valuation
+
+**Problem 1 — raw INSERTs in `routing_api.py` missing `tenantId`.** Three of four raw `text()` INSERT statements in this file (`routing_operations`, `process_plans`, `process_plan_steps` — the fourth, `routing_tables`, was already correct) omitted `tenantId` entirely. All four target tables inherit `TenantAwareMixin`, which defines `tenantId` as `nullable=False`; the ORM's automatic tenant-stamping listener (`app/core/tenant_events.py`) only fires for ORM-mapped inserts, so these raw INSERTs bypassed it completely.
+
+**Root cause.** Same class of bug as the 9.1.1 tenant-security cluster (raw SQL bypassing the ORM's tenant-aware machinery), but on the **insert** side rather than reads — this cluster is explicitly the follow-up to the note left in 9.1.1 that `create_process_plan`'s insert was a known, not-yet-fixed gap.
+
+**Impact.** High — on Postgres, these inserts would violate the `NOT NULL` constraint outright (a hard failure); on a more permissive schema they'd silently insert `NULL`, making the rows invisible to every tenant-scoped read in the same file.
+
+**Files modified.** `backend/app/api/endpoints/routing_api.py`; new test in `backend/app/tests/test_routing_api.py` (`test_raw_inserts_set_tenant_id`).
+
+**Reason for change.** Added `"tenantId"` to the three INSERT statements and their parameter dicts. The specific value used matters and was verified by testing, not assumed: the request-context `get_tenant_id()` (used for read-side scoping) is deliberately `None` for superusers — inserting that directly would violate the `NOT NULL` constraint for a superuser action (confirmed by a failing `IntegrityError` when this was tried first). The already-correct `routing_tables` insert instead uses `user.tenantId` (the calling user's own assigned tenant column, never `None`) — matched that pattern for the other three inserts instead.
+
+**Previous behaviour.** Adding a routing operation, process plan, or process-plan step via these endpoints either failed outright (Postgres `NOT NULL` violation) or inserted a tenant-invisible row.
+
+**New behaviour.** All three inserts now stamp `tenantId = user.tenantId`, making the created rows visible to the same tenant-scoped reads (`list_routings`, `get_routing`) that this file's 9.1.1 fix already scoped.
+
+**Risk level.** Low — additive parameter, matches an existing correct pattern in the same file.
+
+**Testing performed.** `test_raw_inserts_set_tenant_id` creates a routing, an operation, a process plan, and a step through the real endpoints, then reads each row back with raw SQL and asserts `tenantId` matches the test tenant. **Red confirmed** against the first attempted fix (`get_tenant_id()`) with an `IntegrityError` — this is what surfaced the superuser/context-vs-owner distinction described above. **Green** with `user.tenantId`. Left explicitly untouched (out of this cluster's scope): `list_process_plans`/`get_process_plan` raw SELECTs in the same file are still **not** tenant-scoped — a separate read-side gap, noted here so it isn't mistaken for fixed.
+
+**Problem 2 — `get_stock_valuation` multiplied by a hardcoded `1.0`.** `inventory_api.py`'s stock-valuation endpoint computed `total_value += float(item.quantity_on_hand or 0) * 1.0` — the underlying query selected only `part_id, quantity_on_hand`, no cost field at all, so the "valuation" returned was just a sum of on-hand quantities mislabeled as a dollar total.
+
+**Root cause.** The query never joined a cost source; `1.0` was presumably a placeholder that was never replaced.
+
+**Impact.** Medium/high for anyone actually relying on this endpoint for a real inventory valuation figure — the number returned had no relationship to actual value, only to unit count.
+
+**Files modified.** `backend/app/api/endpoints/inventory_api.py`; new test in `backend/app/tests/test_inventory_api.py` (`test_stock_valuation_uses_real_cost_not_hardcoded_one`).
+
+**Reason for change.** Found the codebase's own established source of truth for stock valuation — `backend/alembic/versions/025_materialized_views_and_indexes.py` already computes a materialized stock-value view as `SUM(on_hand_qty * unit_cost)`, confirming `Inventory.unit_cost` (the actual recorded cost for that specific lot) is the intended primary source, with `Part.cost` (the generic catalog price) as a reasonable fallback when a lot has no recorded cost.
+
+**Previous behaviour.** `estimated_total_value` was always numerically identical to total on-hand quantity, regardless of actual part cost.
+
+**New behaviour.** The query now joins `Part` and selects both `Inventory.unit_cost` and `Part.cost`; each row uses its own lot-level `unit_cost` if present, else falls back to the part's catalog `cost`, else is excluded from the total entirely (no more silently pricing an item at `1.0`). The response now also returns `priced_items` alongside `total_items`, so callers can see how many rows actually contributed a real price to the total.
+
+**Risk level.** Low — this changes a computed output value to be more correct; no schema change, no new write path.
+
+**Testing performed.** `test_stock_valuation_uses_real_cost_not_hardcoded_one` seeds one part (catalog cost `12.50`) with two inventory lots — one with its own `unit_cost=5.0` (qty 10), one with no `unit_cost` (qty 2, should fall back to the `12.50` catalog cost) — and asserts `estimated_total_value == 75.0` (`10×5.0 + 2×12.50`) and `priced_items == 2`. **Red confirmed**: the pre-fix code would have produced `12.0` (`10×1.0 + 2×1.0` — just the quantity sum). **Green** after the fix. Combined run: `test_inventory_api.py test_routing_api.py` → **10 passed**.
+
+#### 9.4.2 Cluster: bom-integrity
+
+**Problem 1 (HIGH) — `apply_template` skipped `BomClosure` and the creation webhook.** The "apply template" BOM-assembly path built `BOMItem` rows directly and committed them without ever calling `_closure_add_item` (the sole producer of `BomClosure` rows everywhere else in the codebase, otherwise only invoked from `create_bom_item`) and without emitting the `bom.item.created` webhook event. Every BOM assembled via "apply template" therefore had permanently broken closure-backed where-used/explosion queries for every line it created, and no downstream webhook subscriber ever saw those items. A **bonus root-cause bug** surfaced while testing this: the same code path's `BOM(...)` construction never set `bom_number`, which is `NOT NULL` with no database default — meaning `apply_template` failed its own INSERT on **any real database**, closure bug or not; it had never actually worked at all. The identical missing-`bom_number` defect was also found and fixed in `import_bom`'s `BOM(...)` construction.
+
+**Root cause.** `apply_template` was written as a direct `BOMItem`/`BOM` construction path that bypassed the shared helpers (`_closure_add_item`, `create_bom()`) every other BOM-creation path uses — a "reinvented the path instead of reusing the helper" bug, and it also never had a valid `bom_number` source.
+
+**Impact.** High — "apply template" is a core BOM-assembly feature; on any real database it could not create a BOM at all (the `bom_number` `NOT NULL` failure), and even set up to work around that, its BOM-item structure would have been silently missing closure rows, breaking where-used and explosion queries and leaving webhook subscribers blind to the new items.
+
+**Files modified.** `backend/app/services/bom_service.py` (`apply_template`, `import_bom`); new test `backend/app/tests/test_apply_template_closure.py`.
+
+**Reason for change.** Reuse over reinvention, per the smallest correct fix: replaced the bare `BOM(...)` + `db.add` + `db.flush()` with a call to the existing `create_bom()` helper (same file), which already auto-generates a tenant-scoped `bom_number` — this single change fixes both the missing-`bom_number` bug and sets up the BOM correctly. For the closure gap: `apply_template` now collects the created `BOMItem` objects, flushes once to get their ids, calls `_closure_add_item(db, bom.id, tid, item.id, item.parent_item_id)` for each — the same call shape `create_bom_item` already uses — commits, then emits `bom.item.created` per item after commit, matching `create_bom_item`'s exact pattern. Applied the identical `create_bom()`-reuse fix to `import_bom`'s parallel `BOM(...)` construction.
+
+**Previous behaviour.** `apply_template` failed outright on any real database (missing `bom_number`); had that been worked around, created items would have had no `BomClosure` rows and no webhook emission.
+
+**New behaviour.** `apply_template` (and `import_bom`) now construct their BOM via `create_bom()` (valid `bom_number` guaranteed), and every item created by `apply_template` gets a proper `BomClosure` self-row and a `bom.item.created` webhook event, exactly matching the guarantees every other BOM-item-creation path in the codebase provides.
+
+**Risk level.** Low — the fix reuses existing, already-tested helper functions rather than introducing new logic; the change is strictly "do what every sibling path already does."
+
+**Testing performed.** `test_apply_template_writes_bom_closure_self_rows` builds a `BomTemplate` + 2 `TemplateBomItem` rows, calls `apply_template`, and asserts a `BomClosure` self-row (`ancestor == descendant == item.id`, `depth 0`) exists for each created item. **Red confirmed**: failed against pre-fix code with `IntegrityError: NOT NULL constraint failed: boms.bom_number` (the bonus bug) — proving the function never worked at all before even reaching the closure assertion. **Green** after both fixes. Combined run: `test_bom_closure.py test_bom_items.py test_bom_templates.py test_bom_enterprise.py test_bom_core_correctness.py test_apply_template_closure.py` → **29 passed**, no regressions.
+
+**Problem 2 (MEDIUM) — `import_bom` fabricated a success status.** `import_bom` never actually fetched or parsed the `file_url` it was given — no CSV/Excel/PDF parsing utility exists anywhere in the codebase to reuse for this — yet it created an empty draft BOM and returned `"import_status": "success", "items_imported": 0`, which is indistinguishable from a genuinely successful (if empty) import.
+
+**Root cause.** The function was scaffolded for a file-import feature whose actual parsing logic was never built, but the success/failure reporting was never made to reflect that.
+
+**Impact.** Medium — callers checking `import_status == "success"` had no way to distinguish "we imported 0 real items because the file was empty" from "we didn't even try to read your file."
+
+**Files modified.** `backend/app/services/bom_service.py` (`import_bom`); covered by the same new test file above.
+
+**Reason for change.** Per the "no existing parser to reuse, and building a full fetch+parse pipeline is a real feature, not a bug fix" judgment call: made the function **honest** rather than fabricating success. This is explicitly a scope decision — actually parsing uploaded BOM files is a feature request, not something this fix cycle should improvise.
+
+**Previous behaviour.** Every call to `import_bom` returned `"import_status": "success"` regardless of whether anything was actually imported.
+
+**New behaviour.** `import_status` is now `"not_implemented"`, `items_imported` stays `0`, and the response includes a warning explicitly stating that file parsing isn't implemented yet. The function still creates the empty draft BOM (matching the existing UX intent of "add items via the BOM Items API" afterward) — only the claimed status changed, from false to true.
+
+**Risk level.** Low — the observable *behavior* (an empty draft BOM gets created) is unchanged; only the previously-false status label changed to an accurate one. Any caller currently checking for `"success"` will now correctly see this path as not-yet-implemented rather than believing it worked.
+
+**Testing performed.** `test_import_bom_does_not_claim_success_for_unparsed_file` calls `import_bom` with a URL and asserts `import_status != "success"` and `items_imported == 0`. **Red confirmed** against pre-fix code (`import_status == "success"`); **green** after the fix.
+
+#### 9.4.3 Cluster: api-key-security (hardening beyond the 3 tracked findings — documented for completeness)
+
+**Problem 1 — `plugin_login` ignored API-key scopes entirely.** `auth.py`'s `plugin_login` matched a presented API key against `ApiKey` rows, then minted a normal bearer JWT via the same path used for interactive logins — a JWT that carries **no scope claim at all**. `core/deps.py::get_current_user`'s bearer-token branch (which validates that JWT on every subsequent request) never reads or enforces scopes; only the separate `X-API-Key` header branch does. So a key created with only `["read"]` scope could be **exchanged, via plugin-login, for a full-access bearer token** — completely defeating the read/write scope guard described in this project's auth model (see `PROJECT_ARCHITECTURE.md`/`DATA_HANDLING.md` for the scoped-API-key design).
+
+**Root cause.** Token issuance at `plugin_login` never checked the presented key's scopes before minting a token that (via the bearer path) carries unconditional full access.
+
+**Impact.** Critical/high — a deliberately read-only integration key (e.g. handed to a reporting tool) could be used to obtain a token capable of writing anywhere in the system.
+
+**Files modified.** `backend/app/api/endpoints/auth.py`; new test `backend/app/tests/test_api_key_security.py`.
+
+**Reason for change.** Two options existed: stamp the key's scopes onto the issued token (would require `core/deps.py`'s bearer path to read and enforce a scope claim — out of this fix's file scope) or refuse issuance for insufficiently-scoped keys. Chose refusal — the only fix achievable without touching `deps.py`, and the correct one given the bearer path currently grants unconditional access: only a full-capability (`"write"`) key may be exchanged for a full-capability bearer token.
+
+**Previous behaviour.** Any active API key, regardless of scope, could be exchanged via plugin-login for a token with full access.
+
+**New behaviour.** `plugin_login` now raises `403` ("API key does not have sufficient scope for plugin-login (requires 'write')") unless the presented key's `scopes` list includes `"write"`.
+
+**Risk level.** Low-moderate. One pre-existing test (`test_solidworks_bom_ingest.py::test_plugin_login_with_api_key`) creates an `ApiKey` directly via the ORM without setting `scopes` (defaulting to `[]`), so it now correctly receives `403` instead of `200` — this file was outside this fix's allowed edit list, so it was left as a documented one-line follow-up (`scopes=["read", "write"]` needed on that test's key construction) rather than fixed in-place.
+
+**Testing performed.** `test_read_only_key_cannot_get_token_via_plugin_login` — **red confirmed**, reverting the fix produces `200` + a full token instead of `403`. `test_write_scoped_key_can_still_get_token_via_plugin_login` — sanity check that legitimate full-capability keys are unaffected. `test_two_active_keys_can_both_authenticate` (see Problem 2 below) — 3 tests, **3 passed**; combined run with `test_api_key_scopes.py`/`test_api_keys.py` → **15 passed**, no regressions.
+
+**Problem 2 — every API key shared the literal prefix `"bkb"`.** `create_api_key`/`rotate_api_key` built keys as `f"bkb_{secrets.token_urlsafe(32)}"` then derived `key_prefix = raw_key.split("_")[0]` — always exactly `"bkb"` for every key ever created. `core/deps.py::_authenticate_by_api_key` looks a key up by `.where(ApiKey.key_prefix == key_prefix).scalar_one_or_none()`; the moment a **second** active key existed anywhere in the system, that lookup returned two rows and `scalar_one_or_none()` raised an unhandled `MultipleResultsFound` — a `500` error for **every** API-key-authenticated request system-wide, not just the two colliding keys. (This was already flagged as a known limitation in a comment inside `test_api_key_scopes.py`, confirming it as a real, previously-known gap, not a new discovery.)
+
+**Root cause.** The "prefix" used for fast key lookup was a hardcoded constant, not actually unique per key — despite being used as if it were a lookup key.
+
+**Impact.** Critical — API-key authentication was structurally broken the moment more than one active key existed in the whole system (not just per-tenant), a near-certainty in any real deployment.
+
+**Files modified.** `backend/app/api/endpoints/api_keys.py`; same new test file as Problem 1.
+
+**Reason for change.** Fold a unique random hex string into the prefix itself, ahead of the underscore, so the existing `raw_key.split("_")[0]` extraction (used identically in `create_api_key`, `rotate_api_key`, and `core/deps.py`'s lookup) still works unchanged and now returns a genuinely unique value.
+
+**Previous behaviour.** `key_prefix` was always the literal string `"bkb"` for every key.
+
+**New behaviour.** `raw_key = f"bkb{secrets.token_hex(6)}_{secrets.token_urlsafe(32)}"`, giving `key_prefix` values like `"bkb1a2b3c4d5e6"` — unique per key, still comfortably under the `key_prefix` column's `String(20)` limit (3 + 12 = 15 characters), and still cleanly split on `"_"` since the hex portion contains no underscore.
+
+**Risk level.** Low — purely additive entropy in prefix generation; no change to the lookup logic itself, which already worked correctly once given a genuinely unique prefix to look up.
+
+**Testing performed.** `test_two_active_keys_can_both_authenticate` creates two keys through the real `create_api_key` endpoint, asserts their prefixes differ, then authenticates both via `X-API-Key`, asserting both get `200`. **Red confirmed**: reverting the fix makes the prefix-inequality assertion fail immediately (`'bkb' != 'bkb'`); separately confirmed by manual inspection that the reverted code would go on to raise `MultipleResultsFound` on the second key's lookup if that assertion were removed.
+
+**Full finding-level ledger for commit `d351863`** (Status/Finding/Location, reproduced from `FIX_COVERAGE.md`; all ✅ — plugin-login/key-prefix are additional hardening from the same commit, not separately tracked as FINDINGS_FULL_SCAN rows):
+
+| Cluster | Location |
+|---|---|
+| bom-integrity | `backend/app/services/bom_service.py:2076` (apply_template closure), `:1974` (import_bom fabricated success) |
+| tenant-insert-valuation | `backend/app/api/endpoints/inventory_api.py:332` (hardcoded valuation) |
+
+### 9.5 What was deliberately NOT fixed in this campaign (31 deferred findings)
+
+Per `FIX_COVERAGE.md`'s own grouping, the 31 deferred findings fall into two honest categories — deferred for a stated reason, not silently dropped:
+
+**Dead-layer fabrication (not reachable from `frontend/src/main.jsx`; safe to fix, but has zero user-visible effect until wired in) — left alone specifically because fixing unreached code doesn't change what a user sees:** `SourcingView`, `AutoScrapeModal` (hardcoded STM32H743 part dataset), `ImportRFQsModal` (4 hardcoded fake quotes), `QuoteHistoryModal` (hardcoded 8-quote history), `SettingsModal` (fabricated workspace/billing data), `ProfileModal` (hardcoded "Elena Chen" profile), and several items inside `AnalyticsScreen`/`ProcurementScreen`/`DiffScreen` under `components/screens` that the live router does not currently mount. Cross-reference `frontend/OPENBOM_GAP_ANALYSIS.md` — most of these are exactly the "backend built, no UI wired" gap shape that document's headline finding describes.
+
+**Known follow-ups needing a design decision or larger work, not a "safe patch":**
+- `process_notification_queue` has no scheduler — ECO notification rows are created but never drained.
+- Nothing creates `eco_approvals` rows — the ECR approval UI and notification system both read an empty table.
+- `routing_api`'s `list_process_plans`/`get_process_plan` reads are still tenant-unscoped (the inserts were fixed in 9.4.1; the parallel read-side gap in the same file was explicitly flagged there as out of scope).
+- A long tail of low-severity items enumerated in full in `FINDINGS_FULL_SCAN.md` with no correctness impact: unused/duplicate schemas and functions, unregistered SQLAlchemy event listeners, doc-polish items, a Redis rate-limiter timestamp-granularity nit, a floating base image tag in `backend/Dockerfile`, unpinned `requirements.txt` ranges, and similar.
+
+None of these are described as fixed anywhere else in this document — if you're looking for the status of a specific screen or endpoint not mentioned in sections 9.1–9.4 above, check `FIX_COVERAGE.md` directly for its exact row and deferral reason before assuming it was addressed.
+
+---
+
+*Section 9 synthesized from `docs/audit-2026-08/FINDINGS_FULL_SCAN.md`, `docs/audit-2026-08/FIX_COVERAGE.md`, the per-cluster `docs/audit-2026-08/fix_*.md`/`fix2_*.md`/`fixfe_*.md` write-ups, and the verbatim commit messages of `c6d4565`, `dbcab0d`, `12f0736`, `d351863` (`git log --oneline -12` on the current branch). No source code was modified in producing this document.*

@@ -4,7 +4,7 @@
 >
 > **Grounding.** Everything in this document comes from a read-only audit of the actual codebase (backend `app/`, `alembic/`, `seed_db.py`, `desktop/`, `frontend/`, Docker/CI assets). Where a feature is a **stub or mock**, that is stated plainly instead of describing aspirational behavior. Defects that affect data safety are marked inline with ⚠️ and collected in [§19](#19-known-issues-that-affect-data-handling).
 >
-> **Related documents:** [ARCHITECTURE.md](ARCHITECTURE.md) and [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) (system architecture), [SYSTEM_WORKFLOW.md](SYSTEM_WORKFLOW.md) (end-to-end flows), [MODULE_REFERENCE.md](MODULE_REFERENCE.md) (per-module reference), [FEATURE_CATALOG.md](FEATURE_CATALOG.md) (feature inventory with REAL/PARTIAL/MOCK status), [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) (deployment models), [DISASTER_RECOVERY_RUNBOOK.md](DISASTER_RECOVERY_RUNBOOK.md) (operational DR procedures), [INSTALL.md](INSTALL.md) (Docker install + backup/restore scripts), [TESTING_AND_VALIDATION.md](TESTING_AND_VALIDATION.md) (test coverage), [SECURITY.md](SECURITY.md), [ISSUES.md](ISSUES.md) and [OPEN_ITEMS.md](OPEN_ITEMS.md) (tracked gaps), [desktop/DURABILITY.md](desktop/DURABILITY.md) and [desktop/DESKTOP_PACKAGING.md](desktop/DESKTOP_PACKAGING.md) (desktop durability and packaging), `backend/docs/data-dictionary.md` (column-level dictionary), `backend/docs/API_REFERENCE.md` (endpoint reference).
+> **Related documents:** [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) and [ARCHITECTURE.md](ARCHITECTURE.md) (system architecture), [PROJECT_FEATURES_DOCUMENTATION.md](PROJECT_FEATURES_DOCUMENTATION.md) (feature inventory with REAL/PARTIAL/MOCK status — the sibling doc to check before trusting any screen's data), [UI_UX_DOCUMENTATION.md](UI_UX_DOCUMENTATION.md) (screen-by-screen UI/UX detail), [RECOMMENDED_MAJOR_IMPROVEMENTS.md](RECOMMENDED_MAJOR_IMPROVEMENTS.md) (the gaps this document flags as not-yet-implemented — bulk import record creation, BOM file-import parsing — tracked there as improvement items), [PATCHES_APPLIED.md](PATCHES_APPLIED.md) (the commit-by-commit record of every fix referenced below as ✅), [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) and [FIRST_TIME_SETUP.md](FIRST_TIME_SETUP.md) (deployment and setup), [SYSTEM_WORKFLOW.md](SYSTEM_WORKFLOW.md) (end-to-end flows), [MODULE_REFERENCE.md](MODULE_REFERENCE.md) (per-module reference), [FEATURE_CATALOG.md](FEATURE_CATALOG.md) (older, broader feature inventory), [DISASTER_RECOVERY_RUNBOOK.md](DISASTER_RECOVERY_RUNBOOK.md) (operational DR procedures), [INSTALL.md](INSTALL.md) (Docker install + backup/restore scripts), [TESTING_AND_VALIDATION.md](TESTING_AND_VALIDATION.md) (test coverage), [SECURITY.md](SECURITY.md), [ISSUES.md](ISSUES.md) and [OPEN_ITEMS.md](OPEN_ITEMS.md) (tracked gaps), `docs/audit-2026-08/FIX_COVERAGE.md` and `docs/audit-2026-08/FINDINGS_FULL_SCAN.md` (this week's line-by-line audit: 43 of 74 findings fixed, 31 deferred — the primary source for every ✅/⚠️ fixed-vs-open call in this document), [desktop/DURABILITY.md](desktop/DURABILITY.md) and [desktop/DESKTOP_PACKAGING.md](desktop/DESKTOP_PACKAGING.md) (desktop durability and packaging), `backend/docs/data-dictionary.md` (column-level dictionary), `backend/docs/API_REFERENCE.md` (endpoint reference).
 
 ---
 
@@ -73,7 +73,7 @@ flowchart TB
     end
 
     subgraph STORE["4 · Storage"]
-        PG[("PostgreSQL<br/>47 Alembic migrations,<br/>head 047")]
+        PG[("PostgreSQL<br/>50 Alembic migrations,<br/>head 050")]
         FS["File storage<br/>(UPLOAD_DIR uploads,<br/>RSA keys, logs)"]
         RD[("Redis (optional)<br/>rate limits, blacklist,<br/>backup mutex")]
     end
@@ -123,9 +123,13 @@ Nearly all data originates from users working in the React frontend. `frontend/a
 2. **4xx counts as failure.** Deterministic client errors (400/404/422) are retried and counted toward the circuit-breaker threshold; five consecutive 404s block a whole resource for 30 s.
 3. **Hardcoded BOM id fallback.** `AppCtx.jsx` computes `bomId = project?.id || project?.bomId || data?.project?.id || 1` — structural BOM edits can silently target **bom_id 1** when no real id is threaded through. Once multiple real BOMs exist, this is a cross-BOM write hazard.
 
-### 2.2 Bulk CSV import
+### 2.2 Bulk CSV import — staging only, does not create records yet
 
-`POST /api/v1/import` (`app/api/endpoints/bulk_import.py`, 179 lines): upload a CSV, then `process`, poll `status`, and inspect row-level `errors`. This is the sanctioned high-volume ingestion path for parts data. The frontend BulkImport screen (in `root/integration-screens.jsx`) is wired to it for real. The shell (`src/screens/App.jsx`) also supports drag-and-drop CSV import.
+`POST /api/v1/import` (`app/api/endpoints/bulk_import.py`, 240 lines): `upload` parses the CSV into a `BulkImportJob` + one `BulkImportRow` per line (raw `rowData` JSON, tenant-scoped), `{job_id}/process` remaps each row's keys through the caller-supplied `mappingConfig` (e.g. `{"pn": "Part Number"}`) and marks rows `processed`/`error`, and `{job_id}/status` / `{job_id}/errors` / `jobs` let the UI poll progress and inspect failures.
+
+⚠️ **This is honest staging, not an import pipeline.** `process_import` only rewrites the JSON keys on each `BulkImportRow` — it never constructs a `Part`, never calls `part_service`, and never touches the `parts` table. A "completed" job with `errorRows == 0` means every row's columns were successfully renamed, nothing more; no parts exist afterward that didn't exist before. Turning the staged, remapped rows into real `Part` rows is tracked as a gap in [RECOMMENDED_MAJOR_IMPROVEMENTS.md](RECOMMENDED_MAJOR_IMPROVEMENTS.md) — do not rely on this endpoint to populate the item master today. The frontend BulkImport screen (`root/integration-screens.jsx`) and the shell's drag-and-drop CSV import (`src/screens/App.jsx`) are wired to these real endpoints, so the upload/mapping/status UI works end-to-end — it is the "then the parts appear in the catalog" step that is missing.
+
+Also note `GET /all/status` returns **every tenant's** jobs (not tenant-scoped, kept for backward compatibility) while `GET /jobs` is correctly tenant-scoped — the bulk-import screen must call `/jobs`, never `/all/status`.
 
 ### 2.3 OCR ingestion
 
@@ -138,7 +142,7 @@ Two overlapping surfaces exist (a known duplication):
 - `/solidworks` (`solidworks_integration.py`, 652 lines — the largest endpoint file): bidirectional sync, BOM structure, images, vault stats/tree, attribute extraction, license verify/activate.
 - `/cad` (`cad.py`, 211 lines): re-implements sync/apply-sync/extract-attrs/vault routes with its own inline ORM logic.
 
-Persistent CAD data lands in `sw_property_mappings` (CAD property name → part field), `sw_pending_changes` (a **write-back outbox** of changes destined for SolidWorks), and `part_derivatives` (typed links to derived files: `pdf|step|dwg|dxf|other`), all added by migration 047. Note that a third module, `solidworks_contract.py`, is fully written but **never mounted** in `api_v1.py` (dead code — see §19).
+Persistent CAD data lands in `sw_property_mappings` (CAD property name → part field), `sw_pending_changes` (a **write-back outbox** of changes destined for SolidWorks), and `part_derivatives` (typed links to derived files: `pdf|step|dwg|dxf|other`), all added by migration 047. A third module, `solidworks_contract.py` (property-mapping CRUD + complex part-number generation for the SolidWorks add-in), used to be fully written but never mounted; it is now registered in `api_v1.py` under the same `/solidworks` prefix as `solidworks_integration.py` (§8.1) — reachable over HTTP, though the two-module duplication itself is unchanged.
 
 ### 2.5 Zoho Books (partial by design)
 
@@ -162,7 +166,7 @@ Persistent CAD data lands in `sw_property_mappings` (CAD property name → part 
 
 ### 2.10 Frontend demo fixtures (not real data)
 
-When the backend health check fails, the SPA falls back to static fixtures (`BOM_DATA` in `data.js`, `PROJECTS` in `projects.js`). Several legacy screens still **fabricate** data outright (hardcoded dashboards, fake activity feeds injected every 15 s, synthesized inventory from part-number character codes, canned RFQ quotes — see [FEATURE_CATALOG.md](FEATURE_CATALOG.md) for the full REAL/PARTIAL/MOCK inventory). ⚠️ `AppCtx.jsx` pushes `rows` changes back through `dataService.set("parts", rows)` fire-and-forget on *every* change — including fixture rows — relying on dataService to reject bad writes. Treat anything a MOCK screen shows as **not data**: it is never read from and never written to the database.
+When the backend health check fails, the SPA falls back to static fixtures (`BOM_DATA` in `data.js`, `PROJECTS` in `projects.js`). Several legacy screens used to **fabricate** data outright, and a recent patch pass removed a batch of the worst offenders that were reachable from the live app: the permanently-seeded fake comments/approvals in `AppCtx.jsx`, the always-appended 5 fake approval requests on `ApprovalsScreen`, the fake SSO identities on all three "sign in with..." buttons, and the fake "reset link" forgot-password flow are now fixed (see [PATCHES_APPLIED.md](PATCHES_APPLIED.md) and `docs/audit-2026-08/FIX_COVERAGE.md`, commit `dbcab0d`, for the full list). What remains fabricated is now largely confined to **dead-layer** components not mounted from `src/main.jsx` (`AutoScrapeModal`, `ImportRFQsModal`, `QuoteHistoryModal`, `DiffScreen`, `SettingsModal`, `ProfileModal`) plus a handful of still-live screens noted in §9.3 — see [PROJECT_FEATURES_DOCUMENTATION.md](PROJECT_FEATURES_DOCUMENTATION.md) for the current, screen-by-screen REAL/PARTIAL/MOCK inventory. ⚠️ `AppCtx.jsx` pushes `rows` changes back through `dataService.set("parts", rows)` fire-and-forget on *every* change — including fixture rows — relying on dataService to reject bad writes. Treat anything a MOCK screen shows as **not data**: it is never read from and never written to the database.
 
 ---
 
@@ -245,10 +249,11 @@ The FastAPI lifespan (`app/main.py:97-214`) starts: DB engine init with 5-attemp
 ### 5.1 Schema management
 
 - **~70 SQLAlchemy model modules** registered on a single `Base` (`app/db/base.py` via `app/models/__init__.py`).
-- **47 Alembic migration files** in `alembic/versions`, forming a **single linear chain with exactly one head: `047_solidworks_integration`** (verified by reconstructing every revision/down_revision pair — `001_initial` is the only root, no branches).
-- ⚠️ **Numbering trap:** three files share the `041_` prefix. The real chain order is `040 → 041_compliance_pack_tables → 041_part11_esignatures → 042 → 043 → 044 → 041_zoho_books_sync_tables → 045 → 046 → 047` — `041_zoho_books_sync_tables` actually revises 044. Never infer order from filenames.
+- **50 Alembic migration files** in `alembic/versions`, forming a **single linear chain with exactly one head: `050_rfq_headers_created_by_nullable`** (verified by reconstructing every revision/down_revision pair — `001_initial` is the only root, no branches; chain tail is `...→ 047_solidworks_integration → 048_index_foreign_keys → 049_restore_check_constraints → 050_rfq_headers_created_by_nullable`).
+- ⚠️ **Numbering trap:** three files share the `041_` prefix. The real chain order is `040 → 041_compliance_pack_tables → 041_part11_esignatures → 042 → 043 → 044 → 041_zoho_books_sync_tables → 045 → 046 → 047 → 048 → 049 → 050` — `041_zoho_books_sync_tables` actually revises 044. Never infer order from filenames.
 - The two previously-tracked Postgres fresh-install bugs are **fixed** in `alembic/env.py`: it now widens `alembic_version.version_num` to `VARCHAR(255)` on Postgres and falls back to `settings.DATABASE_URI` (so `.env` is honored).
-- CI has a dedicated fresh-install gate (`.github/workflows/postgres-ci.yml`) proving `scripts.init_db` bootstraps an empty PG16 database and is idempotent — ⚠️ though it hardcodes `EXPECTED_HEAD='041_zoho_books_sync_tables'`, which is now stale relative to head 047 and needs a manual bump per migration.
+- CI has a dedicated fresh-install gate (`.github/workflows/postgres-ci.yml`) proving `scripts.init_db` bootstraps an empty PG16 database and is idempotent — ✅ `EXPECTED_HEAD` is now correctly pinned to `'050_rfq_headers_created_by_nullable'` (previously stale at `041_zoho_books_sync_tables`); this still needs a manual bump on every future head migration, so treat a red fresh-install job after adding a migration as "update EXPECTED_HEAD" before assuming a real regression.
+- ✅ **New in 048/049 — schema-drift fixes:** `048_index_foreign_keys` adds indexes to 30 FK columns that had none (including `bom_closures.ancestor_item_id`/`descendant_item_id`, which the BOM explosion/where-used queries join on constantly), closing a gap where migrated databases and fresh `create_all()` databases had silently diverged. `049_restore_check_constraints` is more consequential: the models declare **85 `CHECK` constraints**, but a database that reached its schema through the Alembic chain (rather than a greenfield `create_all()`) had only **3** of them — a migrated install would silently accept data (e.g. `category='Fabricated'` on a part) that a fresh install rejects. 049 adds the other 82, each `NOT VALID` (enforced on all new INSERT/UPDATE, but not retroactively validated against existing rows — an explicit, audited choice so the migration cannot fail on a database that already holds the very rows the constraint is there to prevent). See §16 for what this changes for data integrity.
 
 ### 5.2 Table families
 
@@ -424,13 +429,14 @@ A request-scoped **contextvar** holds the current tenant id, seeded during authe
 |---|---|---|
 | `before_insert` | Auto-populates `tenantId` on every insert | ✅ **Works** |
 | `before_flush` guard | Raises `PermissionError` on cross-tenant UPDATE/DELETE | ✅ **Works** |
-| `do_orm_execute` SELECT filter | Auto-appends `tenantId = :current` to every ORM SELECT | ⚠️ **DEAD CODE — critical** |
+| `do_orm_execute` SELECT filter | Auto-appends `tenantId = :current` to every ORM SELECT | ✅ **Fixed — now works** |
 
-⚠️ **Critical finding (runtime-verified):** the SELECT filter reads `execute_state.mapper_` inside a `try/except AttributeError` — but SQLAlchemy 2.0.48's `ORMExecuteState` has **no attribute `mapper_`** (only `bind_mapper`/`all_mappers`). Every ORM SELECT raises `AttributeError`, which is swallowed, and the listener silently returns. A minimal reproduction against the project's own virtualenv returned rows from **both** tenants with the listener installed. The advertised automatic read filter contributes nothing today. Read isolation currently rests entirely on (a) explicit per-service tenant filters — which the existing cross-tenant tests do exercise — and (b) the opt-in RLS layer. The fix is a one-line change to `bind_mapper`.
+✅ **Previously-critical finding, now fixed.** Earlier builds read `execute_state.mapper_` inside a `try/except AttributeError` — SQLAlchemy 2.0's `ORMExecuteState` has never had a `mapper_` attribute (only `bind_mapper`/`all_mappers`), so every ORM SELECT raised `AttributeError`, the listener swallowed it, and the automatic filter was a silent no-op that let a runtime reproduction return rows from both tenants. The current `app/core/tenant_events.py` reads `execute_state.bind_mapper` instead, checks the target class is a `TenantAwareMixin` subclass, and appends `.where(entity_class.tenantId == tenant_id)` to the statement — **deliberately not wrapped in try/except any more** (a comment in the source explains why: if the attribute ever moves again, the app should fail loudly, not quietly stop isolating). This is now genuinely defense-in-depth on top of the explicit per-service tenant filters, not a placebo.
 
-Two more app-layer caveats:
+Two more app-layer caveats that are still real:
 
-- **Raw SQL is warned, not blocked.** `_add_tenant_select_filter` logs "Non-ORM SELECT blocked by tenant isolation" for raw `text()` SELECTs but then just returns — the log message is misleading; any raw query that forgets `tenant_sql_clause()` silently bypasses isolation unless RLS is on.
+- **Raw SQL is warned, not blocked — and the warning is now honest.** `_add_tenant_select_filter` logs "Raw (non-ORM) SELECT bypasses automatic tenant isolation — ensure it is tenant-scoped manually" for raw `text()` SELECTs and then returns without filtering — the log message used to falsely claim the query was "blocked"; it now says plainly that it was not. Any raw query that forgets `tenant_sql_clause()` still silently bypasses isolation unless RLS is on. The recent audit pass (`docs/audit-2026-08/`) added tenant scoping to several previously-unscoped raw-SQL call sites — the compliance standard/part-certification endpoints (`compliance_api.py`, see §7.3), `bulk_delete_parts`, and the `routing_api.py` raw INSERTs (`fix2_tenant-insert-valuation.md`) — but `routing_api.py`'s `list_process_plans`/`get_process_plan` raw SELECTs are explicitly still unscoped (deferred, see `docs/audit-2026-08/FIX_COVERAGE.md`), and any endpoint module not yet audited may have the same gap. Treat "warned, not blocked" as the permanent design, not a bug to wait out.
+- **Bulk Core-style delete/update needs the same manual scoping.** A `db.execute(delete(Model).where(...))`/`update(Model).where(...))` Core statement — as opposed to loading ORM objects and deleting/updating them one at a time — bypasses both the SELECT filter and the `before_flush` guard, because no ORM objects ever pass through the Session's identity map. A bulk BOM-item delete filtered only by id (no tenant clause) was one of this month's fixed findings; the fix pattern (add `.where(Model.tenantId == tenant_id)` to the Core statement, or use `tenant_sql_clause()` for raw SQL) is now the standard to follow for any new bulk operation.
 - **Superuser = no filter.** When the contextvar tenant is `None` (superuser), all tenant filtering is skipped; route-level discipline is the only guard.
 
 Note: a `TenantIsolationMiddleware` exists (`app/core/tenant_middleware.py`) but is **deliberately not registered** (`main.py:358-362`) — tenant context is set inside `get_current_user` instead. The middleware file is dead code that still gets maintained.
@@ -451,7 +457,7 @@ Deliberately **global** (no `tenantId`, therefore no RLS policy and no ORM filte
 
 - Substance reference data (042): `substances`, `substance_groups`, `regulation_versions`, `restricted_substance_entries`, `rohs_exemptions` — system-owned regulatory reference data; sharing it is correct.
 - Compliance packs (041): `compliance_packs`, `compliance_pack_items` — shared pack *definitions*; also fine.
-- ⚠️ `part_certifications` — global by inheritance from the pack tables, but it carries **per-part certification data** FK'd into tenant-scoped `parts`, and the `compliance_api` endpoints access it via **raw SQL**. Any missed manual filter leaks certification data across tenants. This is the main residual isolation surface.
+- `part_certifications` — global by inheritance from the pack tables, but it carries **per-part certification data** FK'd into tenant-scoped `parts`, and `compliance_api.py` accesses it via **raw SQL**. ✅ **Fixed:** `get_part_compliance` and `certify_part` now validate the `part_id` (and, for `certify_part`, the `compliance_id`) against the caller's own tenant with `tenant_sql_clause()` *before* joining or inserting into `part_certifications` — a part id from another tenant now 404s instead of returning or attaching certification data. The standalone standard CRUD (`get_compliance`/`update_compliance`, also raw SQL) is scoped the same way. There is no `compliance.py` module in the current tree (the old duplicate-module reference below no longer applies) — `compliance_api.py` is the only endpoint file for this data.
 
 ### 7.4 Tenant scoping elsewhere
 
@@ -465,13 +471,13 @@ Deliberately **global** (no `tenantId`, therefore no RLS policy and no ORM filte
 
 ### 8.1 The API surface
 
-A single aggregate router (`app/api/api_v1.py`) is mounted at `/api/v1` and includes ~68 sub-routers — roughly **549 route decorators across 73 endpoint modules**, plus SAML, Prometheus `/metrics` (auth-gated), `/health`, and `/health/detailed`. The surface is genuinely implemented almost everywhere: the audit found only **two intentional stubs** (ERP connector sync, Zoho pull/reconcile) and no `NotImplementedError`/TODO markers in endpoints.
+A single aggregate router (`app/api/api_v1.py`) is mounted at `/api/v1` and includes ~68 sub-routers, plus SAML, Prometheus `/metrics` (auth-gated), `/health`, and `/health/detailed` (⚠️ `/health/detailed` used to be reachable with **no authentication at all** and leaked internal business/system details; it is now auth-gated — see §18.3). The surface is genuinely implemented almost everywhere. Intentional, explicit stubs: ERP connector `sync` (§10.3), Zoho Books pull/reconcile (§2.5), and — newly documented here — `bom_service.import_bom`, which creates an empty draft BOM and now honestly reports `import_status: "not_implemented"` rather than fabricating success (§10.1).
 
 Reads follow the standard chain: route dependency (`get_db` async session, `get_current_user`, RBAC dep) → service function or inline ORM query → async SQLAlchemy → Postgres. List endpoints paginate via `app.core.pagination.paginate`.
 
-⚠️ Retrieval-side routing warts to know about (all confirmed):
+⚠️ Retrieval-side routing warts to know about:
 
-- **Five routers are written but never mounted** (dead over HTTP): `derivatives.py`, `formulas.py`, `graph.py`, `planning.py` (the fully-implemented PO-from-BOM planning feature, `planning_service.py`), `solidworks_contract.py`.
+- ✅ **Fixed — the five previously-unmounted routers are now mounted.** `derivatives.py`, `formulas.py`, `graph.py` (`/graph/where-used/{part_id}`, `/graph/analytics` — the PDM/CAD vault's "where used" knowledge graph), `planning.py` (the PO-from-BOM planning feature, `planning_service.py`), and `solidworks_contract.py` (property-mapping CRUD + part-number generation for the SolidWorks add-in) are all registered in `app/api/api_v1.py` today; the comments left in that file explicitly note they were "defined but never registered" before. `solidworks_contract.py` shares the `/solidworks` prefix with `solidworks_integration.py` — not a routing bug (FastAPI merges routers cleanly), but keep the pre-existing "two overlapping SolidWorks surfaces" duplication (§2.4) in mind when tracing a `/solidworks/...` call.
 - **Double-prefix paths** exist and are mirrored by the frontend: `/sessions/sessions/...`, `/calendar/calendar-events`, `/country-history/parts/{id}/country-history`, `/compliance/compliance/...`.
 - **Duplicate read surfaces** for the same data: `/po-orders` (raw selects) vs `/procurement` (service-backed) over the same `POHeader`/`POLineItem` models; `/cad` vs `/solidworks`; `/bom-templates` vs `/bom/templates`.
 - **Confirmed contract break:** the frontend calls `GET /erp-connectors/latest/logs` with the literal string `"latest"` against an `int` path parameter — a guaranteed 422, silently swallowed by the UI.
@@ -498,6 +504,7 @@ The SPA hydrates a single god-context (`AppCtx.jsx`) from the API when `/health`
 - `/dashboards` (`dashboards_api.py` → `dashboard_service`, 219 L): four role-specific dashboards.
 - Inventory valuation reports (`/inventory` via `inventory_service`), work-order efficiency and daily reports (`work_order_service`), three quality reports (`quality_service`).
 - BOM rollups (quantity/cost/mass) computed by `bom_service`.
+- ✅ **Fixed:** `GET /inventory/valuation` (`inventory_api.py::get_stock_valuation`) used to multiply on-hand quantity by a hardcoded `1.0` — the "valuation" was a bare unit count mislabeled as a dollar figure. It now joins `Inventory.unit_cost` (the actual per-lot cost, matching the `SUM(on_hand_qty * unit_cost)` pattern the materialized view in migration 025 already used), falling back to the part's catalog `Part.cost` when a lot has no recorded cost, and excluding a row from the total (rather than pricing it at `1.0`) when neither is available. The response also now returns `priced_items` alongside `total_items` so a caller can tell how many rows actually contributed to the total.
 
 ### 9.2 "AI" features — deterministic heuristics, not ML
 
@@ -505,7 +512,12 @@ The SPA hydrates a single god-context (`AppCtx.jsx`) from the API when `/health`
 
 ### 9.3 Analytics data that is fabricated in the UI
 
-⚠️ Several analytics-looking screens do not read the database at all: the main `DashboardScreen` budget module (a mutated module constant that persists nowhere, plus a literal "API Uptime 99.98%"), `ActivityScreen` (injects a random fake event every 15 s), `QMSDashboard`/`NCRScreen` (hardcoded rows despite real `/quality` endpoints existing), `InventoryScreen` in `prod-additions.jsx` (stock synthesized from part-number char codes), and the price-alert/RFQ-compare/inflation modals. `AnalyticsScreen` is PARTIAL: 2–3 KPIs are real, all trend charts are hardcoded. Anything decision-grade must be taken from the API/exports, not from these screens, until they are rewired.
+⚠️ Several analytics-looking screens still do not read the database at all — but this is now a shorter list than it used to be, since a recent patch pass (`dbcab0d` in `docs/audit-2026-08/FIX_COVERAGE.md`) rewired several of the worst offenders to their real endpoints:
+
+- ✅ **Fixed:** `NCRScreen` used to seed state with 4 hardcoded fake Non-Conformance Reports regardless of what `/quality` returned; it now loads the real list from the API. `WorkOrdersScreen` similarly used to silently substitute 5 hardcoded fake work orders whenever the real list came back empty/loading — also fixed to stop doing that.
+- ⚠️ **Still fabricated / not yet re-audited this pass:** the main `DashboardScreen` budget module (a mutated module constant that persists nowhere, plus a literal "API Uptime 99.98%"), `ActivityScreen` (injects a random fake event every 15 s), `InventoryScreen` in `prod-additions.jsx` (stock synthesized from part-number char codes), and the price-alert/RFQ-compare/inflation modals. `AnalyticsScreen` is PARTIAL: 2–3 KPIs are real, several trend/heat-map panels are hardcoded and — per `docs/audit-2026-08/FIX_COVERAGE.md` — are currently **dead-layer** (not reachable from the live router), so their fabricated data isn't something a real user hits today, only something to fix before wiring the screen in.
+
+Anything decision-grade must be taken from the API/exports, not from a screen, until it is confirmed rewired — check [PROJECT_FEATURES_DOCUMENTATION.md](PROJECT_FEATURES_DOCUMENTATION.md) for the current REAL/PARTIAL/MOCK status of any specific screen before trusting what it shows.
 
 ---
 
@@ -515,8 +527,8 @@ The SPA hydrates a single god-context (`AppCtx.jsx`) from the API when `/health`
 
 | Path | What it does | Status |
 |---|---|---|
-| `POST /import` (upload → process → status → errors) | Bulk CSV import with per-row error reporting | ✅ REAL |
-| `/bom` import (bom_enterprise) | BOM structure import | ✅ REAL |
+| `POST /import` (upload → process → status → errors) | Bulk CSV upload, per-row staging, and column remapping | ⚠️ **PARTIAL — stages rows, never creates `Part` records** (§2.2). Cross-ref [RECOMMENDED_MAJOR_IMPROVEMENTS.md](RECOMMENDED_MAJOR_IMPROVEMENTS.md). |
+| `/bom` import (bom_enterprise → `bom_service.import_bom`) | "BOM structure import" from a `file_url` | ⚠️ **Explicit stub.** Creates an empty draft `BOM` and returns `import_status: "not_implemented"` — `file_url` is never fetched or parsed, `items_imported` is always `0`. Until this month's fix it fabricated `import_status: "success"` for the same empty result; it is now honest about doing nothing. Cross-ref [RECOMMENDED_MAJOR_IMPROVEMENTS.md](RECOMMENDED_MAJOR_IMPROVEMENTS.md). |
 | `/catalogs` from-folder + import upload | Catalog ingestion | ✅ REAL |
 | `/user-sync` | localStorage → Postgres bridge (drafts, preferences, scan history, saved searches) | ✅ REAL |
 | `/ocr` extract/confirm | Document → structured fields | ✅ backend; ⚠️ UI never applies to part |
@@ -531,6 +543,8 @@ The SPA hydrates a single god-context (`AppCtx.jsx`) from the API when `/health`
 | `/backup` endpoints | Database-level export (§13) | ✅ superuser-gated |
 | DiffScreen "Export diff" button | ⚠️ **Fake** — shows a success toast, exports nothing | MOCK |
 
+⚠️→✅ **Frontend PO print, now fixed:** the client-side `printPO()` (`frontend/src/root/final-polish.jsx`, not part of the backend `/export` pipeline above) prints a purchase order with a line labeled "Tax (GST 18%)". The label was correct but the amount used to be computed at a hardcoded 8% — a printed document that lied about its own tax line. `printPO()` now computes the tax at the same 18% the label states (matching the configured GST rate used elsewhere for landed-cost calculations). This is a client-rendering fix, not a data-layer one — the backend never stored or served a wrong tax figure — but it is exactly the kind of "the document handed to a vendor doesn't match the number in the system" defect this doc's audience needs to know is resolved.
+
 ### 10.3 Integration egress
 
 - **Zoho Books outbound push** — real (parts/items, vendors/contacts, POs, cost fields per the integration plan), via the integration outbox.
@@ -541,10 +555,14 @@ The SPA hydrates a single god-context (`AppCtx.jsx`) from the API when `/health`
 
 ## 11. File and document handling
 
-- **Documents** (`documents.py`, 210 L): folder tree, upload with **content hashing**, versioning, CRUD. Files are written under `UPLOAD_DIR` (desktop: `%ProgramData%\BlackboxBOM\uploads`; Docker: the `backend_uploads` volume). BOM items can reference an uploaded image via `image_document_id` (FK `SET NULL`, so deleting a document never breaks a BOM line).
+- **Documents** (`documents.py`, 328 L): folder tree, upload, versioning, CRUD, and download. Storage defaults to **local-first**: `UPLOAD_DIR` (desktop: `%ProgramData%\BlackboxBOM\uploads`; Docker: the `backend_uploads` volume) is the default sink, and `s3_storage.upload_file()` is called first — S3/object storage is an optional add-on, never a hard dependency (consistent with the local-first principle). `UPLOAD_DIR` is created lazily on first write rather than crashing at import if the path is read-only or missing (needed because a packaged desktop install may point it at a data dir outside the app's own folder).
+  - **Upload pipeline** (`upload_document`): `validate_upload()` checks the extension against `ALLOWED_EXTENSIONS`; the raw bytes are then run through `combined_scan()` (ClamAV if available, a basic heuristic scanner as a fallback) and rejected with a generic 400 if either flags them — the specific scanner finding is logged server-side only, never returned to the client. The stored filename is **never** derived from the client-supplied name: it is `{md5(content)[:12]}.{safe_ext}`, where `safe_ext` falls back to `bin` unless the extension is alphanumeric and in the allow-list — this closes off path-traversal-via-filename before the name is ever used to build a path. The original filename survives only as the `originalName` metadata column.
+  - **Storage-location bug, fixed:** the upload path used to build an S3 key and call `s3_storage.upload_file()`, but never recorded *which* backend the bytes actually landed in — every `Document` row inherited the model's default and claimed `storage_type='s3'` even when object storage was unavailable and the file fell back to local disk. Downloads then looked in a (possibly nonexistent) S3 bucket for a file sitting in `UPLOAD_DIR` and 404'd. `storage_backend` is now set explicitly from whether `s3_result.get("storage") == "local_fallback"`, so `storage_type` reflects reality going forward. Rows written before this fix may still carry the stale label; `download_document` accounts for that (below).
+  - **Download endpoint, added:** the vault used to be able to list and accept files but never serve the bytes back — no download, no preview, no 3D viewer source. `GET /{document_id}/download` now exists: for `storage_type == 's3'` it fetches by key from object storage, and — because pre-fix rows may be mislabeled `'s3'` while the bytes are actually local — **falls through to the local path** when the object-storage fetch returns nothing, rather than trusting the label alone and 404ing a file that is present. For local files, `document.filePath` is `realpath()`-resolved and checked to still be inside `UPLOAD_DIR` before opening — the path is read from the database, so a tampered or legacy row could otherwise read arbitrary files off the server (e.g. `../../.env`) via symlink or `..` traversal.
+  - BOM items can reference an uploaded image via `image_document_id` (FK `SET NULL`, so deleting a document never breaks a BOM line).
 - **Barcodes/QR** (`barcodes.py`): generated per part, served as images.
 - **OCR files** (`ocr.py`): uploads processed by Tesseract.
-- **CAD derivatives** (`part_derivatives`): typed links (`pdf|step|dwg|dxf|other`) to files derived from CAD models. ⚠️ The `/derivatives` router itself is unmounted (dead), so management is via the SolidWorks routes.
+- **CAD derivatives** (`part_derivatives`): typed links (`pdf|step|dwg|dxf|other`) to files derived from CAD models. The dedicated `/derivatives` router is now mounted (§8.1), so management no longer has to go through the SolidWorks routes only.
 - **Backup artifacts**: gzip + Fernet-encrypted dumps and basebackups in `BACKUP_DIR`, WAL segments in `WAL_ARCHIVE_DIR` (§13).
 
 ⚠️ **Frontend upload caveat:** `documentsAPI.upload`, `ocrAPI.upload`, `bulkImportAPI.upload`, and `catalogsAPI.importUpload` use **raw `fetch`** — no `X-CSRF-Token` header, no 401 silent-refresh, no circuit breaker. With an expired access token they hard-fail instead of refreshing, and they depend on the backend exempting multipart posts from CSRF.
@@ -598,17 +616,21 @@ All backup logic lives in `app/core/backup.py`, driven by the lifespan **backup 
 - Failures trigger **webhook and email alerts** — but see the defects below.
 - `GET /health` includes backup health alongside DB health.
 
-### 13.4 ⚠️ Backup defects you must know before relying on this system
+### 13.4 ✅ Previously-known backup defects — now fixed
 
-These are the two **high-severity** findings of the core audit, plus supporting issues — all in `backend/app/core/backup.py`:
+The core audit had flagged two high-severity findings plus supporting issues, all in `backend/app/core/backup.py`. All four of the substantive ones have since been fixed (confirmed by reading the current code, not just a changelog):
 
-1. **Encrypted physical backups cannot be restored.** `create_physical_backup` encrypts with the chunked stream format, but `restore_physical_backup` decrypts with a single `fernet.decrypt(f.read())`. The 4-byte chunk-length prefix makes the file an invalid single Fernet token, so decryption **always raises `InvalidToken`**. The PITR path for *encrypted* basebackups is broken. (The logical path is fine — `restore_backup` correctly uses `_stream_decrypt`.)
-2. **Backup-failure emails silently never send.** `_send_email_alert` references `settings.APP_NAME`, which does not exist on `Settings` (only `PROJECT_NAME` does); the `AttributeError` is swallowed by a broad `except Exception`. You will not be emailed when backups fail.
-3. **Tar-slip risk on physical restore:** `tarfile.extractall(path=data_dir)` with no member filtering — a tampered archive can write outside the data dir (Python 3.12+ supports `extractall(filter='data')`); the full-file in-memory decrypt also risks OOM on large basebackups.
-4. **Weak webhook signatures:** alert payloads are signed with `sha256(payload + secret)` instead of HMAC (length-extension vulnerable; inconsistent with `csrf.py`, which does it right). Physical-backup failures also store raw `str(e)` as `error_message`, leaking internal paths (the logical path sanitizes correctly).
-5. **Fragile internals:** `update_backup_status` interpolates kwargs keys into a SQL `SET` f-string (safe only while all callers are internal), and `run_backup_pipeline` looks up history rows by `storage_path` equality, which is not unique across retries.
+1. ✅ **Fixed — encrypted physical backups can now be restored.** `create_physical_backup` encrypts with the chunked `_stream_encrypt` format; `restore_physical_backup` used to decrypt with a single `fernet.decrypt(f.read())`, which raised `InvalidToken` on any real (multi-chunk) file. It now calls `_stream_decrypt` — the same chunked-aware routine the logical restore path (`restore_backup`) always used correctly — so the encrypted-PITR-basebackup-unrestorable defect is closed.
+2. ✅ **Fixed — backup-failure emails send again.** `_send_email_alert` referenced `settings.APP_NAME`, which used to not exist on `Settings` (only `PROJECT_NAME` did), so every alert attempt raised `AttributeError`, swallowed by a broad `except Exception`. `Settings` now declares `APP_NAME: str = "Blackbox BOM"` explicitly (with a comment noting it exists specifically so this kind of `settings.<name>` reference never raises again), so the email path executes.
+3. ✅ **Fixed — tar-slip risk closed.** `restore_physical_backup`'s `tarfile.extractall()` now passes `filter="data"` (the stdlib's Python 3.12+ hardening, which rejects absolute paths, parent-directory escapes, symlinks pointing outside the destination, and device/special files) instead of extracting with no member filtering.
+4. ✅ **Fixed — webhook signatures use real HMAC.** Alert payloads are now signed with `hmac.new(secret, payload, hashlib.sha256)` (`sha256=` prefix, GitHub/Stripe-style) instead of the previous `sha256(payload + secret)`, which was forgeable and length-extension-weak.
 
-**Practical guidance until fixes land:** rely on **logical dumps** (which restore correctly), monitor backups by checking `backup_history` / `GET /health` rather than waiting for email, and treat encrypted physical backups as **write-only** artifacts.
+**Two lower-severity items remain, deliberately deferred (not correctness bugs, just fragility):**
+- `update_backup_status` still interpolates kwargs *keys* (not values, which are bound as parameters) into a SQL `SET` f-string — safe only because every caller is internal to this module; still worth hardening if the function is ever exposed to less-trusted input.
+- `run_backup_pipeline` still looks up a just-created `backup_history` row by `storage_path` equality rather than by the id it already has in hand — not unique across retries, though not observed to cause a wrong-row update in practice.
+- `create_physical_backup`'s failure path still stores the raw `str(e)` as `error_message` (the logical backup path sanitizes correctly) — a failed physical backup's error text may contain a local filesystem path.
+
+**Practical guidance now:** both logical dumps and encrypted physical basebackups restore correctly; monitor either way via `backup_history` / `GET /health`, and email alerting on failure now works, so it is no longer necessary to rely solely on polling.
 
 ---
 
@@ -622,9 +644,9 @@ Operational procedures are in [DISASTER_RECOVERY_RUNBOOK.md](DISASTER_RECOVERY_R
 
 ### 14.2 PITR (point-in-time recovery)
 
-Concept: restore the last physical basebackup, then replay archived WAL segments up to a target timestamp. The pieces exist (basebackups, WAL archive, `pitr_restore.py`, `/backup/pitr-restore`), **but**:
+Concept: restore the last physical basebackup, then replay archived WAL segments up to a target timestamp. The pieces exist (basebackups, WAL archive, `pitr_restore.py`, `/backup/pitr-restore`).
 
-⚠️ **PITR restore is not Windows-aware** (confirmed by DURABILITY.md's 2026-07-19 verification): `pitr_restore.py` hardcodes `/var/lib/postgresql/wal_archive` and a Unix `cp` restore_command, ignoring the `WAL_ARCHIVE_DIR` the launcher sets; `backup.py::restore_physical_backup` resolves the right path but still emits `cp`, which Windows `cmd.exe` lacks. Desktop WAL **archiving** works; a desktop PITR **restore** would fail at the first WAL replay. Tracked in [OPEN_ITEMS.md](OPEN_ITEMS.md) ("PITR/WAL live verification"). Combined with §13.4(1), assume PITR is **not yet a working recovery path on desktop** — plan around logical dumps.
+✅ **Fixed — PITR restore is now Windows-aware.** `pitr_restore.py` used to hardcode `/var/lib/postgresql/wal_archive` and a Unix `cp` `restore_command`, ignoring the `WAL_ARCHIVE_DIR` the launcher actually sets; on Windows the WAL replay step would fail because `cmd.exe` has no `cp`. Both `pitr_restore.py` and `backup.py::restore_physical_backup` now read `WAL_ARCHIVE_DIR` from the environment/settings and branch the generated `restore_command` on `os.name`: `copy /Y "<archive>\%f" "%p"` on Windows (`os.name == "nt"`), `cp <archive>/%f %p` everywhere else. Combined with §13.4(1) (encrypted physical restore now decrypting correctly), the previously-documented "PITR is not a working recovery path on desktop" caveat no longer applies at the code level. It has **not** been re-verified end-to-end on a live Windows desktop install since this fix (the original 2026-07-19 verification in DURABILITY.md predates it) — treat it as fixed-in-code, pending a fresh live rehearsal, and still keep logical dumps as your primary, most-exercised recovery path.
 
 ### 14.3 Docker restore
 
@@ -670,6 +692,11 @@ Security architecture detail lives in [SECURITY.md](SECURITY.md) and ARCHITECTUR
 | Tenant isolation | §7 (note the dead SELECT filter) |
 | Regulated data | 21 CFR Part 11 e-signatures write-once; `/esignatures` read-only |
 
+✅ **Two API-key security bugs fixed this month** (both in `app/api/endpoints/api_keys.py` / `auth.py`):
+
+- **Every key used to share the literal prefix `"bkb"`.** `create_api_key`/`rotate_api_key` built the raw key as `f"bkb_{secrets.token_urlsafe(32)}"` and derived `key_prefix` by splitting on `"_"`, which is always exactly `"bkb"` — the moment a second active key existed anywhere, `core/deps.py`'s `X-API-Key` lookup (`.where(ApiKey.key_prefix == key_prefix).scalar_one_or_none()`) matched two rows and raised an unhandled `MultipleResultsFound`, 500ing the request for *every* API-key-authenticated caller, not just the two colliding keys. The raw key is now `f"bkb{secrets.token_hex(6)}_{secrets.token_urlsafe(32)}"`, so the prefix (everything before the first `_`) is unique per key while the lookup logic is unchanged.
+- **`plugin_login` ignored the presented key's scope.** A key created with `scopes=["read"]` could be exchanged at `/auth/plugin-login` for a normal bearer JWT with no scope claim at all — and the bearer-token verification path in `core/deps.py` never checks scopes (only the `X-API-Key` header path does), so a read-only key could mint a token that authorized writes everywhere. `plugin_login` now refuses to issue a token unless the presented key's `scopes` includes `"write"`.
+
 ⚠️ Additional confirmed security notes affecting data: `_check_redis_available` returns `True` without pinging for non-localhost Redis URLs (a down remote Redis breaks the limiter); the audit middleware records `request.client.host` instead of `get_client_ip()` (wrong `userIp` behind a proxy); and the frontend `CurrencyScreen` ships a **live third-party exchange-rate API key hardcoded in client source** with a runtime dependency on an external host — contradicting local-first and mismatched across the two dev servers' CSPs (`serve.py` vs `server.js`).
 
 ⚠️ **Offline login UX hole:** the SPA's sign-in treats "Internal server error" (a reachable, 500ing server) the same as a network failure and enters offline demo mode with arbitrary credentials. Backend authorization still protects real data, but the client shows the full shell.
@@ -682,7 +709,7 @@ Security architecture detail lives in [SECURITY.md](SECURITY.md) and ARCHITECTUR
 
 - FK constraints with explicit `ON DELETE` behavior on every relationship; `NOT NULL tenantId` everywhere tenant-scoped.
 - Tenant-scoped unique keys (migration 035 pattern): `uq(tenantId, pn)`, `uq(tenantId, barcode)`, `uq(tenantId, bom_number)`, `uq(tenantId, name)` (vendors), `uq(tenantId, code)` (projects), `uq(tenantId, catalog_code)`, `uq(tenantId, sw_property)`, `uq(tenantId, part_id, kind)` (derivatives), etc.
-- `CHECK` constraints on statuses, categories, plans, derivative kinds, transaction reference types.
+- `CHECK` constraints on statuses, categories, plans, derivative kinds, transaction reference types — **85 of them declared across the models** (§5.1). ✅ Migration `049_restore_check_constraints` closed a real gap here: a database that reached its schema through the Alembic chain previously had only 3 of the 85 (a fresh `create_all()` install always had all of them — one codebase, two different enforced schemas). 049 adds the missing 82 as `NOT VALID` — enforced on every new write, not retroactively checked against rows already in the table. If you administer a database that predates 049, it is worth running `scripts/audit_check_constraints.py` and then `ALTER TABLE ... VALIDATE CONSTRAINT` per table to confirm no legacy rows are quietly violating a rule the application now assumes holds.
 - Money standardized `Numeric(18,4)` (033), quantities `Numeric(10,4)` (034).
 - The write-once e-signature store; DB-persisted audit logs; `backup_history` verification records.
 - Cross-tenant UPDATE/DELETE guard at flush (works — §7.1).
@@ -698,8 +725,8 @@ Security architecture detail lives in [SECURITY.md](SECURITY.md) and ARCHITECTUR
 | 5 | `Numeric(10,4)` money on `bom_items_master` and inventory cost columns | `bom.py`, `inventory.py` | Overflow above 999,999.9999 — large-assembly extended costs can fail. |
 | 6 | Inverted adjacency-list relationships on both BOM item models | `bom.py:88`, `bom_item.py:38-45` | `item.children`/`item.parent` are semantically swapped (`remote_side=[id]` on the attribute named `children`); `bom_item.py` additionally hangs `delete-orphan` cascade on the wrong side. Code trusting the names will misbehave. |
 | 7 | `bomDataComputed` reads `item.part.partNumber` but the field is `pn` | `bom_template.py:33-48` | `AttributeError` whenever that hybrid property is evaluated with a part present (legacy path). |
-| 8 | Global `part_certifications` accessed via raw SQL | `compliance.py` + `compliance_api.py` | Cross-tenant leak if any manual filter is missed (§7.3). |
-| 9 | Derived `bom_closures` correctness depends on all structural writes going through `bom_service` | `bom_service.py` | Out-of-band writes desynchronize explosion/where-used. |
+| 8 | ✅ Fixed — global `part_certifications` accessed via raw SQL | `compliance_api.py` | `get_part_compliance`/`certify_part` now validate `part_id` (and `compliance_id`) against the caller's tenant via `tenant_sql_clause()` before any join/insert (§7.3). No open cross-tenant leak here today. |
+| 9 | Derived `bom_closures` correctness depends on all structural writes going through `bom_service` | `bom_service.py` | Out-of-band writes desynchronize explosion/where-used. ✅ `apply_template` was found writing `BOMItem` rows directly without producing the matching `BomClosure` rows (and without a `bom_number`, which made every `apply_template` call fail outright on Postgres/SQLite) — both are now fixed: it reuses `create_bom()` and calls `_closure_add_item()` per item, matching `create_bom_item`'s pattern. |
 | 10 | Desktop schema never migrated by Alembic | `desktop/launcher.py` | `create_all` cannot ALTER existing tables → schema drift on upgrade (§14.4). |
 
 ### 16.3 Idempotency and duplicates
@@ -743,8 +770,8 @@ Dedicated handlers exist for `HTTPException`, `RequestValidationError`, `RateLim
 ### 18.3 Monitoring
 
 - **Sentry** (`init_sentry`) for exception reporting; **Prometheus** `/metrics` (auth-gated) via `MetricsMiddleware`.
-- `GET /health` (DB + backup health) and `GET /health/detailed`.
-- Backup failure alerting via webhook + email (⚠️ email path broken, §13.4).
+- `GET /health` (DB + backup health, unauthenticated — intended for load-balancer/orchestrator probes) and `GET /health/detailed`. ✅ **Fixed:** `/health/detailed` used to require no authentication at all while returning internal business/system details (DB connection info, backup status internals) — anyone who could reach the port could read it. It is now auth-gated like the rest of the API; only an authenticated caller can pull the detailed view.
+- Backup failure alerting via webhook + email (✅ email path fixed, §13.4).
 - Deduplicated structured logging per module; DB-persisted audit trail.
 
 ### 18.4 Frontend failure behavior
@@ -759,27 +786,27 @@ Dedicated handlers exist for `HTTPException`, `RequestValidationError`, `RateLim
 
 ## 19. Known issues that affect data handling
 
-Consolidated register of the audit findings that touch data safety, ordered by severity. See [ISSUES.md](ISSUES.md) / [OPEN_ITEMS.md](OPEN_ITEMS.md) for tracking.
+Consolidated register of the audit findings that touch data safety, ordered by severity. See [ISSUES.md](ISSUES.md) / [OPEN_ITEMS.md](OPEN_ITEMS.md) for tracking of anything still open, and [PATCHES_APPLIED.md](PATCHES_APPLIED.md) for the full commit-by-commit record of what has already landed. Findings below marked ✅ are fixed as of this refresh (verified by reading the current code, not just a changelog entry) and are kept here so you know what *used to* be true and don't have to re-discover it.
 
 | Sev | Area | Issue | Where |
 |---|---|---|---|
-| **Critical** | Tenancy | Automatic ORM SELECT tenant filter is dead code (`execute_state.mapper_` doesn't exist in SQLAlchemy 2.0.48; AttributeError swallowed; runtime-verified cross-tenant reads without explicit filters). Fix: use `bind_mapper`. | `app/core/tenant_events.py` |
-| **High** | Backup/DR | Encrypted **physical** backups unrestorable (chunked encrypt vs single-shot decrypt → `InvalidToken` always). | `app/core/backup.py` |
-| **High** | Backup/DR | Backup-failure **emails never send** (`settings.APP_NAME` AttributeError swallowed). | `app/core/backup.py` |
-| **High** | Backup/DR | PITR restore not Windows-aware (hardcoded `/var/lib/...` + Unix `cp`); desktop PITR fails at WAL replay. | `backend/scripts/pitr_restore.py`, `backup.py` |
-| **High** | Integrity | `parts.primary_vendor_id` CASCADE deletes parts on vendor delete; user-delete cascades wipe BOMs/templates/inventory audit. | `app/models/part.py`, `bom.py`, `bom_template.py`, `inventory.py` |
-| **High** | Desktop | Bundled `backend.exe` never stamps/migrates Alembic — future migrations won't apply to installed desktops. | `desktop/launcher.py` |
-| **High** | API | Five implemented routers never mounted (incl. PO-from-BOM planning); ERP-connector logs contract break (`"latest"` vs int → 422). | `app/api/api_v1.py`, frontend `integration-screens.jsx` |
+| ✅ *was Critical* | Tenancy | Automatic ORM SELECT tenant filter was dead code (`execute_state.mapper_` doesn't exist in SQLAlchemy 2.x; `AttributeError` swallowed; runtime-verified cross-tenant reads without explicit filters). **Fixed:** now reads `bind_mapper`, deliberately un-guarded by try/except so a future SQLAlchemy change fails loudly instead of silently disabling isolation again (§7.1). | `app/core/tenant_events.py` |
+| ✅ *was High* | Backup/DR | Encrypted **physical** backups were unrestorable (chunked encrypt vs single-shot decrypt → `InvalidToken` always). **Fixed:** restore now uses the chunk-aware `_stream_decrypt` (§13.4). | `app/core/backup.py` |
+| ✅ *was High* | Backup/DR | Backup-failure **emails never sent** (`settings.APP_NAME` `AttributeError` swallowed). **Fixed:** `Settings.APP_NAME` now exists (§13.4). | `app/core/backup.py` |
+| ✅ *was High* | Backup/DR | PITR restore was not Windows-aware (hardcoded `/var/lib/...` + Unix `cp`); desktop PITR failed at WAL replay. **Fixed:** `WAL_ARCHIVE_DIR` now read from settings, `restore_command` branches on `os.name` (§14.2). | `backend/scripts/pitr_restore.py`, `backup.py` |
+| **High** | Integrity | `parts.primary_vendor_id` CASCADE still deletes parts on vendor delete; user-delete cascades still wipe BOMs/templates/inventory audit rows. **Not fixed** — still present in the current model code. | `app/models/part.py`, `bom.py`, `bom_template.py`, `inventory.py` |
+| **High** | Desktop | Bundled `backend.exe` still never stamps/migrates Alembic — future migrations won't apply to installed desktops. **Not fixed.** | `desktop/launcher.py` |
+| ✅ *was High* | API | Five implemented routers were never mounted (incl. PO-from-BOM planning). **Fixed:** `derivatives`, `formulas`, `graph`, `planning`, and `solidworks_contract` are all registered in `api_v1.py` now (§8.1). ERP-connector logs contract break (`"latest"` vs int → 422) is still present — **not fixed.** | `app/api/api_v1.py`, frontend `integration-screens.jsx` |
 | **High** | Frontend | Circuit breaker counts/retries 4xx; `rows[0].children` render crashes fire exactly on real API data; `toast` missing import crashes mobile scanner. | `frontend/api.js`, `AnalyticsScreen.jsx` et al., `mobile-scanner.jsx` |
-| **Med** | Integrity | Inventory reference-type app/DB mismatch; NULLS-DISTINCT unique hole; `Numeric(10,4)` money overflow; inverted BOM adjacency lists. | `app/models/inventory.py`, `bom.py`, `bom_item.py` |
-| **Med** | Tenancy | Raw-SQL SELECTs only warned, never blocked; global `part_certifications` outside RLS/ORM filters via raw SQL; WS doc locks collide across tenants and leak on disconnect. | `tenant_events.py`, `compliance.py`, `main.py` |
-| **Med** | Backup | Tar-slip in physical restore; non-HMAC webhook signatures; raw error strings persisted; SQL f-string in `update_backup_status`. | `app/core/backup.py` |
-| **Med** | Ingress | Non-idempotent frontend retries can duplicate writes; multipart uploads bypass CSRF/refresh; hardcoded `bomId \|\| 1` fallback; 500-as-offline login bypass to demo shell. | `frontend/api.js`, `AppCtx.jsx`, `App.jsx` |
-| **Med** | Ops | RLS flag must be set **at migration time** (re-apply requires downgrade/upgrade); postgres-ci `EXPECTED_HEAD` stale at 041 vs real head 047; several ci.yml jobs broken as written. | `alembic/versions/040...`, `.github/workflows/*` |
-| **Low** | Misc | Cookie shadows Bearer token; `SessionTimeoutMiddleware` misnamed no-op; seed bypasses Alembic stamping; SW cache-first broader than documented; CSP `ws:/wss:` wildcard; RSA key file permissions; hardcoded exchange-rate API key in client. | various (see §§2–15) |
+| **Med** | Integrity | Inventory reference-type app/DB mismatch; NULLS-DISTINCT unique hole; `Numeric(10,4)` money overflow; inverted BOM adjacency lists. **None of these four are fixed** — confirmed still present in the current model code. | `app/models/inventory.py`, `bom.py`, `bom_item.py` |
+| **Med** | Tenancy | Raw-SQL SELECTs are still only warned, never blocked (by design — see §7.1) — but with a now-honest log message. ✅ Global `part_certifications` access via raw SQL is now tenant-validated (§7.3, §16.2#8) — **fixed**, no longer an open item. WS doc locks colliding across tenants / leaking on disconnect: **not fixed**, still present (§7.4, §12.1). | `tenant_events.py`, `compliance_api.py`, `main.py` |
+| **Med** | Backup | ✅ Tar-slip in physical restore — fixed. ✅ Non-HMAC webhook signatures — fixed. Raw error strings persisted on physical-backup failure, and the SQL `SET`-clause f-string in `update_backup_status` — **both still present**, deliberately deferred as lower-severity (§13.4). | `app/core/backup.py` |
+| **Med** | Ingress | Non-idempotent frontend retries can duplicate writes; multipart uploads bypass CSRF/refresh; hardcoded `bomId \|\| 1` fallback; 500-as-offline login bypass to demo shell. Not addressed by this audit pass — still present. | `frontend/api.js`, `AppCtx.jsx`, `App.jsx` |
+| ✅ *was Med* | Ops | RLS flag still must be set **at migration time** (re-apply requires downgrade/upgrade) — not fixed, inherent to how the migration is written. postgres-ci `EXPECTED_HEAD` **is now correctly pinned to head 050** — fixed. Several `ci.yml` jobs that were broken as written have also been fixed (Docker build/deploy context, bare `alembic upgrade head` against an empty Postgres, legacy `backend/tests/` suite gating the build) per `PATCHES_APPLIED.md` / `docs/audit-2026-08/FIX_COVERAGE.md`. | `alembic/versions/040...`, `.github/workflows/*` |
+| **Low** | Misc | Cookie shadows Bearer token; `SessionTimeoutMiddleware` misnamed no-op; seed bypasses Alembic stamping; SW cache-first broader than documented; CSP `ws:/wss:` wildcard; RSA key file permissions; hardcoded exchange-rate API key in client. Not addressed by this audit pass — still present. | various (see §§2–15) |
 
 ### Reading guidance
 
-- If you are **operating** the system: trust logical dumps, verify restores with `recovery_test.py`, keep `.env` (`ENCRYPTION_KEY`!) in your recovery set, and do not assume email alerting or desktop PITR work today.
-- If you are **developing** against the data layer: always filter reads by tenant explicitly (`tenant_sql_clause()` for raw SQL) — do **not** rely on the automatic SELECT filter; route all BOM structure writes through `bom_service`; never add `ON DELETE CASCADE` to ownership/audit FKs.
-- If you are **evaluating** what the product does: cross-check any screen against [FEATURE_CATALOG.md](FEATURE_CATALOG.md)'s REAL/PARTIAL/MOCK status before treating what it displays as database-backed data.
+- If you are **operating** the system: both logical dumps and encrypted physical basebackups now restore correctly (§13.4); still verify restores with `recovery_test.py` and keep `.env` (`ENCRYPTION_KEY`!) in your recovery set. Failure alerting by email now works, but continue to also monitor `backup_history`/`GET /health` directly.
+- If you are **developing** against the data layer: the automatic ORM SELECT tenant filter now works (§7.1), but that is defense-in-depth, not a reason to skip explicit filtering — always filter raw SQL by tenant explicitly (`tenant_sql_clause()`) and never build a bulk Core `delete()`/`update()` without a `.where(tenantId == ...)` clause; route all BOM structure writes through `bom_service`; never add `ON DELETE CASCADE` to ownership/audit FKs (the existing ones are known bugs, not a pattern to copy).
+- If you are **evaluating** what the product does: cross-check any screen against [PROJECT_FEATURES_DOCUMENTATION.md](PROJECT_FEATURES_DOCUMENTATION.md)'s REAL/PARTIAL/MOCK status before treating what it displays as database-backed data, and see [frontend/OPENBOM_GAP_ANALYSIS.md](frontend/OPENBOM_GAP_ANALYSIS.md) for how these gaps roll up against the competitive landscape (the dominant shape is "backend built, no UI" — bulk import and BOM import in this document are examples of the mirror-image problem: UI built, backend not finished).
