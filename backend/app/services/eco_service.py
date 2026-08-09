@@ -54,6 +54,24 @@ _ECO_NOTIFY: dict[str, tuple[str, str, str]] = {
 }
 
 
+async def _resolve_eco_approvers(db: AsyncSession, eco: EcoHeader) -> set[int]:
+    """The tenant's designated ECO approvers — the same role gate that the
+    "approve" action itself enforces (ECO_APPROVER_ROLES), so these are
+    exactly the people who *can* act on it. No separate approver model to
+    invent: this reuses the existing role/permission setup.
+    """
+    approvers = await db.execute(
+        select(User.id)
+        .join(User.roles)
+        .where(
+            Role.name.in_(ECO_APPROVER_ROLES),
+            User.isActive.is_(True),
+            User.tenantId == eco.tenantId,
+        )
+    )
+    return set(approvers.scalars().all())
+
+
 async def _eco_recipients(db: AsyncSession, eco: EcoHeader, action: str) -> set[int]:
     """The humans who actually need to know about this transition.
 
@@ -61,11 +79,10 @@ async def _eco_recipients(db: AsyncSession, eco: EcoHeader, action: str) -> set[
     never a broadcast to every user. Scoped to the ECO's own tenant.
     """
     if action == "submit":
-        # Whoever is on the hook to approve. Prefer an explicit approver chain
-        # (pending eco_approvals rows); nothing writes those yet, so fall back
-        # to the tenant's designated ECO approvers — the same role gate that
-        # `approve` below actually enforces, so these are exactly the people
-        # who *can* act on it.
+        # Whoever is on the hook to approve. perform_eco_action creates a
+        # pending eco_approvals row per required approver at submit time, so
+        # read that chain; fall back to a fresh role lookup only if none
+        # exist (e.g. no admin-level approver was on the tenant at submit).
         pending = await db.execute(
             select(EcoApproval.approver_id).where(
                 EcoApproval.eco_id == eco.id, EcoApproval.status == "pending"
@@ -74,16 +91,7 @@ async def _eco_recipients(db: AsyncSession, eco: EcoHeader, action: str) -> set[
         ids = set(pending.scalars().all())
         if ids:
             return ids
-        approvers = await db.execute(
-            select(User.id)
-            .join(User.roles)
-            .where(
-                Role.name.in_(ECO_APPROVER_ROLES),
-                User.isActive.is_(True),
-                User.tenantId == eco.tenantId,
-            )
-        )
-        return set(approvers.scalars().all())
+        return await _resolve_eco_approvers(db, eco)
 
     ids = {eco.requested_by}
     if action == "implement":
@@ -330,6 +338,31 @@ async def perform_eco_action(
     now = datetime.now(UTC)
     if action == "submit":
         eco.status = "review"
+        # R8: create the actual approval chain here — a pending eco_approvals
+        # row per required approver — so approvals are never empty and
+        # notification recipients don't have to fall back to a role query.
+        # Skip approvers who already have an open pending row for this ECO
+        # (a reject->resubmit cycle reuses the still-open approval instead of
+        # piling up duplicates).
+        approver_ids = await _resolve_eco_approvers(db, eco)
+        existing_pending = await db.execute(
+            select(EcoApproval.approver_id).where(
+                EcoApproval.eco_id == eco.id, EcoApproval.status == "pending"
+            )
+        )
+        already_pending = set(existing_pending.scalars().all())
+        next_order = await _next_approval_order(db, eco.id)
+        for approver_id in approver_ids - already_pending:
+            db.add(
+                EcoApproval(
+                    eco_id=eco.id,
+                    approver_id=approver_id,
+                    approval_order=next_order,
+                    status="pending",
+                    tenantId=tid,
+                )
+            )
+            next_order += 1
     elif action == "approve":
         # R8 guardrail: forbid self-approval — the acting user must not be
         # the ECO creator/requester.
@@ -365,19 +398,37 @@ async def perform_eco_action(
         eco.approved_by = current_user.id
         eco.approved_at = now
         # R8 guardrail: record the approval on EcoApproval (not just the
-        # header) — approval_order derived from existing approvals, never
-        # hardcoded.
-        approval = EcoApproval(
-            eco_id=eco.id,
-            approver_id=current_user.id,
-            approval_order=await _next_approval_order(db, eco.id),
-            status="approved",
-            comments=comments,
-            signed_at=now,
-            digital_signature=digital_signature,
-            tenantId=tid,
+        # header). submit created a pending row for this approver — fill
+        # that in rather than leaving it dangling forever; fall back to
+        # inserting a fresh row (approval_order derived from existing
+        # approvals, never hardcoded) for legacy ECOs or an approver acting
+        # outside the original chain.
+        pending_row = await db.execute(
+            select(EcoApproval).where(
+                EcoApproval.eco_id == eco.id,
+                EcoApproval.approver_id == current_user.id,
+                EcoApproval.status == "pending",
+            )
         )
-        db.add(approval)
+        approval = pending_row.scalar_one_or_none()
+        if approval:
+            approval.status = "approved"
+            approval.comments = comments
+            approval.signed_at = now
+            approval.digital_signature = digital_signature
+        else:
+            db.add(
+                EcoApproval(
+                    eco_id=eco.id,
+                    approver_id=current_user.id,
+                    approval_order=await _next_approval_order(db, eco.id),
+                    status="approved",
+                    comments=comments,
+                    signed_at=now,
+                    digital_signature=digital_signature,
+                    tenantId=tid,
+                )
+            )
     elif action == "reject":
         eco.status = "draft"
     elif action == "implement":

@@ -3,6 +3,7 @@ import PropTypes from "prop-types";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import { ComplianceReportPanel } from "../components/ComplianceReportPanel.jsx";
+import ExportDialog from "../components/modals/ExportDialog.jsx";
 import {
   BomEditor,
   BomShell,
@@ -11,9 +12,6 @@ import {
   INR,
   Icon,
   ROLES,
-  downloadCSV,
-  downloadJSON,
-  generateXLSX,
   printBOM,
   useAppStore,
 } from "../globals";
@@ -38,6 +36,11 @@ function BomEditorScreen({
   const p = ctx?.project || data.project;
   const r = ctx?.rollup || data.rollup;
   const deltaPct = ((r.bomCost - r.lastCost) / r.lastCost) * 100;
+  // Same fallback convention BomEditor uses for the canonical instance-BOM
+  // id (see root/bom-editor.jsx) — neither the demo fixture nor the
+  // Parts-backed row source currently threads a real bom_id through.
+  const bomId = ctx?.bomId || p?.id || p?.bomId || 1;
+  const [exportOpen, setExportOpen] = React.useState(false);
 
   const allCats = [
     "Assembly",
@@ -162,52 +165,10 @@ function BomEditorScreen({
               </button>
             }
             items={[
-              { header: __t("bomShell.format") },
               {
-                icon: <Icon.Doc size={11} />,
-                label: __t("bomShell.pdfReport"),
-                onClick: () => {
-                  toast("Generating PDF report…");
-                  setTimeout(
-                    () =>
-                      toast("BOM_v3.2.0.pdf ready", {
-                        kind: "success",
-                        action: {
-                          label: "Download",
-                          onClick: () => toast("Downloaded BOM_v3.2.0.pdf"),
-                        },
-                      }),
-                    900,
-                  );
-                },
-              },
-              {
-                icon: <Icon.Doc size={11} />,
-                label: __t("bomShell.excel"),
-                onClick: () => {
-                  generateXLSX(ctx?.rows || data.rows, "BOM_v3.2.0.xls");
-                  toast(__t("bomShell.excel") + " downloaded", {
-                    kind: "success",
-                  });
-                },
-              },
-              {
-                icon: <Icon.Doc size={11} />,
-                label: __t("bomShell.csv"),
-                onClick: () => {
-                  downloadCSV(ctx?.rows || data.rows, "BOM_v3.2.0.csv");
-                  toast(__t("bomShell.csv") + " downloaded", { kind: "success" });
-                },
-              },
-              {
-                icon: <Icon.Doc size={11} />,
-                label: __t("bomShell.json"),
-                onClick: () => {
-                  downloadJSON(ctx?.rows || data.rows, "BOM_v3.2.0.json");
-                  toast(__t("bomShell.json") + " downloaded", {
-                    kind: "success",
-                  });
-                },
+                icon: <Icon.Export size={11} />,
+                label: __t("bomShell.exportDialog") || "Export…",
+                onClick: () => setExportOpen(true),
               },
               "divider",
               {
@@ -570,6 +531,12 @@ function BomEditorScreen({
           />
         )}
       </div>
+      <ExportDialog
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        entity="bom"
+        bomId={bomId}
+      />
     </>
   );
 }

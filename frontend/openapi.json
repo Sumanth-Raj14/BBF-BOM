@@ -1242,6 +1242,11 @@
       },
       "Body_upload_file_api_v1_import_upload_post": {
         "properties": {
+          "entity": {
+            "default": "parts",
+            "title": "Entity",
+            "type": "string"
+          },
           "file": {
             "format": "binary",
             "title": "File",
@@ -2697,6 +2702,106 @@
         "title": "BulkImportStatusResponse",
         "type": "object"
       },
+      "BulkImportUploadResponse": {
+        "description": "Superset of BulkImportJobResponse: adds the contract's upload fields\n(job_id/detected_columns/sample_rows/row_count) without breaking the\npre-existing id/filename/status/totalRows callers.",
+        "properties": {
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completedat"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "detected_columns": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Detected Columns",
+            "type": "array"
+          },
+          "errorRows": {
+            "default": 0,
+            "title": "Errorrows",
+            "type": "integer"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "integer"
+          },
+          "mappingConfig": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mappingconfig"
+          },
+          "processedRows": {
+            "default": 0,
+            "title": "Processedrows",
+            "type": "integer"
+          },
+          "row_count": {
+            "default": 0,
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "sample_rows": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Sample Rows",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "totalRows": {
+            "default": 0,
+            "title": "Totalrows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "status",
+          "job_id"
+        ],
+        "title": "BulkImportUploadResponse",
+        "type": "object"
+      },
       "CADExtractRequest": {
         "properties": {
           "filePath": {
@@ -4059,6 +4164,53 @@
           }
         },
         "title": "CommentUpdate",
+        "type": "object"
+      },
+      "CommitResponse": {
+        "properties": {
+          "created": {
+            "default": 0,
+            "title": "Created",
+            "type": "integer"
+          },
+          "errors": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CommitRowError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "failed": {
+            "default": 0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "updated": {
+            "default": 0,
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "title": "CommitResponse",
+        "type": "object"
+      },
+      "CommitRowError": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "row": {
+            "title": "Row",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row",
+          "message"
+        ],
+        "title": "CommitRowError",
         "type": "object"
       },
       "ComplianceCertCreate": {
@@ -6735,6 +6887,117 @@
         "title": "ExchangeRateCreate",
         "type": "object"
       },
+      "ExportRequest": {
+        "properties": {
+          "bom_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bom Id"
+          },
+          "columns": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Columns"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "entity": {
+            "title": "Entity",
+            "type": "string"
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filters"
+          },
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "include_sub_assemblies": {
+            "default": true,
+            "title": "Include Sub Assemblies",
+            "type": "boolean"
+          },
+          "indented": {
+            "default": true,
+            "title": "Indented",
+            "type": "boolean"
+          },
+          "template_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Id"
+          }
+        },
+        "required": [
+          "entity",
+          "format"
+        ],
+        "title": "ExportRequest",
+        "type": "object"
+      },
+      "ExportTemplateCreateRequest": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "entity": {
+            "title": "Entity",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "entity",
+          "config"
+        ],
+        "title": "ExportTemplateCreateRequest",
+        "type": "object"
+      },
       "ExtractedField": {
         "properties": {
           "confidence": {
@@ -9348,6 +9611,82 @@
           }
         },
         "title": "MakeVsBuyUpdate",
+        "type": "object"
+      },
+      "MappingRequest": {
+        "properties": {
+          "mapping": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Mapping",
+            "type": "object"
+          }
+        },
+        "required": [
+          "mapping"
+        ],
+        "title": "MappingRequest",
+        "type": "object"
+      },
+      "MappingRowError": {
+        "properties": {
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "row": {
+            "title": "Row",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row",
+          "message"
+        ],
+        "title": "MappingRowError",
+        "type": "object"
+      },
+      "MappingValidationResponse": {
+        "properties": {
+          "errors": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MappingRowError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          },
+          "will_create": {
+            "default": 0,
+            "title": "Will Create",
+            "type": "integer"
+          },
+          "will_update": {
+            "default": 0,
+            "title": "Will Update",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "valid"
+        ],
+        "title": "MappingValidationResponse",
         "type": "object"
       },
       "MemberAdd": {
@@ -19155,6 +19494,7 @@
     },
     "/api/v1/analytics/vendor-scorecards": {
       "get": {
+        "description": "Vendor scorecards for the Analytics screen.\n\nSpend figures come from po_headers. On-time and quality come from the\npart_vendors links (app/models/part_vendor.py: onTimeRate 0-100,\nqualityScore 0-5) averaged over the vendor's parts - the same stored\nperformance data /analytics/at-risk-parts already treats as authoritative.\nA vendor with no part links has no measurement, so those fields are null\nrather than a plausible-looking constant.\n\nresponseTime has no source in this schema: nothing records a vendor\nenquiry/response timestamp pair. supplier_scorecards.avgResponseTimeHours\nexists but belongs to the periodic-scorecard subsystem and is not populated\nfrom anything, so it is reported as null.",
         "operationId": "vendor_scorecards_api_v1_analytics_vendor_scorecards_get",
         "responses": {
           "200": {
@@ -23926,39 +24266,16 @@
     },
     "/api/v1/cad/apply-sync": {
       "post": {
+        "description": "Deliberately not implemented.\n\nThe diffs produced by POST /cad/sync are comparison metadata only\n({\"pn\", \"change\": \"File parsed: STEP\", \"metadata\": {...}}) - they carry no\ntarget field and no target value, so there is nothing here that can be\napplied to a Part without guessing at the mutation. The previous\nimplementation looked each part up, counted it, wrote nothing, and returned\n\"Applied N sync changes\", which the UI printed as a success with an audit\nentry that was never written.\n\nReal CAD -> BOM writes live in POST /api/v1/solidworks/apply-sync, which\ntakes a BomSyncRequest with explicit component rows.",
         "operationId": "cad_apply_sync_api_v1_cad_apply_sync_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "title": "Changes",
-                "type": "array"
-              }
-            }
-          }
-        },
         "responses": {
-          "200": {
+          "501": {
             "content": {
               "application/json": {
                 "schema": {}
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "security": [
@@ -30898,6 +31215,50 @@
         ]
       }
     },
+    "/api/v1/export": {
+      "post": {
+        "operationId": "export_entity_api_v1_export_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Export Entity",
+        "tags": [
+          "export"
+        ]
+      }
+    },
     "/api/v1/export/bom/pdf": {
       "get": {
         "operationId": "export_bom_pdf_api_v1_export_bom_pdf_get",
@@ -30987,6 +31348,51 @@
           }
         ],
         "summary": "Export Bom Xlsx",
+        "tags": [
+          "export"
+        ]
+      }
+    },
+    "/api/v1/export/columns": {
+      "get": {
+        "operationId": "get_export_columns_api_v1_export_columns_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "entity",
+            "required": true,
+            "schema": {
+              "title": "Entity",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Export Columns",
         "tags": [
           "export"
         ]
@@ -31083,6 +31489,133 @@
           }
         ],
         "summary": "Export Summary",
+        "tags": [
+          "export"
+        ]
+      }
+    },
+    "/api/v1/export/templates": {
+      "get": {
+        "operationId": "list_export_templates_api_v1_export_templates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "entity",
+            "required": true,
+            "schema": {
+              "title": "Entity",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Export Templates",
+        "tags": [
+          "export"
+        ]
+      },
+      "post": {
+        "operationId": "create_export_template_api_v1_export_templates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportTemplateCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create Export Template",
+        "tags": [
+          "export"
+        ]
+      }
+    },
+    "/api/v1/export/templates/{template_id}": {
+      "delete": {
+        "operationId": "delete_export_template_api_v1_export_templates__template_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "title": "Template Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Export Template",
         "tags": [
           "export"
         ]
@@ -31828,6 +32361,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
         "summary": "Detailed Health"
       }
     },
@@ -31904,7 +32442,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BulkImportJobResponse"
+                  "$ref": "#/components/schemas/BulkImportUploadResponse"
                 }
               }
             },
@@ -31927,6 +32465,54 @@
           }
         ],
         "summary": "Upload File",
+        "tags": [
+          "bulk-import"
+        ]
+      }
+    },
+    "/api/v1/import/{job_id}/commit": {
+      "post": {
+        "description": "Actually create/update records. Tenant-scoped.\n\nTransaction model: each row gets its own SAVEPOINT (db.begin_nested()).\nA bad row is rolled back to that savepoint, counted as failed, and the\nrest of the file keeps going \u2014 one broken row does not sink the whole\nimport. The successful rows are committed together at the end.",
+        "operationId": "commit_import_api_v1_import__job_id__commit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommitResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Commit Import",
         "tags": [
           "bulk-import"
         ]
@@ -31974,6 +32560,64 @@
           }
         ],
         "summary": "Get Import Errors",
+        "tags": [
+          "bulk-import"
+        ]
+      }
+    },
+    "/api/v1/import/{job_id}/mapping": {
+      "post": {
+        "description": "Validate a file-column -> entity-field mapping WITHOUT writing anything.\n\nPersists the mapping on the job (in the existing mappingConfig JSON column,\nno schema change) so /commit can re-run the identical mapping.",
+        "operationId": "validate_mapping_api_v1_import__job_id__mapping_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MappingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingValidationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Validate Mapping",
         "tags": [
           "bulk-import"
         ]

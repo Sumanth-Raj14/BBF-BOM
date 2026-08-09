@@ -990,6 +990,73 @@ export const bulkImportAPI = {
   errors: (jobId) => apiRequest(`/import/${jobId}/errors`),
 };
 
+// Export API — shared contract (see CLUSTER export-import-frontend):
+//   POST /export                       -> streaming file (blob + filename)
+//   GET  /export/columns?entity=<e>    -> authoritative column list for that entity
+//   GET/POST/DELETE /export/templates  -> saved per-tenant export presets
+export const exportAPI = {
+  columns: (entity) => apiRequest(`/export/columns?entity=${encodeURIComponent(entity)}`),
+  templates: {
+    list: (entity) => apiRequest(`/export/templates?entity=${encodeURIComponent(entity)}`),
+    create: (data) => apiRequest('/export/templates', { method: 'POST', body: JSON.stringify(data) }),
+    delete: (id) => apiRequest(`/export/templates/${id}`, { method: 'DELETE' }),
+  },
+  // apiRequest always calls response.json(), which throws on a streamed
+  // binary body — so this goes straight through fetch(), same as the
+  // multipart uploads above. Returns the blob plus the filename the server
+  // chose via Content-Disposition, so the caller never has to guess an
+  // extension or fabricate one.
+  run: async (body) => {
+    const csrfToken = getCSRFToken();
+    const response = await fetch(`${API_BASE}/export`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: 'Export failed' }));
+      throw new Error(err.detail || `HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    const filename = match ? match[1] : `export.${body.format || 'csv'}`;
+    return { blob, filename };
+  },
+};
+
+// Import API — shared contract (see CLUSTER export-import-frontend):
+//   POST /import/upload             (multipart: file, entity) -> job_id + preview
+//   POST /import/{job_id}/mapping   -> validates WITHOUT writing
+//   POST /import/{job_id}/commit    -> actually creates/updates records
+// Distinct from the legacy `bulkImportAPI` above (process/status/errors),
+// which is a different job lifecycle still used by integration-screens.jsx's
+// Bulk Import history screen.
+export const importAPI = {
+  upload: async (file, entity) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('entity', entity);
+    const response = await fetch(`${API_BASE}/import/upload`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: csrfHeaders(),
+      body: formData,
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(err.detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
+  mapping: (jobId, mapping) => apiRequest(`/import/${jobId}/mapping`, { method: 'POST', body: JSON.stringify({ mapping }) }),
+  commit: (jobId) => apiRequest(`/import/${jobId}/commit`, { method: 'POST' }),
+};
+
 // ERP Connectors
 export const erpConnectorsAPI = {
   list: (params = {}) => {
@@ -1523,6 +1590,8 @@ export const api = {
   health: healthAPI,
   webhooks: webhooksAPI,
   bulkImport: bulkImportAPI,
+  export: exportAPI,
+  import: importAPI,
   erpConnectors: erpConnectorsAPI,
   supplierPortal: supplierPortalAPI,
   monitoring: monitoringAPI,
