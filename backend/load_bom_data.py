@@ -13,6 +13,7 @@ from app.db.session import get_session_maker, init_engine
 from app.models.part import Part
 from app.models.project import Project
 from app.models.vendor import Vendor
+from scripts._db_guard import require_non_production_db
 
 # Extracted data from data.js
 BOM_DATA = {
@@ -548,6 +549,9 @@ BOM_DATA = {
 
 async def load_bom_data():
     """Load BOM data into database"""
+    # Writes fixture data -- refuse unless the resolved DB looks like a
+    # test/e2e/sqlite database (see the 2026-08-09 incident).
+    require_non_production_db()
     # Create tables
     engine = await init_engine()
     async with engine.begin() as conn:

@@ -1,5 +1,15 @@
 #!/usr/bin/env python
-"""Seed enterprise tables with sample data: Service BOM, Routings, Process Plans, Timesheets."""
+"""Seed enterprise tables with sample data: Service BOM, Routings, Process Plans, Timesheets.
+
+INCIDENT (2026-08-09): fixture-writing scripts must resolve their DB through
+app.db.session (so TEST_DATABASE_URL wins) and refuse to run against
+anything that doesn't look like a test/e2e/sqlite database. This script used
+to import the module-level `AsyncSessionLocal` placeholder directly without
+ever calling `init_engine()`, so standalone it would fail with
+"'NoneType' object is not callable" before touching any database -- fixed by
+calling init_engine()/get_session_maker() like the other seed scripts, and
+now gated by scripts._db_guard.require_non_production_db() too.
+"""
 
 import asyncio
 import sys
@@ -9,7 +19,8 @@ sys.path.insert(0, ".")
 
 from sqlalchemy import text
 
-from app.db.session import AsyncSessionLocal
+from app.db.session import get_session_maker, init_engine
+from scripts._db_guard import require_non_production_db
 
 SEED_SERVICE_BOMS = [
     {
@@ -487,7 +498,10 @@ SEED_TIMESHEETS = [
 
 
 async def seed():
-    async with AsyncSessionLocal() as db:
+    require_non_production_db()  # raises if this looks like a live DB
+    await init_engine()
+    Session = await get_session_maker()
+    async with Session() as db:
         # Check if already seeded
         count = (
             await db.execute(text("SELECT COUNT(*) FROM service_bom_headers"))

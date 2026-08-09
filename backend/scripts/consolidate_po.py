@@ -53,7 +53,17 @@ logger = logging.getLogger("po_consolidation")
 async def run_consolidation(dry_run: bool = False, force: bool = False) -> dict:
     from sqlalchemy import text
 
-    from app.db.session import AsyncSessionLocal
+    from app.db.session import get_session_maker, init_engine
+    from scripts._db_guard import require_non_production_db
+
+    if not dry_run:
+        # This inserts/updates real po_headers/po_line_items/purchase_orders
+        # rows -- refuse unless the resolved DB looks like a test/e2e/sqlite
+        # database (see the 2026-08-09 incident). --dry-run only reads, so
+        # it's left unguarded (useful to preview against a real DB).
+        require_non_production_db()
+    await init_engine()
+    AsyncSessionLocal = await get_session_maker()
 
     results = {
         "headers_created": 0,

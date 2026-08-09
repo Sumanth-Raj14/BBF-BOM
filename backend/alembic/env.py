@@ -11,10 +11,19 @@ from alembic import context
 # access to the values within the .ini file in use.
 config = context.config
 
-# Override sqlalchemy.url from environment if DATABASE_URL is set
+# Override sqlalchemy.url from environment if set. TEST_DATABASE_URL takes
+# precedence -- same rule as app.db.session.resolve_database_url() -- so that
+# `alembic upgrade head` run with only TEST_DATABASE_URL set (e.g. from a test
+# harness) migrates the test database, not whatever DATABASE_URL/settings
+# would otherwise resolve to. INCIDENT (2026-08-09): this used to check only
+# DATABASE_URL/DATABASE_URI, so TEST_DATABASE_URL was silently ignored here.
 import os
 
-db_url = os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_URI")
+db_url = (
+    os.environ.get("TEST_DATABASE_URL")
+    or os.environ.get("DATABASE_URL")
+    or os.environ.get("DATABASE_URI")
+)
 if not db_url:
     # Fall back to the application's own configured URL so migrations use the
     # same credentials as the running app. Without this, alembic.ini's stub

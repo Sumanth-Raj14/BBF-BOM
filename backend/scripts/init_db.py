@@ -27,8 +27,9 @@ separately. App-layer tenant isolation (the primary mechanism) is unaffected.
 Usage
 -----
     cd backend && python -m scripts.init_db
-Honors ``DATABASE_URL`` / ``DATABASE_URI`` if set, else uses the app's
-``settings.DATABASE_URI`` (from .env).
+Honors ``TEST_DATABASE_URL`` / ``DATABASE_URL`` / ``DATABASE_URI`` (in that
+order) if set, else uses the app's ``settings.DATABASE_URI`` (from .env) --
+see ``app.db.session.resolve_database_url``.
 """
 import asyncio
 import os
@@ -43,13 +44,17 @@ _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
-from app.core.config import settings  # noqa: E402
 from app.db.base import Base  # noqa: E402
+from app.db.session import resolve_database_url  # noqa: E402
 from app.models import *  # noqa: E402,F401,F403  (populate Base.metadata with every model)
 
 
 def _resolve_url() -> str:
-    return os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_URI") or settings.DATABASE_URI
+    # Delegates to the single source of truth (TEST_DATABASE_URL > DATABASE_URL
+    # > settings.DATABASE_URI) instead of re-implementing the precedence here.
+    # INCIDENT (2026-08-09): this used to check DATABASE_URL/DATABASE_URI only,
+    # so TEST_DATABASE_URL was silently ignored during bootstrap.
+    return resolve_database_url()
 
 
 def _alembic_config(url: str) -> Config:
