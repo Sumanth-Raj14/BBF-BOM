@@ -50,7 +50,8 @@ async def _check_redis_rate_limit(key: str, max_requests: int, window: int = 60)
 # Per-API-key rate limiting (in-memory with LRU eviction, fallback when Redis unavailable)
 _api_key_rate_limits: dict[str, list[float]] = {}
 _API_KEY_RATE_LIMIT_MAX = 5000
-_API_KEY_RATE_LIMIT_PER_MINUTE = 120
+# Configurable for the same reason as the per-user ceiling below.
+_API_KEY_RATE_LIMIT_PER_MINUTE = settings.RATE_LIMIT_API_KEY_PER_MINUTE
 _API_KEY_RATE_LIMIT_WINDOW = 60.0
 
 
@@ -203,10 +204,14 @@ def _rls_pin_tenant_id(user: User) -> Optional[int]:
     return user.tenantId
 
 
-# Per-user rate limiting (token-authenticated users)
+# Per-user rate limiting (token-authenticated users).
+# The ceiling comes from settings so an on-prem deployment can tune it; it used
+# to be a hardcoded 300, which no operator could change and which normal use hit
+# (the SPA issues 15-20 requests per screen load, so ~15 navigations a minute
+# tripped it, and api.js's 5s-per-retry backoff then stalled the whole shell).
 _user_rate_limits: dict[int, list[float]] = {}
 _USER_RATE_LIMIT_MAX = 10000
-_USER_RATE_LIMIT_PER_MINUTE = 300
+_USER_RATE_LIMIT_PER_MINUTE = settings.RATE_LIMIT_USER_PER_MINUTE
 _USER_RATE_LIMIT_WINDOW = 60.0
 
 

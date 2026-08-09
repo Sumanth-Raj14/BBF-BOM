@@ -236,6 +236,15 @@ class Settings(BaseSettings):
     # infinitely replayable), just one sized for normal use rather than for
     # brute-force password guessing.
     RATE_LIMIT_REFRESH_PER_MINUTE: int = 30
+    # Per-authenticated-user ceiling, enforced in core/deps.py for EVERY
+    # authenticated request. This was a hardcoded 300 that no deployment could
+    # tune, and it is easy to hit legitimately: the SPA fires 15-20 requests per
+    # screen load, so ~15 navigations in a minute tripped it. When it trips,
+    # api.js backs off 5s per retry, which stalls the whole shell. Configurable
+    # here, with headroom for normal interactive use.
+    RATE_LIMIT_USER_PER_MINUTE: int = 1200
+    # Per-API-key ceiling (machine clients: plugins, integrations).
+    RATE_LIMIT_API_KEY_PER_MINUTE: int = 600
     # Outbound Zoho Books API calls (client-side token bucket in
     # app.integrations.zoho_client.ZohoBooksClient) — conservative default
     # well under Zoho's server-side limit so the tool throttles itself first.

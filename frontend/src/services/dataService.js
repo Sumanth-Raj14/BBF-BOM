@@ -18,10 +18,40 @@ function notify() {
   window.dispatchEvent(new CustomEvent(SYNC_EVENT, { detail: status }));
 }
 
+/**
+ * A queued write can never succeed if its payload is the wrong SHAPE for the
+ * endpoint it targets. `create`/`update` post a single entity, so an array
+ * payload is permanently invalid — the server answers 422 every time, and the
+ * old catch-all requeue below put it straight back on the queue. The result was
+ * a poison entry that replayed on every app boot, forever, firing a failing
+ * POST /parts on literally every page load.
+ *
+ * Dropping these on load makes already-poisoned browsers self-heal instead of
+ * needing the user to clear site data.
+ */
+function isPoisonEntry(item) {
+  if (!item || typeof item !== 'object') return true;
+  if (item.action === 'create' || item.action === 'update') {
+    return Array.isArray(item.payload);
+  }
+  return false;
+}
+
 function loadQueue() {
   try {
     const raw = localStorage.getItem(QUEUE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    const clean = parsed.filter((item) => !isPoisonEntry(item));
+    if (clean.length !== parsed.length) {
+      // Rewrite immediately so the drop is permanent, not re-evaluated forever.
+      try { localStorage.setItem(QUEUE_KEY, JSON.stringify(clean)); } catch { /* skip */ }
+      console.warn(
+        `[sync] dropped ${parsed.length - clean.length} unsendable queued write(s) ` +
+        `(wrong payload shape — these could never succeed)`
+      );
+    }
+    return clean;
   } catch { return []; }
 }
 
@@ -57,7 +87,27 @@ async function processQueue() {
         else if (item.action === 'update') await writer.update(item.payload);
         else if (item.action === 'delete' && writer.remove) await writer.remove(item.payload);
       }
-    } catch {
+    } catch (err) {
+      // A deterministic client error (400/403/404/409/422...) means the server
+      // understood the request and rejected it. Retrying cannot change that, so
+      // requeueing it creates an infinite loop that re-fires on every app boot
+      // and blocks every legitimate write behind it. Only genuinely transient
+      // failures (network, 408, 429, 5xx) are worth retrying — the same
+      // distinction api.js's circuit breaker makes.
+      const status = err && err.status;
+      const isPermanent =
+        typeof status === 'number' &&
+        status >= 400 && status < 500 &&
+        status !== 408 && status !== 429;
+
+      if (isPermanent) {
+        console.warn(
+          `[sync] dropping unsendable ${item.domain}/${item.action} write ` +
+          `(HTTP ${status}) — it would never succeed`, err && err.message
+        );
+        continue; // drop it and keep draining the rest of the queue
+      }
+
       enqueueWrite(item.domain, item.action, item.payload);
       break;
     }
@@ -314,6 +364,15 @@ export const dataService = {
     setLocal(domain, value);
     const writer = apiWriters[domain];
     if (!writer) return;
+
+    // `set` replaces the whole LOCAL collection, so `value` is normally an
+    // array. `writer.create` posts ONE entity, so handing it an array produced
+    // a guaranteed 422 that was then queued and retried forever (see
+    // isPoisonEntry above). A whole-collection replace has no single-entity
+    // server equivalent, so there is nothing to send: keep the local write and
+    // return. Callers that mean "create one record" use `create()`.
+    if (Array.isArray(value)) return;
+
     if (!_online) {
       enqueueWrite(domain, 'create', value);
       return;
@@ -465,6 +524,13 @@ function setLocal(domain, value) {
     case 'savedSearches': storage.savedSearches.set(value); break;
   }
 }
+
+// Sanitise the persisted queue once at boot. loadQueue() drops entries that can
+// never be sent (see isPoisonEntry); calling it here means a browser that
+// already holds a poisoned queue heals on the next load instead of replaying a
+// guaranteed-failing write on every page for the rest of time. It also seeds
+// _pendingCount so the sync indicator starts truthful.
+saveQueue(loadQueue());
 
 window.addEventListener('online', () => { _online = true; notify(); processQueue(); });
 window.addEventListener('offline', () => { _online = false; notify(); });
