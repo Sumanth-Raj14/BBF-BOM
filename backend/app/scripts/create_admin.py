@@ -20,7 +20,7 @@ from sqlalchemy import select
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from app.core.security import get_password_hash
-from app.db.session import AsyncSessionLocal
+from app.db.session import get_session_maker
 from app.models.user import User
 
 
@@ -51,7 +51,12 @@ async def main():
         print(f"ERROR: {err}", file=sys.stderr)
         sys.exit(1)
 
-    async with AsyncSessionLocal() as db:
+    # finding: infra-secrets-health #3 - AsyncSessionLocal is a None placeholder
+    # until init_engine() runs (see app/main.py startup); calling it directly crashed
+    # with "'NoneType' object is not callable". get_session_maker() lazily inits the
+    # engine the same way app startup does, then returns a real session factory.
+    session_maker = await get_session_maker()
+    async with session_maker() as db:
         result = await db.execute(
             select(User).where((User.email == email) | (User.username == username))
         )

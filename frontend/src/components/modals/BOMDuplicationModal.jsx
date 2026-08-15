@@ -1,13 +1,17 @@
 import PropTypes from "prop-types";
+import { AppContext } from "../../context/AppCtx.jsx";
 import { navigateTo } from "../../services/navigation.js";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Icon, api, useAppStore } from "../../globals";
+import { Icon, api } from "../../globals";
 import { Modal, Button, Field, Input, Checkbox, Badge } from "../ui";
 
 function BOMDuplicationModal({ open, onClose }) {
-  const ctx = useAppStore();
+  // Reads the app context directly. (useAppStore() is now equivalent — the
+  // two context objects were unified in context/appContext.js — but the
+  // explicit import keeps the dependency visible.)
+    const ctx = React.useContext(AppContext);
   const [name, setName] = React.useState("");
   const [includeRev, setIncludeRev] = React.useState(true);
   const [includeCosts, setIncludeCosts] = React.useState(false);
@@ -28,6 +32,12 @@ function BOMDuplicationModal({ open, onClose }) {
         id: r.id + "-dup-" + stamp,
         children: r.children ? relabel(r.children) : undefined,
         cost: includeCosts ? r.cost : 0,
+        // The "Reset revision to A" checkbox was rendered and bound to state,
+        // but includeRev was never read here — so the duplicate silently kept
+        // the source revision whichever way the box was ticked. Rows do carry
+        // a real `rev` (see bom-editor.jsx), so there was always something to
+        // reset.
+        rev: includeRev ? "A" : r.rev,
       }));
     const dupRows = relabel(newRows);
 

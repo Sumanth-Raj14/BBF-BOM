@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
+from app.core.tenant_context import tenant_sql_clause
 from app.db.session import get_db
 from app.models.user import User
 
@@ -57,9 +58,12 @@ async def list_routings(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: routing_tables carries tenantId; raw text() reads bypass
+    # the ORM select filter (tenant_events.py) so scope explicitly here.
+    tc, tp = tenant_sql_clause("rt")
     r = await db.execute(
         text(
-            """SELECT rt.*, rt.routing_number as code,
+            f"""SELECT rt.*, rt.routing_number as code,
                rt.status = 'active' as is_active,
                COALESCE(op_counts.cnt, 0) as operations_count
             FROM routing_tables rt
@@ -67,9 +71,10 @@ async def list_routings(
                 SELECT routing_id, COUNT(*) as cnt
                 FROM routing_operations GROUP BY routing_id
             ) op_counts ON rt.id = op_counts.routing_id
+            WHERE 1=1 {tc}
             ORDER BY rt.id DESC LIMIT :l OFFSET :s"""
         ),
-        {"l": limit, "s": skip},
+        {"l": limit, "s": skip, **tp},
     )
     return [dict(row) for row in r.mappings().all()]
 
@@ -105,8 +110,15 @@ async def get_routing(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: scope the routing_tables lookup by tenant.
+    tc, tp = tenant_sql_clause()
     hdr = (
-        (await db.execute(text("SELECT * FROM routing_tables WHERE id = :id"), {"id": routing_id}))
+        (
+            await db.execute(
+                text(f"SELECT * FROM routing_tables WHERE id = :id {tc}"),
+                {"id": routing_id, **tp},
+            )
+        )
         .mappings()
         .first()
     )
@@ -128,7 +140,11 @@ async def add_routing_operation(
 ):
     await db.execute(
         text(
-            "INSERT INTO routing_operations (routing_id, operation_number, operation_name, description, work_center, setup_time_min, run_time_min, cycle_time_min, estimated_cost) VALUES (:rid, :on, :name, :d, :wc, :st, :rt, :ct, :ec)"
+            # tenant-insert-valuation: raw INSERT bypasses the ORM before_insert
+            # listener (tenant_events.py) that stamps tenantId, so set it explicitly.
+            # Use user.tenantId (not get_tenant_id()/tenant_sql_clause context, which is
+            # None for superusers) so the row always gets a real owning tenant.
+            'INSERT INTO routing_operations (routing_id, operation_number, operation_name, description, work_center, setup_time_min, run_time_min, cycle_time_min, estimated_cost, "tenantId") VALUES (:rid, :on, :name, :d, :wc, :st, :rt, :ct, :ec, :tid)'
         ),
         {
             "rid": routing_id,
@@ -140,6 +156,7 @@ async def add_routing_operation(
             "rt": body.run_time_min,
             "ct": body.cycle_time_min,
             "ec": body.estimated_cost,
+            "tid": user.tenantId,
         },
     )
     await db.commit()
@@ -153,9 +170,11 @@ async def list_process_plans(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: scope the process_plans read by tenant, like list_routings.
+    tc, tp = tenant_sql_clause("pp")
     r = await db.execute(
         text(
-            """SELECT pp.*, pp.plan_number as code,
+            f"""SELECT pp.*, pp.plan_number as code,
                COALESCE(step_counts.cnt, 0) as steps_count,
                COALESCE(
                    (SELECT SUM(COALESCE(setup_time_min, 0) + COALESCE(run_time_min, 0))
@@ -166,9 +185,10 @@ async def list_process_plans(
                 SELECT process_plan_id, COUNT(*) as cnt
                 FROM process_plan_steps GROUP BY process_plan_id
             ) step_counts ON pp.id = step_counts.process_plan_id
+            WHERE 1=1 {tc}
             ORDER BY pp.id DESC LIMIT :l OFFSET :s"""
         ),
-        {"l": limit, "s": skip},
+        {"l": limit, "s": skip, **tp},
     )
     return [dict(row) for row in r.mappings().all()]
 
@@ -183,7 +203,10 @@ async def create_process_plan(
     num = f"PP-{count + 1:04d}"
     await db.execute(
         text(
-            "INSERT INTO process_plans (plan_number, name, description, part_family, is_template, created_by) VALUES (:pn, :n, :d, :pf, :it, :u)"
+            # tenant-insert-valuation: raw INSERT bypasses the ORM before_insert
+            # listener that stamps tenantId, so set it explicitly (user.tenantId,
+            # not context, so superusers still get a real owning tenant).
+            'INSERT INTO process_plans (plan_number, name, description, part_family, is_template, created_by, "tenantId") VALUES (:pn, :n, :d, :pf, :it, :u, :tid)'
         ),
         {
             "pn": num,
@@ -192,6 +215,7 @@ async def create_process_plan(
             "pf": body.part_family,
             "it": body.is_template,
             "u": user.id,
+            "tid": user.tenantId,
         },
     )
     await db.commit()
@@ -204,8 +228,15 @@ async def get_process_plan(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: scope the process_plans lookup by tenant.
+    tc, tp = tenant_sql_clause()
     hdr = (
-        (await db.execute(text("SELECT * FROM process_plans WHERE id = :id"), {"id": plan_id}))
+        (
+            await db.execute(
+                text(f"SELECT * FROM process_plans WHERE id = :id {tc}"),
+                {"id": plan_id, **tp},
+            )
+        )
         .mappings()
         .first()
     )
@@ -227,7 +258,10 @@ async def add_process_plan_step(
 ):
     await db.execute(
         text(
-            "INSERT INTO process_plan_steps (process_plan_id, step_number, step_name, description, work_center, setup_time_min, run_time_min, inspection_required) VALUES (:pid, :sn, :name, :d, :wc, :st, :rt, :ir)"
+            # tenant-insert-valuation: raw INSERT bypasses the ORM before_insert
+            # listener that stamps tenantId, so set it explicitly (user.tenantId,
+            # not context, so superusers still get a real owning tenant).
+            'INSERT INTO process_plan_steps (process_plan_id, step_number, step_name, description, work_center, setup_time_min, run_time_min, inspection_required, "tenantId") VALUES (:pid, :sn, :name, :d, :wc, :st, :rt, :ir, :tid)'
         ),
         {
             "pid": plan_id,
@@ -238,6 +272,7 @@ async def add_process_plan_step(
             "st": body.setup_time_min,
             "rt": body.run_time_min,
             "ir": body.inspection_required,
+            "tid": user.tenantId,
         },
     )
     await db.commit()

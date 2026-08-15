@@ -56,8 +56,22 @@ def upgrade() -> None:
     )
 
     op.execute("ALTER TABLE po_headers ADD COLUMN IF NOT EXISTS vendor_id INTEGER")
+    # Finding 1: Postgres has no `ADD CONSTRAINT IF NOT EXISTS` - that syntax is
+    # invalid and aborts the whole migration transaction. Fresh installs use
+    # create_all (this migration only runs on upgrade paths against DBs that
+    # predate it), but any such DB must be able to apply this without erroring,
+    # including on a second/rerun where the constraint already exists. Guard
+    # with a DO block that swallows only the expected duplicate_object error.
     op.execute(
-        "ALTER TABLE po_headers ADD CONSTRAINT IF NOT EXISTS fk_po_headers_vendor FOREIGN KEY (vendor_id) REFERENCES vendors(id)"
+        """
+        DO $$
+        BEGIN
+            ALTER TABLE po_headers ADD CONSTRAINT fk_po_headers_vendor
+                FOREIGN KEY (vendor_id) REFERENCES vendors(id);
+        EXCEPTION
+            WHEN duplicate_object THEN NULL;
+        END $$;
+        """
     )
     op.create_index("idx_po_headers_vendor_id", "po_headers", ["vendor_id"])
 

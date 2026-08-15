@@ -88,9 +88,8 @@ class ReachObligation(Base, TenantAwareMixin):
     article_part_id = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True)  # offending leaf article
     substance_id = Column(Integer, ForeignKey("substances.id", ondelete="CASCADE"), nullable=False, index=True)
     regulation_version_id = Column(
-        Integer, ForeignKey("regulation_versions.id", ondelete="CASCADE"), nullable=False
-    )
-    bom_id = Column(Integer, ForeignKey("boms.id", ondelete="CASCADE"))  # nullable context
+        Integer, ForeignKey("regulation_versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    bom_id = Column(Integer, ForeignKey("boms.id", ondelete="CASCADE"), index=True)  # nullable context
     concentration_ppm = Column(Numeric(12, 4))
     scip_ref = Column(String)
 

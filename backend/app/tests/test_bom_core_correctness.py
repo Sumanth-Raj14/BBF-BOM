@@ -7,13 +7,13 @@ R2: quantity_rollup / cost_rollup were single-level flat sums (hardcoded "levels
     cost = unit_cost * line_qty) instead of multiplying quantity DOWN the assembly tree.
 """
 
+import pytest
+
 from app.core.tenant_context import TenantContext
 from app.models.bom import BOM, BOMItem
 from app.models.part import Part
 from app.models.tenant import Tenant
 from app.services import bom_service
-
-import pytest
 
 
 async def _make_part(db_session, tenant_id, pn, name="Part", category="Electrical", cost=0.0):

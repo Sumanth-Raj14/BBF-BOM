@@ -206,3 +206,30 @@ export const ZohoBooksScreen = createLazyScreen(function () {
 export const CatalogsScreen = createLazyScreen(function () {
   return import("./screens/CatalogsScreen.jsx");
 }, "CatalogsScreen");
+
+// Regulated features — serial/lot genealogy (GET /traceability/*).
+export const TraceabilityScreen = createLazyScreen(function () {
+  return import("./screens/TraceabilityScreen.jsx");
+}, "TraceabilityScreen");
+// Regulated features — deviation / waiver requests (/deviations).
+export const DeviationsScreen = createLazyScreen(function () {
+  return import("./screens/DeviationsScreen.jsx");
+}, "DeviationsScreen");
+// Requirements management + part traceability + coverage (/requirements).
+export const RequirementsScreen = createLazyScreen(function () {
+  return import("./screens/RequirementsScreen.jsx");
+}, "RequirementsScreen");
+// Configurable BOM variants (/bom/variants).
+export const BomVariantsScreen = createLazyScreen(function () {
+  return import("./screens/BomVariantsScreen.jsx");
+}, "BomVariantsScreen");
+// xBOM: BOM type filter + EBOM -> MBOM derivation (/mbom).
+export const MbomScreen = createLazyScreen(function () {
+  return import("./screens/MbomScreen.jsx");
+}, "MbomScreen");
+
+// CAD connectors — Onshape/Fusion/Altium connections, test/documents/import,
+// plus the credential-free Altium file upload (/cad-connectors).
+export const CadConnectorsScreen = createLazyScreen(function () {
+  return import("./screens/CadConnectorsScreen.jsx");
+}, "CadConnectorsScreen");

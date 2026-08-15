@@ -45,7 +45,16 @@ async def create_api_key(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    raw_key = f"bkb_{secrets.token_urlsafe(32)}"
+    # CLUSTER api-key-security finding 2: every key used to get the literal
+    # prefix "bkb" -- the auth lookups (here in list/rotate/revoke and in
+    # core/deps.py's _authenticate_by_api_key) do
+    # `WHERE key_prefix == ...` then `scalar_one_or_none()`, which raises
+    # MultipleResultsFound the moment a second active key shares a prefix.
+    # Fold unique random hex into the prefix itself (hex has no "_", so
+    # `raw_key.split("_")[0]` -- used everywhere prefixes are derived --
+    # still yields the whole prefix unchanged) so lookups stay O(1)-indexed
+    # and unique per key.
+    raw_key = f"bkb{secrets.token_hex(6)}_{secrets.token_urlsafe(32)}"
     key_prefix = raw_key.split("_")[0]
     key_hash = get_password_hash(raw_key)
 
@@ -92,7 +101,8 @@ async def rotate_api_key(
     if not existing.mappings().first():
         raise HTTPException(404, "API key not found")
 
-    raw_key = f"bkb_{secrets.token_urlsafe(32)}"
+    # See create_api_key above: unique-per-key prefix (finding 2).
+    raw_key = f"bkb{secrets.token_hex(6)}_{secrets.token_urlsafe(32)}"
     key_prefix = raw_key.split("_")[0]
     key_hash = get_password_hash(raw_key)
 

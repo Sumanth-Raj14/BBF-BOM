@@ -210,15 +210,21 @@ async def executive_dashboard(db: AsyncSession, user: User) -> dict:
     wo_count = await _count(f"SELECT COUNT(*) FROM work_orders WHERE {tf}")
     ncr_count = await _count(f"SELECT COUNT(*) FROM ncr_reports WHERE {tf}")
 
+    # TO_CHAR(...::date, 'YYYY-MM') is Postgres-only (SQLite has neither the
+    # "::" cast nor TO_CHAR). "poDate" is stored as an ISO "YYYY-MM-DD"
+    # string, so bucket by its first 7 characters in Python instead.
     r_spend = await db.execute(
-        text(f"""
-        SELECT TO_CHAR("poDate"::date, 'YYYY-MM') as month, SUM("poTotal") as spend
-        FROM "po_headers" WHERE {tf} AND "poDate" IS NOT NULL
-        GROUP BY month ORDER BY month DESC LIMIT 12
-    """),
+        text(f'SELECT "poDate", "poTotal" FROM "po_headers" WHERE {tf} AND "poDate" IS NOT NULL'),
         tf_params,
     )
-    monthly_spend = [dict(row) for row in r_spend.mappings().all()]
+    spend_by_month: dict[str, float] = {}
+    for po_date, po_total in r_spend.fetchall():
+        month = str(po_date)[:7]
+        spend_by_month[month] = spend_by_month.get(month, 0.0) + float(po_total or 0)
+    monthly_spend = [
+        {"month": month, "spend": spend}
+        for month, spend in sorted(spend_by_month.items(), reverse=True)[:12]
+    ]
 
     r_status = await db.execute(
         text(f"""

@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,18 +69,21 @@ async def analytics_dashboard(
         for row in vendor_breakdown.fetchall()
     ]
 
-    monthly_spend = await db.execute(
-        text(f"""
-                SELECT TO_CHAR("poDate"::date, 'YYYY-MM') as month, COALESCE(SUM("poTotal"), 0) as spend
-                FROM "po_headers"
-                WHERE {tf} AND "poDate" IS NOT NULL
-                GROUP BY TO_CHAR("poDate"::date, 'YYYY-MM')
-                ORDER BY month DESC LIMIT 12
-            """),
+    # TO_CHAR(...::date, 'YYYY-MM') is Postgres-only (SQLite has neither the
+    # "::" cast nor TO_CHAR). "poDate" is stored as an ISO "YYYY-MM-DD" string,
+    # so bucket by its first 7 characters in Python instead — portable and
+    # dialect-free.
+    po_dates = await db.execute(
+        text(f'SELECT "poDate", "poTotal" FROM "po_headers" WHERE {tf} AND "poDate" IS NOT NULL'),
         tf_params,
     )
+    spend_by_month: dict[str, float] = {}
+    for po_date, po_total in po_dates.fetchall():
+        month = str(po_date)[:7]
+        spend_by_month[month] = spend_by_month.get(month, 0.0) + float(po_total or 0)
     result["monthlySpend"] = [
-        {"month": row[0], "spend": float(row[1])} for row in monthly_spend.fetchall()
+        {"month": month, "spend": spend}
+        for month, spend in sorted(spend_by_month.items(), reverse=True)[:12]
     ]
 
     recent_pos = await db.execute(
@@ -132,31 +137,46 @@ async def analytics_trends(
     current_user: User = Depends(get_current_user),
 ):
     tf, tf_params = _tenant_filter_params(current_user)
-    interval_map = {
-        "1mo": "1 month",
-        "3mo": "3 months",
-        "6mo": "6 months",
-        "1yr": "1 year",
-    }
-    interval = interval_map.get(range_, "6 months")
+    # PORTABILITY: this used TO_CHAR(...) and NOW() - INTERVAL '<n> months',
+    # all of which are Postgres-only, so /analytics/trends 500'd outright on
+    # SQLite. That matters because this product is local-first and a SQLite
+    # install is a legitimate small deployment. Compute the cutoff in Python,
+    # bind it as a parameter, and bucket by month in Python — identical results
+    # on both engines, and it also removes an f-string interpolation into SQL.
+    days_map = {"1mo": 30, "3mo": 91, "6mo": 182, "1yr": 365}
+    cutoff = datetime.now(UTC) - timedelta(days=days_map.get(range_, 182))
 
-    cost_trend = await db.execute(
+    rows = await db.execute(
         text(f"""
-                SELECT TO_CHAR("createdAt", 'YYYY-MM') as month,
-                       COALESCE(AVG(cost), 0) as avg_cost,
-                       COUNT(*) as part_count
+                SELECT "createdAt" AS created_at, cost
                 FROM parts
-                WHERE {tf} AND "createdAt" >= NOW() - INTERVAL '{interval}'
-                GROUP BY TO_CHAR("createdAt", 'YYYY-MM')
-                ORDER BY month
+                WHERE {tf} AND "createdAt" >= :cutoff
             """),
-        tf_params,
+        {**tf_params, "cutoff": cutoff},
     )
+
+    buckets: dict[str, list[float]] = {}
+    for created_at, cost in rows.fetchall():
+        if created_at is None:
+            continue
+        # createdAt is a datetime on Postgres and may come back as an ISO
+        # string on SQLite; handle both rather than assuming one driver.
+        month = (
+            created_at.strftime("%Y-%m")
+            if hasattr(created_at, "strftime")
+            else str(created_at)[:7]
+        )
+        buckets.setdefault(month, []).append(float(cost) if cost is not None else 0.0)
+
     return {
         "range": range_,
         "data": [
-            {"month": row[0], "avgCost": float(row[1]), "partCount": row[2]}
-            for row in cost_trend.fetchall()
+            {
+                "month": month,
+                "avgCost": (sum(costs) / len(costs)) if costs else 0.0,
+                "partCount": len(costs),
+            }
+            for month, costs in sorted(buckets.items())
         ],
     }
 
@@ -199,24 +219,40 @@ async def analytics_inflation(
     guessed at.
     """
     tf, tf_params = _tenant_filter_params(current_user, "ph")
+    # PORTABILITY: this grouped by TO_CHAR(..., 'YYYY-MM'), which is
+    # Postgres-only and made this endpoint 500 on SQLite. The per-category
+    # trend maths already happened in Python below, so the month bucketing and
+    # averaging move there too — same results on both engines. (Same fix as
+    # /analytics/trends; this product is local-first and SQLite is a legitimate
+    # small deployment.)
     rows = await db.execute(
         text(f"""
             SELECT COALESCE(p.category, 'Other') as category,
-                   TO_CHAR(COALESCE(ph."effectiveDate", ph."recordedAt"), 'YYYY-MM') as month,
-                   AVG(ph.price) as avg_price
+                   COALESCE(ph."effectiveDate", ph."recordedAt") as dated,
+                   ph.price as price
             FROM price_history ph
             JOIN parts p ON p.id = ph."partId"
             WHERE {tf}
-            GROUP BY COALESCE(p.category, 'Other'),
-                     TO_CHAR(COALESCE(ph."effectiveDate", ph."recordedAt"), 'YYYY-MM')
-            ORDER BY category, month
         """),
         tf_params,
     )
 
-    by_category: dict[str, list[dict]] = {}
-    for row in rows.fetchall():
-        by_category.setdefault(row[0], []).append({"month": row[1], "avgPrice": float(row[2])})
+    # category -> month -> list of prices
+    grouped: dict[str, dict[str, list[float]]] = {}
+    for category, dated, price in rows.fetchall():
+        if dated is None or price is None:
+            continue
+        # datetime on Postgres, ISO string on SQLite — handle both.
+        month = dated.strftime("%Y-%m") if hasattr(dated, "strftime") else str(dated)[:7]
+        grouped.setdefault(category, {}).setdefault(month, []).append(float(price))
+
+    by_category: dict[str, list[dict]] = {
+        category: [
+            {"month": month, "avgPrice": sum(prices) / len(prices)}
+            for month, prices in sorted(months.items())
+        ]
+        for category, months in sorted(grouped.items())
+    }
 
     categories = []
     for category, points in by_category.items():
@@ -243,7 +279,39 @@ async def vendor_scorecards(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    Vendor scorecards for the Analytics screen.
+
+    Spend figures come from po_headers. On-time and quality come from the
+    part_vendors links (app/models/part_vendor.py: onTimeRate 0-100,
+    qualityScore 0-5) averaged over the vendor's parts - the same stored
+    performance data /analytics/at-risk-parts already treats as authoritative.
+    A vendor with no part links has no measurement, so those fields are null
+    rather than a plausible-looking constant.
+
+    responseTime has no source in this schema: nothing records a vendor
+    enquiry/response timestamp pair. supplier_scorecards.avgResponseTimeHours
+    exists but belongs to the periodic-scorecard subsystem and is not populated
+    from anything, so it is reported as null.
+    """
     tf, tf_params = _tenant_filter_params(current_user, "v")
+
+    # Queried separately: joining part_vendors into the PO aggregate below
+    # would fan out the rows and inflate totalSpend / avgPOValue.
+    perf_rows = await db.execute(
+        text(f"""
+            SELECT v.name,
+                   AVG(pv."onTimeRate") as on_time_rate,
+                   AVG(pv."qualityScore") as quality_score
+            FROM part_vendors pv
+            JOIN vendors v ON v.id = pv."vendorId"
+            WHERE {tf}
+            GROUP BY v.name
+        """),
+        tf_params,
+    )
+    perf = {row[0]: (row[1], row[2]) for row in perf_rows.fetchall()}
+
     result = await db.execute(
         text(f"""
             SELECT
@@ -262,6 +330,7 @@ async def vendor_scorecards(
     )
     scorecards = []
     for row in result.fetchall():
+        on_time, quality = perf.get(row[0], (None, None))
         scorecards.append(
             {
                 "vendor": row[0],
@@ -269,9 +338,9 @@ async def vendor_scorecards(
                 "poCount": row[2],
                 "totalSpend": float(row[3] or 0),
                 "avgPOValue": float(row[4] or 0),
-                "onTimeRate": 94.5,
-                "qualityScore": 4.2,
-                "responseTime": "2.3 days",
+                "onTimeRate": float(on_time) if on_time is not None else None,
+                "qualityScore": float(quality) if quality is not None else None,
+                "responseTime": None,
             }
         )
     return scorecards

@@ -18,7 +18,6 @@ Create Date: 2026-07-17
 
 """
 
-import contextlib
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -74,25 +73,30 @@ NEW_TYPE = sa.Numeric(18, 4)
 OLD_TYPE = sa.Float()
 
 
+# Finding 2: contextlib.suppress(Exception) around each op.alter_column, all inside
+# one Postgres transaction, meant the FIRST failing alter aborted the transaction
+# (Postgres marks it "aborted" until ROLLBACK) and every alter after that was then
+# silently swallowed too - the migration reported success while changing nothing
+# past the first failure. Give each column its own SAVEPOINT so a failure on one
+# column only rolls back that column's statement, not the whole migration.
+def _alter_column_guarded(table: str, col: str, existing_type, type_) -> None:
+    savepoint = f"sp_{table}_{col}"
+    op.execute(f"SAVEPOINT {savepoint}")
+    try:
+        op.alter_column(table, col, existing_type=existing_type, type_=type_)
+    except Exception:
+        op.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+    else:
+        op.execute(f"RELEASE SAVEPOINT {savepoint}")
+
+
 def upgrade() -> None:
     for table, columns in _MONEY_COLUMNS.items():
         for col in columns:
-            with contextlib.suppress(Exception):
-                op.alter_column(
-                    table,
-                    col,
-                    existing_type=OLD_TYPE,
-                    type_=NEW_TYPE,
-                )
+            _alter_column_guarded(table, col, OLD_TYPE, NEW_TYPE)
 
 
 def downgrade() -> None:
     for table, columns in reversed(list(_MONEY_COLUMNS.items())):
         for col in columns:
-            with contextlib.suppress(Exception):
-                op.alter_column(
-                    table,
-                    col,
-                    existing_type=NEW_TYPE,
-                    type_=OLD_TYPE,
-                )
+            _alter_column_guarded(table, col, NEW_TYPE, OLD_TYPE)

@@ -5,17 +5,42 @@ import { toast } from "../../utils/toast";
 import { Icon, api, escapeHtml, openPrintWindow } from "../../globals";
 import { Button, EmptyState, Menu, ScreenHeader } from "../ui";
 // ============ DIFF ============
-export default function DiffScreen({ data, openModal }) {
+export default function DiffScreen({ data, openModal, bomId }) {
   const [swapped, setSwapped] = React.useState(false);
   const [versionA, setVersionA] = React.useState("current");
-  const [bom1Id] = React.useState(1);
-  const [bom2Id] = React.useState(2);
+  // The BOM actually open in the app right now — never a hardcoded id.
+  // A second BOM to diff against (if any) is discovered below via
+  // bomEnterprise.list(), since this app tracks one active BOM at a time
+  // and has no picker for "which other BOM". Comparing against nothing
+  // real must not fire a request that 404s (see loading effect).
+  const bom1Id = bomId || 1;
+  const [bom2Id, setBom2Id] = React.useState(null);
+  // Distinguishes "haven't checked yet" from "checked, no other BOM exists" —
+  // only the latter should force the honest empty state instead of falling
+  // back to demo data below.
+  const [bom2Checked, setBom2Checked] = React.useState(false);
   const [apiDiff, setApiDiff] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
   const [snapshots, setSnapshots] = React.useState([]);
 
   React.useEffect(() => {
-    if (api && api.bomEnterprise) {
+    if (!api || !api.bomEnterprise || !api.bomEnterprise.list) {
+      setBom2Checked(true);
+      return;
+    }
+    api.bomEnterprise
+      .list()
+      .then((result) => {
+        const list = result?.items || (Array.isArray(result) ? result : []);
+        const other = list.find((b) => b.id !== bom1Id);
+        setBom2Id(other ? other.id : null);
+      })
+      .catch(() => setBom2Id(null))
+      .finally(() => setBom2Checked(true));
+  }, [bom1Id]);
+
+  React.useEffect(() => {
+    if (api && api.bomEnterprise && bom2Id != null) {
       setLoading(true);
       api.bomEnterprise
         .compare(bom1Id, bom2Id)
@@ -67,7 +92,7 @@ export default function DiffScreen({ data, openModal }) {
   React.useEffect(() => {
     if (api && api.bomEnterprise && api.bomEnterprise.snapshots) {
       api.bomEnterprise.snapshots
-        .list(bom2Id)
+        .list(bom1Id)
         .then((list) => setSnapshots(Array.isArray(list) ? list : []))
         .catch((err) => {
           console.warn(
@@ -77,9 +102,12 @@ export default function DiffScreen({ data, openModal }) {
           setSnapshots([]);
         });
     }
-  }, [bom2Id]);
+  }, [bom1Id]);
 
-  const currentDiff = apiDiff || data.diff;
+  // No second BOM to diff against once we've actually checked — an honest
+  // empty state, not a fabricated demo diff and not a 404 request.
+  const noComparison = bom2Checked && bom2Id == null;
+  const currentDiff = noComparison ? null : apiDiff || data.diff;
   const selectedSnapshot =
     versionA !== "current"
       ? snapshots.find((s) => String(s.id) === versionA)
@@ -209,7 +237,9 @@ export default function DiffScreen({ data, openModal }) {
                   {selectedSnapshot
                     ? selectedSnapshot.version ||
                       selectedSnapshot.snapshot_name
-                    : `${a.ver} ↔ ${b.ver}`}{" "}
+                    : a && b
+                      ? `${a.ver} ↔ ${b.ver}`
+                      : __t("diff.noComparison") || "No comparison"}{" "}
                   <Icon.ChevronDown size={10} />
                 </Button>
               }
@@ -247,14 +277,19 @@ export default function DiffScreen({ data, openModal }) {
       {!baseDiff ? (
         <EmptyState
           icon={<Icon.Diff size={22} />}
-          title={__t("diff.snapshotTitle") || "Archived snapshot"}
+          title={
+            selectedSnapshot
+              ? __t("diff.snapshotTitle") || "Archived snapshot"
+              : __t("diff.noComparisonTitle") || "Nothing to compare yet"
+          }
           message={
-            selectedSnapshot?.change_description ||
-            (__t("diff.snapshotNoDetail") ||
-              "This is a saved snapshot. Line-by-line comparison against archived snapshots isn't available yet — showing snapshot details only.") +
-              (selectedSnapshot
-                ? ` (${selectedSnapshot.item_count ?? 0} ${__t("diff.items") || "items"})`
-                : "")
+            selectedSnapshot
+              ? (selectedSnapshot.change_description ||
+                  __t("diff.snapshotNoDetail") ||
+                  "This is a saved snapshot. Line-by-line comparison against archived snapshots isn't available yet — showing snapshot details only.") +
+                ` (${selectedSnapshot.item_count ?? 0} ${__t("diff.items") || "items"})`
+              : __t("diff.noComparisonMessage") ||
+                "There's only one revision of this BOM right now, so there's nothing to diff it against yet. Save a snapshot or create another BOM to compare."
           }
         />
       ) : (
@@ -371,4 +406,5 @@ export default function DiffScreen({ data, openModal }) {
 DiffScreen.propTypes = {
   data: PropTypes.object,
   openModal: PropTypes.func,
+  bomId: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
 };

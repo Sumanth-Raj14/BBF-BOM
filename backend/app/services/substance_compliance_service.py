@@ -816,7 +816,9 @@ async def _get_bom_or_404(db: AsyncSession, bom_id: int) -> BOM:
 async def evaluate_bom_compliance(
     db: AsyncSession, bom_id: int, *, persist: bool = True
 ) -> dict:
-    bom = await _get_bom_or_404(db, bom_id)
+    # Called for the 404/tenant guard, not the value — it is what stops this
+    # evaluating a BOM belonging to another tenant. Do not drop it.
+    await _get_bom_or_404(db, bom_id)
     tid = get_tenant_id()
 
     items_stmt = select(BOMItem).where(BOMItem.bom_id == bom_id)

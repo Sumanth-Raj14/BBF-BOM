@@ -11,6 +11,7 @@ from app.core.deps import get_current_superuser, get_current_user
 from app.db.session import get_db
 from app.integrations.crypto import encrypt_secret
 from app.integrations.events import emit_integration_event
+
 # _build_client/_mark_health/_sanitize_error are the same helpers the outbox
 # worker uses to build provider clients, record connection health, and redact
 # secrets/URLs from error text — reused here so the live "test connection"

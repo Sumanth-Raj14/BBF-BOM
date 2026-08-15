@@ -56,8 +56,8 @@ Blackbox BOM is a **local-first, multi-tenant BOM (Bill of Materials) management
   quirks in the troubleshooting section). The API client is `frontend/api.js`; it talks to the
   backend **same-origin** at `/api/v1` (`frontend/src/config.js`).
 - **Database** — **PostgreSQL** with async SQLAlchemy 2.0 and Alembic migrations
-  (47 migration files, single head `047_solidworks_integration`). Every business table is
-  tenant-scoped via a `tenantId` column.
+  (50 migration files, single head `050_rfq_headers_created_by_nullable`). Every business table
+  is tenant-scoped via a `tenantId` column.
 - **Redis** — **optional**. Rate limiting, token blacklists, and backup locks use Redis when
   available and fall back to in-memory implementations when not (`backend/app/core/rate_limit.py`).
   You do **not** need Redis for a local manual setup.
@@ -279,10 +279,21 @@ S3_SECRET_KEY=<generated>
 **What these secrets actually do (and why you can't skip them):**
 
 - `SECRET_KEY` — signs CSRF cookies and other HMAC material. Config validation
-  (`backend/app/core/config.py`) enforces **Shannon entropy ≥ 80 bits** and rejects
-  known-weak values; in `ENVIRONMENT=production` a missing/weak secret is a **hard startup
-  failure**. In development you still need a real random value.
-- `ENCRYPTION_KEY` — on first run the backend **auto-generates an RSA-4096 keypair** for
+  (`backend/app/core/config.py`, `_estimate_entropy`/`_is_weak_secret`) enforces **Shannon
+  entropy ≥ 80 bits** and rejects a list of known-weak values (`"changeme"`, `"secret"`, etc.)
+  — and unlike the other secrets below, **this check is a hard `ValueError` at startup in every
+  environment**, not just production, if you set a weak value. If you leave `SECRET_KEY` **unset**
+  in development (and you're not running in a container), the backend will auto-generate one and
+  persist it to `backend/.secret_key` with a warning — convenient for a quick local try, but do
+  this deliberately: that file changing or disappearing invalidates every issued JWT. Setting it
+  yourself in `.env` is the recommended path.
+- `ENCRYPTION_KEY`, `S3_SECRET_KEY`, `POSTGRES_PASSWORD` — these three are required to be
+  **present** (empty = hard failure, any environment), but a weak/low-entropy *value* is only a
+  **logged warning** in `development`/`staging`; it becomes a hard `ValueError` only when
+  `ENVIRONMENT=production`. Don't rely on that leniency — generate real random values for all of
+  them regardless (see below), since weak values are a real risk even in dev if your `.env` ever
+  leaks.
+- `ENCRYPTION_KEY` specifically — on first run the backend **auto-generates an RSA-4096 keypair** for
   signing JWTs (RS256) and encrypts the private key PEM with a passphrase derived from
   `ENCRYPTION_KEY` (`backend/app/core/security.py`). **Consequence:** if you change
   `ENCRYPTION_KEY` after first run, the backend can no longer decrypt its own JWT signing key.
@@ -702,7 +713,10 @@ every empty secret in `.env` (see B2) or use `install.ps1` which generates them.
 **Backend exits at startup complaining about `SECRET_KEY` / weak secret / entropy**
 Config validation requires ≥ 80 bits of Shannon entropy and rejects known-weak values.
 Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"` — don't hand-type
-a password. In `ENVIRONMENT=production` this is a hard failure on purpose.
+a password. `SECRET_KEY` enforces this in **every** environment; `ENCRYPTION_KEY`,
+`S3_SECRET_KEY`, and `POSTGRES_PASSWORD` only hard-fail on a weak value in
+`ENVIRONMENT=production` (they warn-and-continue in development) — but all four should still be
+real random values, not just the one that's enforced.
 
 **`alembic upgrade head` fails around migration 004 on a fresh database**
 Expected — the chain can't build from scratch (see A5). Never run raw Alembic on a fresh DB;
@@ -856,8 +870,10 @@ Service worker. Hard refresh (`Ctrl+Shift+R`) or try an incognito window; worst 
 the SW and clear site data (see [troubleshooting](#service-worker--stale-bundles)).
 
 **Q: Are the API docs available?**
-The API is mounted at `/api/v1` and `GET /health` is the quickest liveness probe. `/metrics`
-(Prometheus, auth-gated) and `/health/detailed` also exist under the v1 router.
+The API is mounted at `/api/v1` and `GET /health` is the quickest liveness probe (no login
+needed). `GET /api/v1/health/detailed` also exists but **requires a logged-in user**
+(`Depends(get_current_user)`, `backend/app/api/api_v1.py`) — hitting it anonymously with `curl`
+returns 401, that's expected, not a bug. `/metrics` (Prometheus) is also auth-gated.
 
 **Q: Why does the dashboard show budgets / uptime / activity that I never entered?**
 Those specific widgets are **mock** — fabricated client-side demo data (see

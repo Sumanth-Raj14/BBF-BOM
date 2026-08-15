@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import cache_get, cache_set
 from app.core.pagination import PageParams, paginate
 from app.models.part import Part
+from app.services import webhook_service
 
 
 async def list_parts(
@@ -77,6 +78,9 @@ async def create_part(db: AsyncSession, data: dict, tenant_id: int) -> Part:
     db.add(db_part)
     await db.commit()
     await db.refresh(db_part)
+    await webhook_service.emit_event(
+        db, "part.created", {"part_id": db_part.id, "pn": db_part.pn}, db_part.tenantId
+    )
     return db_part
 
 
@@ -93,6 +97,9 @@ async def update_part(db: AsyncSession, part_id: int, data: dict) -> Part:
             setattr(db_part, field, value)
     await db.commit()
     await db.refresh(db_part)
+    await webhook_service.emit_event(
+        db, "part.updated", {"part_id": db_part.id, "pn": db_part.pn}, db_part.tenantId
+    )
     return db_part
 
 
@@ -104,14 +111,26 @@ async def delete_part(db: AsyncSession, part_id: int) -> None:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Part with ID {part_id} not found",
         )
+    part_tenant_id, pn = db_part.tenantId, db_part.pn  # read before the row goes away
     await db.delete(db_part)
     await db.commit()
+    await webhook_service.emit_event(
+        db, "part.deleted", {"part_id": part_id, "pn": pn}, part_tenant_id
+    )
 
 
 async def bulk_delete_parts(db: AsyncSession, part_ids: list[int]) -> int:
     from sqlalchemy import delete
 
-    result = await db.execute(delete(Part).where(Part.id.in_(part_ids)))
+    from app.core.tenant_context import get_tenant_id
+
+    # tenant-security: Core delete() bypasses the ORM before_flush tenant
+    # guard in tenant_events.py, so it must scope by tenant explicitly here.
+    stmt = delete(Part).where(Part.id.in_(part_ids))
+    tenant_id = get_tenant_id()
+    if tenant_id is not None:
+        stmt = stmt.where(Part.tenantId == tenant_id)
+    result = await db.execute(stmt)
     await db.commit()
     return result.rowcount
 

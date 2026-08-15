@@ -1,14 +1,16 @@
 import PropTypes from "prop-types";
+import { AppContext } from "../../context/AppCtx.jsx";
 import { storage } from "../../utils/storage.js";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Icon, api, useAppStore } from "../../globals";
+import { Icon, api } from "../../globals";
 import {
   Modal,
   Button,
   Field,
   Input,
+  Select,
   Tabs,
   TabPanel,
   Badge,
@@ -24,7 +26,95 @@ function BOMTemplatesModal({ open, onClose }) {
   const [templates, setTemplates] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
-  const ctx = useAppStore();
+
+  // ── Effectivity tab (migration 053_bom_effectivity) ──
+  // Operates on the real `bom_items` rows for a saved (server-side) template,
+  // independent of the save/load tabs above which push/pull a `bomData` JSON
+  // blob and never touch those rows.
+  const [effTemplateId, setEffTemplateId] = React.useState("");
+  const [effItems, setEffItems] = React.useState([]);
+  const [effLoading, setEffLoading] = React.useState(false);
+  const [effAsOfDate, setEffAsOfDate] = React.useState(
+    new Date().toISOString().slice(0, 10),
+  );
+  const [effResolvedIds, setEffResolvedIds] = React.useState(null);
+  const [effNewPartId, setEffNewPartId] = React.useState("");
+  const [effNewQty, setEffNewQty] = React.useState("1");
+
+  const serverTemplates = templates.filter((t) => Number.isInteger(t.id));
+
+  const loadEffItems = async (templateId) => {
+    if (!templateId) {
+      setEffItems([]);
+      return;
+    }
+    setEffLoading(true);
+    setEffResolvedIds(null);
+    try {
+      const data = await api.bomItems.list({ bomTemplateId: templateId });
+      setEffItems(data?.items || []);
+    } catch (e) {
+      toast(e.message || "Failed to load BOM lines", { kind: "warn" });
+      setEffItems([]);
+    } finally {
+      setEffLoading(false);
+    }
+  };
+
+  const patchEffField = (itemId, field, value) => {
+    setEffItems((prev) =>
+      prev.map((it) => (it.id === itemId ? { ...it, [field]: value } : it)),
+    );
+  };
+
+  const saveEffItem = async (item) => {
+    try {
+      await api.bomItems.update(item.id, {
+        effectiveFrom: item.effectiveFrom || null,
+        effectiveTo: item.effectiveTo || null,
+        effectiveSerialFrom: item.effectiveSerialFrom || null,
+        effectiveSerialTo: item.effectiveSerialTo || null,
+        effectiveLot: item.effectiveLot || null,
+      });
+      toast("Effectivity saved", { kind: "success" });
+      setEffResolvedIds(null);
+    } catch (e) {
+      toast(e.message || "Failed to save effectivity", { kind: "warn" });
+    }
+  };
+
+  const addEffItem = async () => {
+    const partId = parseInt(effNewPartId, 10);
+    if (!effTemplateId || !partId) return;
+    try {
+      await api.bomItems.create({
+        bomTemplateId: effTemplateId,
+        partId,
+        quantity: parseInt(effNewQty, 10) || 1,
+      });
+      setEffNewPartId("");
+      setEffNewQty("1");
+      await loadEffItems(effTemplateId);
+      toast("Line added", { kind: "success" });
+    } catch (e) {
+      toast(e.message || "Failed to add line", { kind: "warn" });
+    }
+  };
+
+  const resolveAsOf = async () => {
+    try {
+      const resolved = await api.bomItems.resolved(effTemplateId, {
+        asOfDate: effAsOfDate,
+      });
+      setEffResolvedIds(new Set((resolved || []).map((r) => r.id)));
+    } catch (e) {
+      toast(e.message || "Failed to resolve BOM", { kind: "warn" });
+    }
+  };
+  // Reads the app context directly. (useAppStore() is now equivalent — the
+  // two context objects were unified in context/appContext.js — but the
+  // explicit import keeps the dependency visible.)
+    const ctx = React.useContext(AppContext);
 
   React.useEffect(() => {
     if (open && ctx?.apiConnected) {
@@ -195,6 +285,7 @@ function BOMTemplatesModal({ open, onClose }) {
       value: "load",
       label: __t("bomTemplates.loadTemplate") || "Load template",
     },
+    { value: "effectivity", label: "Effectivity" },
   ];
 
   return (
@@ -382,6 +473,177 @@ function BOMTemplatesModal({ open, onClose }) {
               </li>
             ))}
           </ul>
+        )}
+      </TabPanel>
+
+      <TabPanel id={TABS_ID} value="effectivity" active={tab === "effectivity"}>
+        {!ctx?.apiConnected ? (
+          <EmptyState
+            icon={<span aria-hidden="true">∅</span>}
+            title="Connect to the server to manage line effectivity"
+          />
+        ) : serverTemplates.length === 0 ? (
+          <EmptyState
+            icon={<span aria-hidden="true">∅</span>}
+            title="Save a template to the server first, then manage its line effectivity here"
+          />
+        ) : (
+          <div className="flex flex-col gap-12">
+            <Field label="Template" htmlFor="eff-template">
+              <Select
+                id="eff-template"
+                value={effTemplateId}
+                onChange={(e) => {
+                  const val = e.target.value ? parseInt(e.target.value, 10) : "";
+                  setEffTemplateId(val);
+                  loadEffItems(val);
+                }}
+              >
+                <option value="">Select a template…</option>
+                {serverTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            {effTemplateId !== "" && (
+              <>
+                <div className="flex items-end gap-8">
+                  <Field label="As of date" htmlFor="eff-asof">
+                    <Input
+                      id="eff-asof"
+                      type="date"
+                      value={effAsOfDate}
+                      onChange={(e) => setEffAsOfDate(e.target.value)}
+                    />
+                  </Field>
+                  <Button variant="secondary" size="sm" onClick={resolveAsOf}>
+                    Resolve
+                  </Button>
+                  {effResolvedIds && (
+                    <Badge tone="neutral">
+                      {effResolvedIds.size} / {effItems.length} effective as of {effAsOfDate}
+                    </Badge>
+                  )}
+                </div>
+
+                {effLoading ? (
+                  <Spinner size="sm" label="Loading lines…" />
+                ) : effItems.length === 0 ? (
+                  <EmptyState
+                    icon={<span aria-hidden="true">∅</span>}
+                    title="No lines yet — add one below"
+                  />
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="w-full fs-11">
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: "left" }}>Part ID</th>
+                          <th style={{ textAlign: "left" }}>From</th>
+                          <th style={{ textAlign: "left" }}>To</th>
+                          <th style={{ textAlign: "left" }}>Serial from</th>
+                          <th style={{ textAlign: "left" }}>Serial to</th>
+                          <th style={{ textAlign: "left" }}>Lot</th>
+                          <th />
+                          <th />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {effItems.map((item) => (
+                          <tr key={item.id}>
+                            <td>{item.partId}</td>
+                            <td>
+                              <Input
+                                type="date"
+                                value={item.effectiveFrom || ""}
+                                onChange={(e) =>
+                                  patchEffField(item.id, "effectiveFrom", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td>
+                              <Input
+                                type="date"
+                                value={item.effectiveTo || ""}
+                                onChange={(e) =>
+                                  patchEffField(item.id, "effectiveTo", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td>
+                              <Input
+                                value={item.effectiveSerialFrom || ""}
+                                onChange={(e) =>
+                                  patchEffField(item.id, "effectiveSerialFrom", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td>
+                              <Input
+                                value={item.effectiveSerialTo || ""}
+                                onChange={(e) =>
+                                  patchEffField(item.id, "effectiveSerialTo", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td>
+                              <Input
+                                value={item.effectiveLot || ""}
+                                onChange={(e) =>
+                                  patchEffField(item.id, "effectiveLot", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td>
+                              {effResolvedIds && (
+                                <Badge tone={effResolvedIds.has(item.id) ? "success" : "neutral"}>
+                                  {effResolvedIds.has(item.id) ? "effective" : "not effective"}
+                                </Badge>
+                              )}
+                            </td>
+                            <td>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => saveEffItem(item)}
+                              >
+                                Save
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="flex items-end gap-8">
+                  <Field label="Add line — Part ID" htmlFor="eff-new-part">
+                    <Input
+                      id="eff-new-part"
+                      type="number"
+                      value={effNewPartId}
+                      onChange={(e) => setEffNewPartId(e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Qty" htmlFor="eff-new-qty">
+                    <Input
+                      id="eff-new-qty"
+                      type="number"
+                      value={effNewQty}
+                      onChange={(e) => setEffNewQty(e.target.value)}
+                    />
+                  </Field>
+                  <Button variant="primary" size="sm" onClick={addEffItem}>
+                    <Icon.Plus size={12} /> Add
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
         )}
       </TabPanel>
     </Modal>

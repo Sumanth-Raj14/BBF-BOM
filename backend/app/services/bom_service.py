@@ -24,7 +24,9 @@ from app.models.bom_template import BomTemplate
 from app.models.bom_variant import BomVariant, BomVariantItem
 from app.models.document import Document
 from app.models.enterprise_extensions import CustomAttributeDefinition
+from app.models.mbom import MbomHeader, MbomItem
 from app.models.part import Part
+from app.services import uom_service, webhook_service
 
 # Upload location comes from settings (env-configurable via UPLOAD_DIR), same as
 # documents.py, so a packaged / read-only install can point it at a writable
@@ -51,13 +53,20 @@ def _cache_part(tid: Optional[int], pid: int, pn: str, name: str):
 # ============ Basic CRUD ============
 
 
-async def list_boms(db: AsyncSession, skip: int = 0, limit: int = 100) -> tuple[list[BOM], int]:
+async def list_boms(
+    db: AsyncSession, skip: int = 0, limit: int = 100, bom_type: Optional[str] = None
+) -> tuple[list[BOM], int]:
     tid = get_tenant_id()
     base = select(BOM)
     count_base = select(func.count()).select_from(BOM)
     if tid is not None:
         base = base.where(BOM.tenantId == tid)
         count_base = count_base.where(BOM.tenantId == tid)
+    # xBOM (migration 052): optional EBOM/MBOM/SBOM filter. None (the default)
+    # preserves every existing caller's behavior exactly.
+    if bom_type is not None:
+        base = base.where(BOM.bom_type == bom_type)
+        count_base = count_base.where(BOM.bom_type == bom_type)
     total = (await db.execute(count_base)).scalar() or 0
     result = await db.execute(base.offset(skip).limit(limit).order_by(BOM.id))
     return result.scalars().all(), total
@@ -127,6 +136,89 @@ async def create_bom(db: AsyncSession, data: dict, tenant_id: Optional[int] = No
     await db.commit()
     await db.refresh(bom)
     return bom
+
+
+# ============ xBOM: EBOM -> MBOM derivation ============
+
+
+async def derive_mbom_from_ebom(
+    db: AsyncSession,
+    ebom_id: int,
+    tenant_id: Optional[int] = None,
+    name: Optional[str] = None,
+) -> MbomHeader:
+    """Create a new MBOM (mbom_headers/mbom_items) by copying an existing
+    EBOM's structure — the actual value of xBOM: a manufacturing view that
+    can then diverge from engineering. Read-only against the source: the
+    EBOM header (`boms`) and its lines (`bom_items_master`) are never
+    written to.
+    """
+    tid = tenant_id if tenant_id is not None else get_tenant_id()
+    ebom = await get_bom_or_404(db, ebom_id)
+    if ebom.bom_type != "EBOM":
+        raise HTTPException(
+            status_code=400,
+            detail=f"BOM {ebom_id} is a {ebom.bom_type}, not an EBOM — cannot derive an MBOM from it",
+        )
+
+    items_stmt = select(BOMItem).where(BOMItem.bom_id == ebom_id)
+    if tid is not None:
+        items_stmt = items_stmt.where(BOMItem.tenantId == tid)
+    ebom_items = (await db.execute(items_stmt)).scalars().all()
+
+    # mbom_headers.mbom_number has no DB default — auto-generate a
+    # tenant-scoped number the same way create_bom does for bom_number.
+    count_stmt = select(func.count()).select_from(MbomHeader)
+    if tid is not None:
+        count_stmt = count_stmt.where(MbomHeader.tenantId == tid)
+    count = (await db.execute(count_stmt)).scalar() or 0
+    mbom_number = f"MBOM-{datetime.now(UTC).year}-{count + 1:04d}"
+
+    header = MbomHeader(
+        mbom_number=mbom_number,
+        ebom_id=ebom.id,
+        name=name or f"{ebom.name} (MBOM)",
+        description=ebom.description,
+        tenantId=tid,
+    )
+    db.add(header)
+    await db.flush()  # assigns header.id for the items below
+
+    # mbom_items.part_id is NOT NULL — an EBOM line with no part assigned has
+    # nothing to manufacture against, so it's skipped rather than faked.
+    #
+    # Two passes to preserve the EBOM's parent/child structure (migration
+    # 057_mbom_hierarchy): the source rows can't be assumed to arrive
+    # parent-before-child, so pass 1 creates every new item and flushes once
+    # to obtain new ids, then pass 2 maps each old parent_item_id -> the new
+    # item created for it. An old parent that was itself skipped (partless,
+    # or belongs to a different tenant and never made it into ebom_items)
+    # simply leaves the child with no parent — same "skip, don't fake" rule
+    # as the partless-line case.
+    old_to_new: list[tuple[Any, MbomItem]] = []
+    for item in ebom_items:
+        if item.part_id is None:
+            continue
+        new_item = MbomItem(
+            mbom_id=header.id,
+            part_id=item.part_id,
+            quantity=item.quantity if item.quantity is not None else 1,
+            unit=item.unit or "EA",
+            notes=item.notes,
+            tenantId=tid,
+        )
+        db.add(new_item)
+        old_to_new.append((item, new_item))
+
+    await db.flush()  # assigns each new_item.id for the parent-mapping pass below
+    id_map = {old.id: new.id for old, new in old_to_new}
+    for old_item, new_item in old_to_new:
+        if old_item.parent_item_id is not None and old_item.parent_item_id in id_map:
+            new_item.parent_item_id = id_map[old_item.parent_item_id]
+
+    await db.commit()
+    await db.refresh(header)
+    return header
 
 
 # ============ Instance-line CRUD (X1 canonical-BOM model) ============
@@ -482,6 +574,12 @@ async def create_bom_item(
     if item.part_id is not None:
         pr = await db.execute(select(Part).where(Part.id == item.part_id))
         part = pr.scalar_one_or_none()
+    await webhook_service.emit_event(
+        db,
+        "bom.item.created",
+        {"bom_id": bom.id, "item_id": item.id, "part_id": item.part_id},
+        item.tenantId,
+    )
     return _serialize_bom_item(item, part)
 
 
@@ -531,6 +629,12 @@ async def update_bom_item(db: AsyncSession, bom_id: int, item_id: int, data: dic
         if tid is not None:
             pr_stmt = pr_stmt.where(Part.tenantId == tid)
         part = (await db.execute(pr_stmt)).scalar_one_or_none()
+    await webhook_service.emit_event(
+        db,
+        "bom.item.updated",
+        {"bom_id": bom_id, "item_id": item.id, "part_id": item.part_id},
+        item.tenantId,
+    )
     return _serialize_bom_item(item, part)
 
 
@@ -541,9 +645,13 @@ async def delete_bom_item(db: AsyncSession, bom_id: int, item_id: int) -> None:
     descendants pointing at a parent that no longer exists."""
     tid = get_tenant_id()
     item = await _get_bom_item_or_404(db, bom_id, item_id, tid)
+    item_tenant_id = item.tenantId  # read before the row goes away
     await _closure_remove_subtree(db, bom_id, tid, item.id)
     await db.commit()
     await _invalidate_bom_caches(bom_id)
+    await webhook_service.emit_event(
+        db, "bom.item.deleted", {"bom_id": bom_id, "item_id": item_id}, item_tenant_id
+    )
 
 
 async def reorder_bom_items(db: AsyncSession, bom_id: int, item_ids: list[int]) -> dict:
@@ -605,7 +713,10 @@ async def attach_bom_item_image(
     # Never build a path from the client-supplied filename — derive a safe
     # name from the content hash plus a whitelisted extension only (same rule
     # as documents.py's upload_document).
-    file_hash = hashlib.md5(content).hexdigest()[:12]
+    # SHA-256 for the same reason as documents.py's upload_document: this hash
+    # becomes the stored object's name and the key has no tenant prefix, so a
+    # cheap MD5 collision could overwrite another tenant's file.
+    file_hash = hashlib.sha256(content).hexdigest()[:16]
     raw_ext = os.path.splitext(file.filename or "")[1].lower().lstrip(".")
     safe_ext = raw_ext if raw_ext.isalnum() and raw_ext in ALLOWED_EXTENSIONS else "bin"
     safe_filename = f"{file_hash}.{safe_ext}"
@@ -1228,19 +1339,61 @@ async def get_quantity_rollup(db: AsyncSession, bom_id: int) -> dict:
 
     levels, effective_qty = _compute_levels_and_effective_qty(items)
 
+    # Multi-UOM: two BOM lines for the SAME part can be counted in different
+    # units (2 M on one line, 150 CM on another) — summing the raw numbers
+    # would silently produce a meaningless total. The first line seen for a
+    # part number becomes that part's anchor unit; every later line in the
+    # SAME literal unit adds with zero DB cost (identical to pre-UOM
+    # behaviour — the case every existing single-unit BOM hits). A later
+    # line in a DIFFERENT unit is converted into the anchor via uom_service;
+    # if that conversion is impossible (cross-dimension, or either side is
+    # an unrecognised free-text unit), it is never folded in as if 1:1 —
+    # it's left out of the total and reported in uom_warnings so a wrong
+    # number is never mistaken for a right one.
+    # ponytail: this loop calls uom_service.try_convert per differing-unit
+    # line (2 queries each) rather than caching units/factors across the
+    # loop the way uom_service.rollup_quantities now does — real N+1 on a
+    # BOM with many mixed-uom lines, deferred because it would mean
+    # threading a cache dict through convert()/try_convert()'s public
+    # signature. Upgrade path: give try_convert/extended_cost an optional
+    # cache kwarg, mirroring the local dicts in rollup_quantities.
     total_quantity_map: dict[str, float] = {}
+    unit_by_part: dict[str, str] = {}
     levels_by_part: dict[str, set[int]] = {}
+    uom_warnings: list[dict] = []
     for item in items:
         if item.part_id:
             pid = item.part_id
             pn = parts[pid].pn if pid in parts else f"ID:{pid}"
-            total_quantity_map[pn] = total_quantity_map.get(pn, 0) + effective_qty[item.id]
+            unit = item.unit or "EA"
+            eff_qty = effective_qty[item.id]
+            if pn not in total_quantity_map:
+                total_quantity_map[pn] = eff_qty
+                unit_by_part[pn] = unit
+            else:
+                anchor = unit_by_part[pn]
+                if unit.strip().upper() == anchor.strip().upper():
+                    total_quantity_map[pn] += eff_qty
+                else:
+                    converted, err = await uom_service.try_convert(db, eff_qty, unit, anchor, tid)
+                    if err is not None:
+                        uom_warnings.append(
+                            {
+                                "part_number": pn,
+                                "line_unit": unit,
+                                "expected_unit": anchor,
+                                "message": err,
+                            }
+                        )
+                    else:
+                        total_quantity_map[pn] += float(converted)
             levels_by_part.setdefault(pn, set()).add(levels[item.id])
 
     rollup = [
         {
             "part_number": pn,
             "total_quantity": qty,
+            "unit": unit_by_part.get(pn, "EA"),
             "levels": sorted(levels_by_part.get(pn, {1})),
         }
         for pn, qty in sorted(total_quantity_map.items(), key=lambda x: -x[1])
@@ -1250,6 +1403,7 @@ async def get_quantity_rollup(db: AsyncSession, bom_id: int) -> dict:
         "total_items": len(items),
         "unique_parts": len(part_ids),
         "rollup": rollup,
+        "uom_warnings": uom_warnings,
     }
 
 
@@ -1283,14 +1437,39 @@ async def get_cost_rollup(db: AsyncSession, bom_id: int) -> dict:
     total_cost = 0.0
     cost_by_level: dict[int, float] = {}
     cost_by_category: dict[str, float] = {}
+    uom_warnings: list[dict] = []
 
     levels, effective_qty = _compute_levels_and_effective_qty(items)
 
     for item in items:
         if item.part_id and item.part_id in parts_map:
             part = parts_map[item.part_id]
-            unit_cost = float(item.unit_cost_snapshot or (part.cost or 0))
-            extended = unit_cost * effective_qty[item.id]
+            # A snapshot cost is what was recorded FOR this line, so it's
+            # priced per this line's own unit (line_uom == cost_uom below ->
+            # extended_cost's identical-unit fast path, no DB hit, same
+            # number as pre-UOM code). Falling back to Part.cost means the
+            # cost is priced per the PART's stock unit (part.uom), which can
+            # legitimately differ from this line's unit (e.g. costed per M,
+            # line counted in CM) — that's the case uom_service.extended_cost
+            # converts for. Same truthy-fallback rule as before this feature
+            # (a 0/None snapshot falls through to part.cost).
+            if item.unit_cost_snapshot:
+                unit_cost = float(item.unit_cost_snapshot)
+                cost_uom = item.unit or "EA"
+            else:
+                unit_cost = float(part.cost or 0)
+                cost_uom = part.uom or "EA"
+            extended_decimal, warning = await uom_service.extended_cost(
+                db, effective_qty[item.id], item.unit or "EA", unit_cost, cost_uom, tid
+            )
+            extended = float(extended_decimal)
+            if warning is not None:
+                uom_warnings.append(
+                    {
+                        "part_number": part.pn,
+                        "message": warning,
+                    }
+                )
             total_cost += extended
             level = levels[item.id]
             cost_by_level[level] = cost_by_level.get(level, 0) + extended
@@ -1302,6 +1481,7 @@ async def get_cost_rollup(db: AsyncSession, bom_id: int) -> dict:
         "total_cost": round(total_cost, 2),
         "cost_by_level": {k: round(v, 2) for k, v in cost_by_level.items()},
         "cost_by_category": {k: round(v, 2) for k, v in cost_by_category.items()},
+        "uom_warnings": uom_warnings,
     }
     await cache_set(cache_key, result, ttl=300)
     return result
@@ -1435,30 +1615,52 @@ async def get_where_used(db: AsyncSession, part_id: int) -> list[dict]:
         for b in br.scalars().all():
             boms_map[b.id] = b
 
-    parent_item_ids = {item.parent_item_id for item in items if item.parent_item_id}
+    # Walk UP the whole ancestor chain, not just one hop.
+    #
+    # This used to fetch only the direct parents of the matching items. The
+    # resolve_level_and_parent loop below then asked ancestor_map for the
+    # grandparent, got None because it was never fetched, and stopped — so
+    # `level` saturated at 2 and `parent_bom_id` froze at the first hop for
+    # every part nested 3+ deep. Keep fetching each newly-discovered
+    # generation until the chain runs out.
     ancestor_map: dict[int, Optional[int]] = {}
     ancestor_bom_map: dict[int, Optional[int]] = {}
-    if parent_item_ids:
+    pending = {item.parent_item_id for item in items if item.parent_item_id}
+    while pending:
         ancestors = await db.execute(
             select(BOMItem.id, BOMItem.parent_item_id, BOMItem.bom_id).where(
-                BOMItem.id.in_(parent_item_ids)
+                BOMItem.id.in_(pending)
             )
         )
+        next_pending: set[int] = set()
         for row in ancestors:
             ancestor_map[row.id] = row.parent_item_id
             ancestor_bom_map[row.id] = row.bom_id
+            if row.parent_item_id and row.parent_item_id not in ancestor_map:
+                next_pending.add(row.parent_item_id)
+        # `- ancestor_map.keys()` also breaks the loop on a cyclic parent
+        # chain, which the walk below already guards against with `while cur`.
+        pending = next_pending - ancestor_map.keys()
 
     def resolve_level_and_parent(pid: Optional[int]) -> tuple[int, Optional[int]]:
         level = 1
         pbom_id = None
         cur = pid
-        while cur:
+        # Now that ancestor_map spans the full chain, a corrupt parent cycle
+        # would spin here forever — it only terminated before because the map
+        # was one generation deep. Stop on a revisit.
+        seen: set[int] = set()
+        while cur and cur not in seen:
+            seen.add(cur)
             pbom_id = ancestor_bom_map.get(cur, pbom_id)
-            nxt = ancestor_map.get(cur)
-            if nxt is None:
-                break
+            # Count THIS ancestor, then move up. The old code incremented only
+            # when a further ancestor existed, so it was short by one for every
+            # non-root item: a direct child of a root line reported level 1,
+            # same as the root itself. The convention here is the one
+            # _compute_levels_and_effective_qty documents — root items are
+            # level 1 — so level == 1 + number of ancestors.
             level += 1
-            cur = nxt
+            cur = ancestor_map.get(cur)
         return level, pbom_id
 
     results = []
@@ -1582,7 +1784,10 @@ async def create_snapshot(
     part_ids = [item.part_id for item in items if item.part_id]
     parts_map: dict[int, Any] = {}
     if part_ids:
-        pr = await db.execute(select(Part).where(Part.id.in_(set(part_ids))))
+        parts_stmt = select(Part).where(Part.id.in_(set(part_ids)))
+        if tid is not None:
+            parts_stmt = parts_stmt.where(Part.tenantId == tid)
+        pr = await db.execute(parts_stmt)
         for p in pr.scalars().all():
             parts_map[p.id] = p
 
@@ -1675,37 +1880,69 @@ async def compare_boms(db: AsyncSession, bom_id_1: int, bom_id_2: int) -> dict:
         items2_stmt = items2_stmt.where(BOMItem.tenantId == tid)
     items1_r = await db.execute(items1_stmt)
     items2_r = await db.execute(items2_stmt)
-    items1 = {i.part_id: i for i in items1_r.scalars().all() if i.part_id}
-    items2 = {i.part_id: i for i in items2_r.scalars().all() if i.part_id}
+
+    def _aggregate_by_part(rows) -> dict[int, dict[str, Any]]:
+        """Collapse a BOM's lines to one entry per part.
+
+        A part legitimately appears on MANY lines of a single BOM — the same
+        resistor on four reference designators, or a fastener reused across
+        sub-assemblies. This used to build `{i.part_id: i for i in rows}`,
+        which keeps only the LAST line for such a part: every earlier
+        occurrence vanished from the comparison, and the quantities reported
+        were one arbitrary line's rather than the part's total. Two BOMs
+        differing only in how many times a part appears compared as identical.
+
+        Aggregate instead: total quantity, union of reference designators.
+        """
+        agg: dict[int, dict[str, Any]] = {}
+        for r in rows:
+            if not r.part_id:
+                continue
+            entry = agg.setdefault(r.part_id, {"quantity": 0, "refdes": set()})
+            if r.quantity is not None:
+                entry["quantity"] += r.quantity
+            if r.reference_designator:
+                entry["refdes"].add(r.reference_designator)
+        return agg
+
+    def _refdes(entry: dict[str, Any]) -> Optional[str]:
+        # Sorted so the same set of designators always renders identically —
+        # otherwise a pure ordering difference would read as "modified".
+        return ", ".join(sorted(entry["refdes"])) if entry["refdes"] else None
+
+    items1 = _aggregate_by_part(items1_r.scalars().all())
+    items2 = _aggregate_by_part(items2_r.scalars().all())
 
     all_ids = set(items1.keys()) | set(items2.keys())
-    parts_r = await db.execute(select(Part).where(Part.id.in_(all_ids)))
+    parts_stmt = select(Part).where(Part.id.in_(all_ids))
+    if tid is not None:
+        parts_stmt = parts_stmt.where(Part.tenantId == tid)
+    parts_r = await db.execute(parts_stmt)
     parts = {p.id: p for p in parts_r.scalars().all()}
 
     added, removed, modified, unchanged = [], [], [], []
-    for pid, item in items2.items():
+    for pid, entry in items2.items():
         pn = parts[pid].pn if pid in parts else f"ID:{pid}"
         if pid not in items1:
-            added.append({"part_number": pn, "quantity": item.quantity})
-        elif (
-            items1[pid].quantity != item.quantity
-            or items1[pid].reference_designator != item.reference_designator
-        ):
+            added.append({"part_number": pn, "quantity": entry["quantity"]})
+        elif items1[pid]["quantity"] != entry["quantity"] or _refdes(
+            items1[pid]
+        ) != _refdes(entry):
             modified.append(
                 {
                     "part_number": pn,
-                    "old_quantity": items1[pid].quantity,
-                    "new_quantity": item.quantity,
-                    "old_refdes": items1[pid].reference_designator,
-                    "new_refdes": item.reference_designator,
+                    "old_quantity": items1[pid]["quantity"],
+                    "new_quantity": entry["quantity"],
+                    "old_refdes": _refdes(items1[pid]),
+                    "new_refdes": _refdes(entry),
                 }
             )
         else:
-            unchanged.append({"part_number": pn, "quantity": item.quantity})
-    for pid, item in items1.items():
+            unchanged.append({"part_number": pn, "quantity": entry["quantity"]})
+    for pid, entry in items1.items():
         pn = parts[pid].pn if pid in parts else f"ID:{pid}"
         if pid not in items2:
-            removed.append({"part_number": pn, "quantity": item.quantity})
+            removed.append({"part_number": pn, "quantity": entry["quantity"]})
 
     return {
         "bom_id_1": bom_id_1,
@@ -1748,7 +1985,10 @@ async def create_baseline(
     part_ids = [item.part_id for item in items if item.part_id]
     parts_map: dict[int, Any] = {}
     if part_ids:
-        pr = await db.execute(select(Part).where(Part.id.in_(set(part_ids))))
+        parts_stmt = select(Part).where(Part.id.in_(set(part_ids)))
+        if tid is not None:
+            parts_stmt = parts_stmt.where(Part.tenantId == tid)
+        pr = await db.execute(parts_stmt)
         for p in pr.scalars().all():
             parts_map[p.id] = p
 
@@ -1813,9 +2053,16 @@ async def create_variant(
     description: Optional[str] = None,
     configuration_rules: Optional[dict[str, Any]] = None,
     user_id: int = None,
+    tenant_id: Optional[int] = None,
 ) -> BomVariant:
     await get_bom_or_404(db, base_bom_id)
-    tid = get_tenant_id()
+    # Prefer the explicitly-passed tenant (from current_user.tenantId), same as
+    # create_bom / create_bom_item. Relying on the ambient context ALONE made
+    # this 500 on every HTTP call — bom_variants.tenantId is NOT NULL and the
+    # request path does not populate that context, so every real variant
+    # creation failed with an IntegrityError. Service-layer tests missed it
+    # because they set TenantContext by hand before calling in.
+    tid = tenant_id if tenant_id is not None else get_tenant_id()
     variant = BomVariant(
         base_bom_id=base_bom_id,
         variant_name=variant_name,
@@ -1848,7 +2095,10 @@ async def get_variant(db: AsyncSession, variant_id: int) -> dict:
     part_ids = {i.part_id for i in variant_items if i.part_id}
     parts_map = {}
     if part_ids:
-        pr = await db.execute(select(Part).where(Part.id.in_(part_ids)))
+        parts_stmt = select(Part).where(Part.id.in_(part_ids))
+        if tid is not None:
+            parts_stmt = parts_stmt.where(Part.tenantId == tid)
+        pr = await db.execute(parts_stmt)
         for p in pr.scalars().all():
             parts_map[p.id] = p
 
@@ -1887,15 +2137,22 @@ async def add_variant_item(
     substitute_part_id: Optional[int] = None,
     is_optional: bool = False,
     condition_expression: Optional[str] = None,
+    tenant_id: Optional[int] = None,
 ) -> BomVariantItem:
-    tid = get_tenant_id()
+    # Same as create_variant: explicit tenant first, ambient context as
+    # fallback. The tenant filters below are the cross-tenant guard, so this
+    # must resolve to a real tenant on the HTTP path.
+    tid = tenant_id if tenant_id is not None else get_tenant_id()
     variant_stmt = select(BomVariant).where(BomVariant.id == variant_id)
     if tid is not None:
         variant_stmt = variant_stmt.where(BomVariant.tenantId == tid)
     result = await db.execute(variant_stmt)
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Variant not found")
-    part = await db.execute(select(Part).where(Part.id == part_id))
+    part_stmt = select(Part).where(Part.id == part_id)
+    if tid is not None:
+        part_stmt = part_stmt.where(Part.tenantId == tid)
+    part = await db.execute(part_stmt)
     if not part.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Part not found")
 
@@ -1906,6 +2163,10 @@ async def add_variant_item(
         substitute_part_id=substitute_part_id,
         is_optional=is_optional,
         condition_expression=condition_expression,
+        # Set explicitly rather than leaning on tenant_events' before_insert
+        # listener: that only populates tenantId when the AMBIENT context is
+        # set, which it is not on the HTTP path (see create_variant above).
+        tenantId=tid,
     )
     db.add(item)
     await db.commit()
@@ -1914,44 +2175,12 @@ async def add_variant_item(
 
 
 # ============ Import/Export ============
-
-
-async def export_bom(db: AsyncSession, bom_id: int, format: str) -> dict:
-    bom = await get_bom_or_404(db, bom_id)
-    tid = get_tenant_id()
-    items_stmt = select(BOMItem).where(BOMItem.bom_id == bom_id)
-    if tid is not None:
-        items_stmt = items_stmt.where(BOMItem.tenantId == tid)
-    items_result = await db.execute(items_stmt)
-    items = items_result.scalars().all()
-
-    part_ids = [i.part_id for i in items if i.part_id]
-    parts_map = {}
-    if part_ids:
-        pr = await db.execute(select(Part).where(Part.id.in_(set(part_ids))))
-        for p in pr.scalars().all():
-            parts_map[p.id] = p
-
-    export_data = []
-    for item in items:
-        part = parts_map.get(item.part_id) if item.part_id else None
-        export_data.append(
-            {
-                "part_number": part.pn if part else "",
-                "part_name": part.name if part else "",
-                "quantity": item.quantity,
-                "reference_designator": item.reference_designator,
-                "notes": item.notes,
-            }
-        )
-
-    return {
-        "bom_id": bom_id,
-        "bom_name": bom.name,
-        "format": format,
-        "item_count": len(export_data),
-        "items": export_data,
-    }
+#
+# export_bom() lived here and was removed: POST /bom/{bom_id}/export routes to
+# export_service.render_export() instead (the shared column/format/filter
+# contract), so nothing called it. It produced a flat 5-field dict that no
+# longer matched what the endpoint returned — a second, diverging definition of
+# "export a BOM". import_bom() below IS live; the endpoint calls it directly.
 
 
 async def import_bom(
@@ -1963,21 +2192,29 @@ async def import_bom(
     if not file_url:
         raise HTTPException(status_code=400, detail="file_url is required")
     tid = get_tenant_id()
-    bom = BOM(
-        name=f"Imported BOM ({datetime.now(UTC).strftime('%Y-%m-%d')})",
-        description=f"Imported from {file_url} ({format})",
-        project_id=project_id,
-        status="draft",
-        tenantId=tid,
+    # Reuse create_bom (see apply_template above) instead of a bare BOM(...)
+    # insert — it auto-generates the required, otherwise-omitted bom_number.
+    bom = await create_bom(
+        db,
+        {
+            "name": f"Imported BOM ({datetime.now(UTC).strftime('%Y-%m-%d')})",
+            "description": f"Imported from {file_url} ({format})",
+            "project_id": project_id,
+        },
+        tenant_id=tid,
     )
-    db.add(bom)
-    await db.commit()
-    await db.refresh(bom)
+    # bom-integrity finding 2: file_url is never fetched or parsed here, so no
+    # rows are ever created — reporting "success" made an empty draft BOM
+    # indistinguishable from a real import. Report "not_implemented" instead.
     return {
         "bom_id": bom.id,
-        "import_status": "success",
+        "import_status": "not_implemented",
         "items_imported": 0,
-        "warnings": ["BOM structure created. Import items via BOM Items API."],
+        "warnings": [
+            f"File parsing is not implemented; no items were imported from "
+            f"{file_url}. An empty draft BOM was created — add items via the "
+            "BOM Items API."
+        ],
     }
 
 
@@ -1991,13 +2228,19 @@ async def create_template(
     source_bom_id: Optional[int] = None,
     user_id: int = None,
 ) -> BomTemplate:
+    tid = get_tenant_id()
     ptc = 0
     if source_bom_id:
-        src = await db.execute(select(BOM).where(BOM.id == source_bom_id))
+        src_stmt = select(BOM).where(BOM.id == source_bom_id)
+        if tid is not None:
+            src_stmt = src_stmt.where(BOM.tenantId == tid)
+        src = await db.execute(src_stmt)
         if src.scalar_one_or_none():
-            items = await db.execute(select(BOMItem).where(BOMItem.bom_id == source_bom_id))
+            items_stmt = select(BOMItem).where(BOMItem.bom_id == source_bom_id)
+            if tid is not None:
+                items_stmt = items_stmt.where(BOMItem.tenantId == tid)
+            items = await db.execute(items_stmt)
             ptc = len(items.scalars().all())
-    tid = get_tenant_id()
     tmpl = BomTemplate(
         name=name,
         description=description,
@@ -2043,33 +2286,50 @@ async def apply_template(
     tmpl = result.scalar_one_or_none()
     if not tmpl:
         raise HTTPException(status_code=404, detail="Template not found")
-    bom = BOM(
-        name=f"{tmpl.name} (from template)",
-        project_id=project_id,
-        status="draft",
-        tenantId=tid,
-    )
-    db.add(bom)
-    await db.flush()
+    # Reuse create_bom (not a bare BOM(...) insert) — boms.bom_number is
+    # NOT NULL with no DB default, and create_bom is the helper that already
+    # auto-generates a tenant-scoped one. Discovered while fixing the
+    # bom-integrity closure finding below: the old bare BOM(...) here had no
+    # bom_number at all and would fail its INSERT on any real database.
+    bom = await create_bom(db, {"name": f"{tmpl.name} (from template)", "project_id": project_id}, tenant_id=tid)
 
     template_items = await db.execute(
         select(TemplateBomItem).where(TemplateBomItem.bomTemplateId == template_id)
     )
-    items_created = 0
+    created_items: list[BOMItem] = []
     for ti in template_items.scalars().all():
-        db.add(
-            BOMItem(
-                bom_id=bom.id,
-                part_id=ti.partId,
-                quantity=ti.quantity or 1,
-                reference_designator=ti.referenceDesignator,
-                notes=ti.notes,
-                sort_order=ti.sortOrder or 0,
-                tenantId=tid,
-            )
+        item = BOMItem(
+            bom_id=bom.id,
+            part_id=ti.partId,
+            quantity=ti.quantity if ti.quantity is not None else 1,
+            reference_designator=ti.referenceDesignator,
+            notes=ti.notes,
+            sort_order=ti.sortOrder or 0,
+            tenantId=tid,
         )
-        items_created += 1
+        db.add(item)
+        created_items.append(item)
+    await db.flush()  # assigns each item.id, needed by closure rows below
+
+    # bom-integrity finding 1: create_bom_item is not the sole path that
+    # creates BOMItem rows — this loop was skipping the BomClosure self-row
+    # that _closure_add_item writes, permanently breaking where-used for
+    # every template-applied item. Match create_bom_item's exact pattern.
+    for item in created_items:
+        await _closure_add_item(db, bom.id, tid, item.id, item.parent_item_id)
 
     await db.commit()
     await db.refresh(bom)
-    return {"bom_id": bom.id, "template_id": template_id, "items_created": items_created}
+
+    # ponytail: session has expire_on_commit=False (session.py), and item.id/
+    # part_id/tenantId are already populated from the flush() above, so no
+    # per-item refresh() round trip is needed here.
+    for item in created_items:
+        await webhook_service.emit_event(
+            db,
+            "bom.item.created",
+            {"bom_id": bom.id, "item_id": item.id, "part_id": item.part_id},
+            item.tenantId,
+        )
+
+    return {"bom_id": bom.id, "template_id": template_id, "items_created": len(created_items)}

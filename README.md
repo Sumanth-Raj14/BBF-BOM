@@ -28,9 +28,9 @@ uvicorn app.main:app --reload --port 8000
 
 ### Frontend
 ```bash
-cd "BOM and PRD"
+cd frontend
 npm install
-npm run dev                 # Vite dev server on port 3001
+npm run dev                 # Vite dev server
 npm run build               # Production build to dist/
 ```
 
@@ -98,11 +98,11 @@ sessions/tokens carry over. See `scripts/backup-data.sh` /
 (`pg_dump`/`pg_restore` + tar over `docker compose cp`), no extra tooling
 required.
 
-### Docker (Production, full stack — monitoring/MinIO/pgBackRest)
+### Docker (full stack)
 ```bash
-cd backend
-docker compose -f docker-compose.prod.yml up -d
+docker compose up -d          # repo-root docker-compose.yml (postgres + backend + frontend)
 ```
+See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for production hardening (monitoring, MinIO, pgBackRest). There is no separate `docker-compose.prod.yml`.
 
 ## Key Features
 

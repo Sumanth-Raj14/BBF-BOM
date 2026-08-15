@@ -18,6 +18,7 @@
 | `backend/docs/API_REFERENCE.md` | Full endpoint-by-endpoint API reference (~549 routes) — the detailed companion to §7–§9's operational view of the API surface |
 | `backend/docs/data-dictionary.md` | Full table/column reference for the schema this guide's §5 (migrations) and §6 (backups) operate on |
 | `backend/docs/admin-guide.md` | Day-2 administration tasks (user/tenant management, RBAC) that pick up once the deployment in this guide is live |
+| `docs/audit-2026-08/FIX_COVERAGE.md` | Which of the 74 findings in `docs/audit-2026-08/FINDINGS_FULL_SCAN.md` are fixed vs. deferred — several deployment-relevant fixes referenced in this guide (health-endpoint auth, the tenant SELECT-filter bug) are detailed there |
 
 ---
 
@@ -109,7 +110,9 @@ From `desktop/DESKTOP_PACKAGING.md`:
 
 ## 3. Configuration Reference (Environment Variables)
 
-All backend configuration flows through a single pydantic-settings class (`backend/app/core/config.py`) that reads a `.env` file, supports an **optional HashiCorp Vault** backend for secrets, and validates secret strength (Shannon entropy ≥ 80 bits plus weak-secret checks). **In `ENVIRONMENT=production`, the app hard-fails at startup on missing or weak secrets** — this is deliberate; do not work around it with dummy values.
+All backend configuration flows through a single pydantic-settings class (`backend/app/core/config.py`) that reads a `.env` file, supports an **optional HashiCorp Vault** backend for secrets, and validates secret strength (Shannon entropy ≥ 80 bits plus weak-secret checks).
+
+**Important — this is stricter than "production only":** `Settings.model_post_init` unconditionally raises `ValueError` at process start (any `ENVIRONMENT`, including local dev) if `POSTGRES_PASSWORD`, `S3_SECRET_KEY`, or `ENCRYPTION_KEY` are empty — you cannot boot the app at all without them, even for a throwaway dev DB. `SECRET_KEY` is handled separately: in development (and only outside a container) it auto-generates and persists to `.secret_key` if unset, with a loud warning; **in production, or when running inside a container (`/.dockerenv` or `KUBERNETES_SERVICE_HOST` detected), auto-generation is disabled and a missing `SECRET_KEY` is a hard `RuntimeError`.** Weak/low-entropy values for any of the four secrets are hard `ValueError`s in production and warnings in development. Do not work around any of this with dummy values — set real secrets even in dev, since the app will not start otherwise.
 
 ### 3.1 Core secrets (required)
 
@@ -123,10 +126,11 @@ All backend configuration flows through a single pydantic-settings class (`backe
 
 | Variable | Purpose | Notes |
 |---|---|---|
-| `POSTGRES_SERVER` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` / `POSTGRES_PORT` | Assembled into an async DSN by `assemble_db_connection` | **Known limitation:** the password is interpolated into the DSN *without URL-encoding* (`config.py`). Avoid `@`, `:`, `/`, `#` in `POSTGRES_PASSWORD`, or set `DATABASE_URL` directly. |
+| `POSTGRES_SERVER` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` / `POSTGRES_PORT` | Assembled into an async DSN by `assemble_db_connection` | `config.py` URL-encodes the user and password with `urllib.parse.quote` before building the DSN, so special characters (`@ : / # ?`) in `POSTGRES_PASSWORD` are safe — this was previously a known bug (unencoded interpolation) and is now fixed. `POSTGRES_PASSWORD` itself is a **required** field regardless of environment (see §3.1) — the app refuses to start with it empty. |
 | `DATABASE_URL` | Full DSN override, `postgresql+asyncpg://...` | The desktop launcher exports this directly to the backend child process. |
 | `SKIP_CREATE_ALL` | When set, the lifespan skips the deprecated `Base.metadata.create_all` | **Set `true` on every migration-managed deployment** (the Docker entrypoint already does). Leaving it off can create tables outside Alembic and mask migration drift. See §5. |
 | `ENABLE_RLS` | Opt-in PostgreSQL Row-Level Security as a second tenant-isolation layer | **Trap:** migration `040_postgres_rls_tenant_isolation` only applies RLS if `ENABLE_RLS` is true **at the time the migration runs**. Flipping it on later does nothing — you must `alembic downgrade 039` then re-upgrade with the flag set. Decide *before* first migration. Strongly recommended for any multi-tenant server deployment (see §12.2). |
+| `TEST_DATABASE_URL` | Test/dev-only override, takes precedence over `DATABASE_URL` | `app/db/session.resolve_database_url()` resolution order is `TEST_DATABASE_URL > DATABASE_URL > settings.DATABASE_URI` (fixed 2026-08-09 after an incident where it was ignored and a fixture/reset script hit the live database). Never set this to a production DSN, and never run fixture/seed scripts without it pointing at sqlite or an obviously-named scratch/test/e2e database — `backend/scripts/_db_guard.py` enforces this for scripts that call it. Not used in normal production deployment (leave unset). |
 
 ### 3.3 Frontend serving (single-process mode)
 
@@ -157,8 +161,10 @@ All backend configuration flows through a single pydantic-settings class (`backe
 |---|---|---|
 | `REDIS_URL` | Redis connection for slowapi rate limits, JWT blacklist, backup mutex | Optional; in-memory fallback. **Caveat:** if `REDIS_URL` points at a *non-localhost* host, availability is assumed without a ping — a down remote Redis leaves the limiter built against unreachable storage (`rate_limit.py`). Keep Redis co-located and monitored. |
 | `REDIS_PASSWORD` | Compose sets `requirepass` on the redis:7 container | |
+| `RATE_LIMIT_USER_PER_MINUTE` | Per-authenticated-user request cap (`app/core/deps.py`) | Default **1200**. Previously hardcoded; now tunable via `.env`. |
+| `RATE_LIMIT_API_KEY_PER_MINUTE` | Per-API-key request cap (`app/core/deps.py`) | Default **600**. Previously hardcoded; now tunable via `.env`. |
 
-Built-in limits (no tuning vars documented): per-IP default **60/min**, per-user **300/min**, per-API-key **120/min**, per-IP WebSocket **30/min**.
+Other limits remain fixed (no tuning var yet): per-IP default **60/min**, per-IP WebSocket **30/min**.
 
 ### 3.7 Reverse proxy
 
@@ -250,7 +256,7 @@ Useful flags (documented in `desktop/DESKTOP_PACKAGING.md` §6):
 
 ### 5.1 The one rule: bootstrap with `init_db`, never bare `alembic upgrade head` on an empty database
 
-The Alembic chain is 47 files with a **single linear head: `047_solidworks_integration`** (verified — one root `001_initial`, no branches; see `backend/docs/data-dictionary.md` for the full table/column reference these migrations build). However, **migrations `004+` reference ~74 tables that historically only exist via `Base.metadata.create_all`** — running `alembic upgrade head` against an *empty* database fails partway. That is exactly why `.github/workflows/postgres-ci.yml` exists as the fresh-install gate.
+The Alembic chain is 56 files with a **single linear head: `056_cad_connections`** (verified — one root `001_initial`, no branches; see `backend/docs/data-dictionary.md` for the full table/column reference these migrations build). However, **migrations `004+` reference ~74 tables that historically only exist via `Base.metadata.create_all`** — running `alembic upgrade head` against an *empty* database fails partway. That is exactly why `.github/workflows/postgres-ci.yml` exists as the fresh-install gate.
 
 The supported bootstrap is `backend/scripts/init_db.py`:
 
@@ -267,7 +273,7 @@ flowchart TD
 - **Fresh database** → `create_all` + `alembic stamp head`. The DB is born at the current schema and future upgrades apply incrementally.
 - **Existing, previously-stamped database** → normal `alembic upgrade head`.
 - The Docker entrypoint (`backend/scripts/docker-entrypoint.sh`) runs this automatically: `pg_isready` wait → `python -m scripts.init_db` → conditional RBAC seed → `exec uvicorn`.
-- `postgres-ci.yml` proves this bootstrap is idempotent against an empty PostgreSQL 16. (Note it currently hardcodes `EXPECTED_HEAD='041_zoho_books_sync_tables'`, which is stale versus the actual head `047` — bump it when you add migrations.)
+- `postgres-ci.yml` proves this bootstrap is idempotent against an empty PostgreSQL 16, and it asserts the stamped revision equals a hardcoded `EXPECTED_HEAD` (currently `'056_cad_connections'`, correctly in sync with the actual head). **You must bump `EXPECTED_HEAD` in that workflow every time you add a new head migration**, or the CI gate will fail (by design) on the next PR that adds one.
 
 **Set `SKIP_CREATE_ALL=true` in every deployment that uses `init_db`.** Otherwise the FastAPI lifespan *also* runs `create_all` at every startup (a deprecated legacy behavior kept for the desktop bundle), which can silently create tables outside Alembic's knowledge and mask drift.
 
@@ -275,7 +281,7 @@ Two previously-tracked Postgres-only Alembic bugs are **confirmed fixed** in `ba
 
 ### 5.2 Migration hygiene notes for operators
 
-- **Numbering trap:** three files share the `041_` prefix (`041_compliance_pack_tables`, `041_part11_esignatures`, `041_zoho_books_sync_tables`), and the Zoho one actually revises `044`. The real order is `040 → 041_compliance → 041_part11 → 042 → 043 → 044 → 041_zoho → 045 → 046 → 047`. **Never infer chain order from filenames**; use `alembic history`.
+- **Numbering trap:** three files share the `041_` prefix (`041_compliance_pack_tables`, `041_part11_esignatures`, `041_zoho_books_sync_tables`), and the Zoho one actually revises `044`. The real order is `040 → 041_compliance → 041_part11 → 042 → 043 → 044 → 041_zoho → 045 → 046 → 047 → 048_index_foreign_keys → 049_restore_check_constraints → 050_rfq_headers_created_by_nullable → 051_export_templates → 052_bom_types → 053_bom_effectivity → 054_uom_conversion → 055_requirements → 056_cad_connections`. **Never infer chain order from filenames**; use `alembic history`.
 - **RLS (`ENABLE_RLS`) must be decided before migrating.** Migration `040` no-ops unless the dialect is PostgreSQL *and* `ENABLE_RLS` is true at migration time. Enabling it later requires `alembic downgrade 039` + re-upgrade with the flag set (documented in the migration's own docstring; covered by `app/tests/test_rls_flag.py`).
 - RLS policies attach only to tables that have a `tenantId` column. The deliberately global tables (substance reference data from `042`, `compliance_packs`/`part_certifications` from `041_compliance_pack_tables`) sit outside RLS by design.
 
@@ -320,18 +326,19 @@ These are confirmed bugs in `backend/app/core/backup.py` and `scripts/pitr_resto
 | # | Defect | Operational consequence |
 |---|---|---|
 | 1 | **Encrypted *physical* backups cannot be restored.** `create_physical_backup` encrypts with a length-prefixed multi-chunk Fernet stream, but `restore_physical_backup` decrypts with a single-shot `fernet.decrypt(f.read())` — always raises `InvalidToken` on stream-encrypted files. | The PITR recovery path for **encrypted basebackups is broken**. The *logical* restore path (`restore_backup`) correctly uses stream decryption and works. |
-| 2 | **Backup-failure email alerts silently never send.** `_send_email_alert` references `settings.APP_NAME`, which doesn't exist (`config.py` defines `PROJECT_NAME`); the `AttributeError` is swallowed by a broad `except`. | You will **not** be emailed when backups fail. Use the webhook alert path and/or external monitoring of `/health` (which includes backup health) instead. |
-| 3 | **PITR restore is not Windows-aware.** `pitr_restore.py` hardcodes `/var/lib/postgresql/wal_archive` and a Unix `cp` `restore_command`; `restore_physical_backup` resolves the right path but still emits `cp`, which Windows `cmd.exe` lacks. | Desktop WAL **archiving works** (the launcher writes a correct `copy /Y` archive_command), but a desktop **PITR restore will fail at first WAL replay**. Tracked in `OPEN_ITEMS.md` ("PITR/WAL live verification") and `desktop/DURABILITY.md`. |
-| 4 | Physical restore uses `tarfile.extractall` without member filtering (tar-slip risk on tampered archives) and decrypts whole files in memory (OOM risk on large basebackups). | Only restore physical backups you created and stored securely. |
-| 5 | Webhook alerts are signed with `sha256(payload + secret)` rather than HMAC (length-extension weakness). | Treat webhook signatures as informational, not authentication, until fixed. |
+| 2 | **PITR restore is not Windows-aware.** `pitr_restore.py` hardcodes `/var/lib/postgresql/wal_archive` and a Unix `cp` `restore_command`; `restore_physical_backup` resolves the right path but still emits `cp`, which Windows `cmd.exe` lacks. | Desktop WAL **archiving works** (the launcher writes a correct `copy /Y` archive_command), but a desktop **PITR restore will fail at first WAL replay**. Tracked in `OPEN_ITEMS.md` ("PITR/WAL live verification") and `desktop/DURABILITY.md`. |
+| 3 | Physical restore uses `tarfile.extractall` without member filtering (tar-slip risk on tampered archives) and decrypts whole files in memory (OOM risk on large basebackups). | Only restore physical backups you created and stored securely. |
+| 4 | Webhook alerts are signed with `sha256(payload + secret)` rather than HMAC (length-extension weakness). | Treat webhook signatures as informational, not authentication, until fixed. |
+
+**Fixed since the last audit pass — no longer a defect:** backup-failure email alerts previously silently never sent because `_send_email_alert` referenced `settings.APP_NAME`, which didn't exist. `config.py` now defines `APP_NAME: str = "Blackbox BOM"` as a real field, so the email alert path sends correctly. The webhook alert path remains available as a second channel regardless.
 
 ### 6.3 Recommended backup posture (until the defects above are fixed)
 
 1. **Rely on logical backups** (`pg_dump` custom format) as your primary restore path — create + verify + restore are all sound, including stream encryption/decryption.
 2. **Test restores, don't just take backups.** Run `scripts/recovery_test.py` (or manually `pg_restore` into a scratch DB) on a schedule. A backup you haven't restored is a hope, not a backup.
 3. Back up the **trio** together: database dump + `UPLOAD_DIR` + `RSA_KEY_DIR` (the `backup-data.*` scripts already do). Also escrow `ENCRYPTION_KEY` and `SECRET_KEY` — encrypted backups are useless without `ENCRYPTION_KEY`.
-4. Keep WAL archiving on (it's cheap insurance and the archive side works on all platforms), but **do not count on PITR restore on Windows desktop** until defect #3 is fixed; on Linux, PITR restore with *unencrypted* basebackups is the viable path.
-5. Wire the **webhook** failure alert and independently alert on `GET /health` (it reports backup health), because email alerts are currently dead (defect #2).
+4. Keep WAL archiving on (it's cheap insurance and the archive side works on all platforms), but **do not count on PITR restore on Windows desktop** until defect #2 is fixed; on Linux, PITR restore with *unencrypted* basebackups is the viable path.
+5. Wire **both** the email and webhook failure alerts (both channels work) and independently alert on `GET /health` (it reports backup health) as a third, alert-pipeline-independent signal.
 
 ---
 
@@ -541,7 +548,8 @@ Two audited gaps remain *even with* `BEHIND_PROXY=True` (see §12.4): the audit 
 | Endpoint | Auth | Returns |
 |---|---|---|
 | `GET /health` | None | DB health **and backup health** (`main.py:694-709`). Use this for load-balancer checks *and* backup alerting (§6.3). |
-| `GET /api/v1/health` and `GET /api/v1/health/detailed` | Per router config | Detailed component health |
+| `GET /api/v1/health` | None | Liveness probe — deliberately stays unauthenticated |
+| `GET /api/v1/health/detailed` | **Auth required (401/403 without a valid session or API key)** | Detailed component health. Fixed in a recent patch: this endpoint used to be reachable with no auth at all and leaked internal row counts/system info plus fabricated hardcoded `"security"`/`"authentication"` status blocks; it now requires auth and no longer echoes those fabricated fields (`backend/app/tests/test_health_auth.py`). Give any external monitor hitting this path a real session or API key. |
 | `GET /api/v1/metrics` | **Auth-gated** | Prometheus metrics (via `MetricsMiddleware`). Because it requires auth, give your Prometheus scraper an API key (`/api/v1/api-keys`, sent as `X-API-Key`) rather than disabling auth. |
 
 Startup also runs `scripts/startup_health_check.py` inside the lifespan, so a container that fails its checks fails fast. For the full endpoint-by-endpoint reference behind `/api/v1/*` (all ~549 routes across 73 routers), see `backend/docs/API_REFERENCE.md`; for routine post-deployment admin tasks (users, tenants, RBAC roles) once the service above is healthy, see `backend/docs/admin-guide.md`.
@@ -623,7 +631,7 @@ docker compose up -d
 
 ### 11.4 CI/CD caution — do not cargo-cult `.github/workflows/ci.yml`
 
-The audited CI has several deploy-relevant defects: the `test-backend` job runs bare `alembic upgrade head` against an empty Postgres (the exact anti-pattern §5.1 forbids — `postgres-ci.yml` is the correct gate); `build-and-push` points docker/build-push-action at the repo root where **no Dockerfile exists**; and the deploy jobs run `docker compose pull api` while the checked-in compose files name the service **`backend`**. If you stand up CD from this repo, fix those first and keep `postgres-ci.yml`'s fresh-install job as your migration gate (bumping its hardcoded `EXPECTED_HEAD`, currently stale at `041_zoho_books_sync_tables` vs. actual head `047`). Also note `desktop/tests/test_updater.py` (24 updater unit tests) is not wired into any workflow — run it manually before desktop releases.
+The audited CI has several deploy-relevant defects: the `test-backend` job runs bare `alembic upgrade head` against an empty Postgres (the exact anti-pattern §5.1 forbids — `postgres-ci.yml` is the correct gate); `build-and-push` points docker/build-push-action at the repo root where **no Dockerfile exists**; and the deploy jobs run `docker compose pull api` while the checked-in compose files name the service **`backend`**. If you stand up CD from this repo, fix those first and keep `postgres-ci.yml`'s fresh-install job as your migration gate — its `EXPECTED_HEAD` is currently correctly in sync at `056_cad_connections`, but every future migration must bump it or the gate correctly fails the PR. Also note `desktop/tests/test_updater.py` (24 updater unit tests) is not wired into any workflow — run it manually before desktop releases.
 
 ---
 
@@ -640,11 +648,13 @@ Everything below is from the code audit. Deploy with these expectations set — 
 | **Five routers implemented but never mounted** (`derivatives`, `formulas`, `graph`, `planning`, `solidworks_contract`) | Fully written but unreachable over HTTP — notably **PO-from-BOM planning** (`planning.py` + `planning_service.py`) is dead until someone adds the `include_router` lines in `app/api/api_v1.py`. Do not promise these features to users of a current deployment. |
 | **"AI" features** (`/api/v1/ai`) | Implemented but **deterministic heuristics**, not ML — a hard-coded seasonal multiplier over PO history with fabricated confidence values. No GPU, model weights, or external AI API is needed (or used). |
 
-### 12.2 Multi-tenancy: turn on RLS for real isolation
+### 12.2 Multi-tenancy: the ORM SELECT filter is now fixed; RLS remains recommended defense-in-depth
 
-The advertised automatic ORM SELECT tenant filter in `app/core/tenant_events.py` is **dead code** (runtime-verified: it reads `execute_state.mapper_`, which doesn't exist on SQLAlchemy 2.0.48's `ORMExecuteState`; the AttributeError is swallowed and rows from *both* tenants come back). INSERT auto-stamping and UPDATE/DELETE cross-tenant guards **do** work, and services filter reads explicitly — but the automatic read layer contributes nothing today. Additionally, raw `text()` SELECTs are only *warned about*, not blocked, and the global `compliance_packs`/`part_certifications` tables are outside both layers.
+**Fixed since the last audit pass.** The automatic ORM SELECT tenant filter in `app/core/tenant_events.py` was previously dead code — it read `execute_state.mapper_`, an attribute `ORMExecuteState` has never had on SQLAlchemy 2.x, so the `AttributeError` was swallowed and rows from *both* tenants came back on every query. It now uses `execute_state.bind_mapper` (the correct attribute) and is **deliberately not wrapped in a broad try/except**, so if this attribute ever moves again in a future SQLAlchemy version, the app fails loudly instead of silently dropping isolation. INSERT auto-stamping and UPDATE/DELETE cross-tenant guards also work, as before.
 
-**Operational consequence:** for any deployment hosting more than one tenant, set `ENABLE_RLS=true` *before* running migrations (§5.2) so PostgreSQL-level policies backstop read isolation. Single-tenant deployments (the common local-first case) are unaffected in practice.
+Remaining gaps to plan around: raw `text()` SELECTs cannot be auto-filtered (the ORM event only sees ORM statements) — they are logged at `warning` level when they bypass the filter, but not blocked, so any raw SQL in the codebase or in ad hoc admin queries must scope by tenant explicitly (`tenant_sql_clause` / `get_tenant_id()`). The global `compliance_packs`/`part_certifications` tables (substance reference data, certifications) sit outside tenant scoping entirely by design — they are shared reference data, not per-tenant.
+
+**Operational consequence:** the app-layer filter is now the real primary defense for ORM-issued queries. For any deployment hosting more than one tenant, still set `ENABLE_RLS=true` *before* running migrations (§5.2) so PostgreSQL-level policies backstop the app layer in depth — particularly useful against the raw-SQL gap above, which RLS closes at the database level regardless of how the query was issued. Single-tenant deployments (the common local-first case) are unaffected either way.
 
 ### 12.3 Backup subsystem defects
 
@@ -657,7 +667,6 @@ See §6.2 — encrypted **physical** restores broken, backup-failure **emails** 
 - **Behind a proxy:** audit-log `userIp` and the WS rate limiter see the proxy IP even with `BEHIND_PROXY=True` (§9.3). The WS in-memory fallback also clears everyone's window when 1000 IPs are tracked.
 - **Remote Redis is assumed up without a ping** (§3.6) — co-locate and monitor Redis.
 - **RSA private key file permissions** are OS defaults — restrict `RSA_KEY_DIR` ACLs on multi-user hosts (§3.4).
-- **`POSTGRES_PASSWORD` special characters** break the DSN (§3.2).
 
 ### 12.5 Frontend expectations (mock/demo surfaces)
 
@@ -678,9 +687,8 @@ The working tree contains large stray artifacts that must not ship: ~18 `test_*.
 ## 13. Pre-Production Checklist
 
 **Secrets & config**
-- [ ] `SECRET_KEY`, `ENCRYPTION_KEY` generated with real entropy; stored in a secret manager; **`ENCRYPTION_KEY` escrowed for DR** (§3.1, §6.3)
+- [ ] `SECRET_KEY`, `ENCRYPTION_KEY`, `POSTGRES_PASSWORD`, `S3_SECRET_KEY` all set with real entropy (the app hard-fails at startup, in every environment, if `POSTGRES_PASSWORD`/`S3_SECRET_KEY`/`ENCRYPTION_KEY` are empty — §3.1); stored in a secret manager; **`ENCRYPTION_KEY` escrowed for DR** (§6.3)
 - [ ] `ENVIRONMENT=production` (server, behind TLS only) — desktop stays non-production by design
-- [ ] `POSTGRES_PASSWORD` has no `@ : / #` characters (or `DATABASE_URL` set directly)
 - [ ] `SKIP_CREATE_ALL=true` on all migration-managed deployments
 - [ ] `ENABLE_RLS` decided **before** first migration; `true` for multi-tenant (§5.2, §12.2)
 - [ ] `BEHIND_PROXY=True` when behind nginx; TrustedHost list includes the public hostname
@@ -757,4 +765,4 @@ python desktop/build.py --skip-installer    # fast iteration
 
 ---
 
-*This guide is grounded in a code-level audit of the repository as of 2026-07. Where behavior is described as broken, stubbed, or mock, that reflects the audited code — verify against the current source before assuming a fix has landed. For gaps and their tracking, see `frontend/OPEN_ITEMS.md`, `desktop/DURABILITY.md`, and `DISASTER_RECOVERY_RUNBOOK.md`.*
+*This guide is grounded in a code-level audit of the repository, refreshed 2026-08-09 against migration head `056_cad_connections` and the fixes tracked in `docs/audit-2026-08/FIX_COVERAGE.md`. Where behavior is described as broken, stubbed, or mock, that reflects the audited code — verify against the current source before assuming a fix has landed. For gaps and their tracking, see `frontend/OPEN_ITEMS.md`, `desktop/DURABILITY.md`, `DISASTER_RECOVERY_RUNBOOK.md`, and `docs/audit-2026-08/FIX_COVERAGE.md`.*

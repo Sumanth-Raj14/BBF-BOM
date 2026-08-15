@@ -35,6 +35,8 @@ export const SECTIONS = [
     items: [
       { id: "diff", label: "Compare Revisions", icon: <Icon.Diff size={size} /> },
       { id: "pdm", label: "CAD Vault", icon: <Icon.Doc size={size} /> },
+      { id: "bom-variants", label: "BOM Variants", icon: <Icon.Bom size={size} /> },
+      { id: "mbom", label: "Manufacturing BOMs (xBOM)", icon: <Icon.Bom size={size} /> },
       { id: "routing", label: "Routings & Processes", icon: <Icon.Activity size={size} /> },
     ],
   },
@@ -43,6 +45,9 @@ export const SECTIONS = [
     items: [
       { id: "qms", label: "QMS Dashboard", icon: <Icon.Activity size={size} /> },
       { id: "ncr", label: "Non-Conformance", icon: <Icon.Flag size={size} /> },
+      { id: "deviations", label: "Deviations & Waivers", icon: <Icon.Flag size={size} /> },
+      { id: "requirements", label: "Requirements", icon: <Icon.Check size={size} /> },
+      { id: "traceability", label: "Serial & Lot Traceability", icon: <Icon.Scan size={size} /> },
       { id: "compliance", label: "Compliance", icon: <Icon.Check size={size} /> },
     ],
   },
@@ -84,6 +89,7 @@ export const SECTIONS = [
     items: [
       { id: "webhooks", label: "Webhooks", icon: <Icon.Link size={size} /> },
       { id: "erp", label: "ERP Connectors", icon: <Icon.Refresh size={size} /> },
+      { id: "cad-connectors", label: "CAD Connectors", icon: <Icon.Refresh size={size} /> },
       { id: "zoho-books", label: "Zoho Books", icon: <Icon.Refresh size={size} /> },
       { id: "monitoring", label: "Monitoring", icon: <Icon.Activity size={size} /> },
     ],

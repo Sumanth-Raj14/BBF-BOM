@@ -38,7 +38,7 @@ async def test_cascade_clean_removes_mapping(db_session, test_tenant, tenant_id)
         IntegrationExternalLink.entity_type == "part"))).scalars().all()
     states = (await db_session.execute(select(ZohoSyncState).where(
         ZohoSyncState.entity_type == "part"))).scalars().all()
-    assert [l.entity_id for l in links] == [202]
+    assert [link.entity_id for link in links] == [202]
     assert [s.entity_id for s in states] == [202]
 
 
@@ -53,8 +53,9 @@ async def test_cascade_clean_is_idempotent_noop(db_session, test_tenant, tenant_
 
 @pytest.mark.asyncio
 async def test_delete_part_endpoint_cascade_cleans(db_session, test_tenant, tenant_id):
-    from app.api.endpoints.parts import delete_part
     from types import SimpleNamespace
+
+    from app.api.endpoints.parts import delete_part
 
     part = Part(pn="PN-DEL", name="ToDelete", tenantId=tenant_id)
     db_session.add(part)

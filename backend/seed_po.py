@@ -1,26 +1,88 @@
-"""Seed database with PO data from Cleaned_Purchase_Orders.xlsx"""
+"""Seed database with PO data from Cleaned_Purchase_Orders.xlsx.
+
+INCIDENT (2026-08-09): this script used to resolve its own DB URL
+(DATABASE_URL/DATABASE_URI env vars, or else a hardcoded
+postgresql://.../bom_db default) and then unconditionally ran
+`DELETE FROM po_line_items` / `DELETE FROM po_headers` with no scoping --
+wiping ALL purchase-order data on whatever database it happened to resolve
+to, live or not, and ignoring TEST_DATABASE_URL entirely.
+
+Fixed by routing through the same two chokepoints every other script uses:
+  - app.db.session.resolve_database_url() (TEST_DATABASE_URL > DATABASE_URL >
+    settings.DATABASE_URI) via scripts._db_guard.require_non_production_db(),
+    which also refuses to run at all unless the resolved DB looks like a
+    test/e2e/sqlite database.
+  - the delete is now scoped to just the PO numbers this run is about to
+    re-insert (identified from the Excel file), not the whole table. If a
+    future edit makes the po_numbers list unavailable, do NOT fall back to an
+    unscoped delete -- require an explicit confirmation env var instead (see
+    ALLOW_FULL_PO_WIPE below).
+"""
 
 import asyncio
+import os
+import sys
 
 import openpyxl
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.db.base import Base
-from app.models.po_models import POHeader, POLineItem
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
+
+from app.core.tenant_context import TenantContext  # noqa: E402
+from app.db.base import Base  # noqa: E402
+from app.models.po_models import POHeader, POLineItem  # noqa: E402
+from app.models.tenant import Tenant  # noqa: E402
+from scripts._db_guard import require_non_production_db  # noqa: E402
 
 EXCEL_PATH = r"C:\Users\tsuma\Downloads\bom tool\Cleaned_Purchase_Orders.xlsx"
-import os
 
-DATABASE_URL = (
-    os.environ.get("DATABASE_URL")
-    or os.environ.get("DATABASE_URI")
-    or "postgresql+asyncpg://bom_user:bom_password@127.0.0.1:5432/bom_db"
+# Only consulted if the script can't identify its own rows (see below) --
+# an explicit opt-in is required before it will ever delete every PO row.
+ALLOW_FULL_PO_WIPE = os.environ.get("ALLOW_FULL_PO_WIPE", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
 )
 
 
+async def _tenant_id(session) -> int:
+    """Id of the tenant to seed into (mirrors scripts/seed_e2e_fixture.py).
+
+    POHeader/POLineItem are TenantAwareMixin with tenantId NOT NULL; without
+    an ambient tenant context the before_insert listener in
+    app.core.tenant_events never populates it and every insert below fails
+    the NOT NULL constraint. Also required so the "clear existing data" step
+    can scope its delete to this tenant only -- poNumber is unique only per
+    tenant (uq_po_headers_tenant_poNumber), so a same-numbered PO belonging
+    to a different tenant must never be touched by this script.
+
+    Called from inside the caller's `async with session.begin():` block --
+    uses flush(), not commit(), so it doesn't end that outer transaction
+    (AsyncSession.begin() raises "a transaction is already begun" if called
+    after an earlier commit() auto-began a new one).
+    """
+    tid = (await session.execute(select(Tenant.id).order_by(Tenant.id))).scalars().first()
+    if tid is not None:
+        return tid
+    tenant = Tenant(tenant_name="Blackbox BOM", tenant_code="DEFAULT")
+    session.add(tenant)
+    await session.flush()
+    print(f"Created default tenant id={tenant.id} (database had none)")
+    return tenant.id
+
+
 async def seed():
-    engine = create_async_engine(DATABASE_URL)
+    # Resolves via app.db.session.resolve_database_url() and raises unless the
+    # target looks like a test/e2e/sqlite database (or ALLOW_SEED_ON_LIVE_DB is
+    # explicitly set). Must happen before any connection is opened.
+    database_url = require_non_production_db()
+
+    engine = create_async_engine(database_url)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -79,47 +141,97 @@ async def seed():
 
     # Insert into database
     async with async_session() as session:
-        async with session.begin():
-            # Clear existing data
-            await session.execute(text("DELETE FROM po_line_items"))
-            await session.execute(text("DELETE FROM po_headers"))
+        token = None
+        try:
+            async with session.begin():
+                # Resolved (and, if necessary, created) inside this
+                # transaction via flush() rather than commit() -- calling
+                # session.begin() after an earlier commit() would raise "a
+                # transaction is already begun on this Session".
+                tid = await _tenant_id(session)
+                token = TenantContext.set(tenant_id=tid)
 
-            for po_data in pos:
-                header = POHeader(
-                    poNumber=po_data["number"],
-                    poDate=po_data["date"],
-                    vendorName=po_data["vendor"],
-                    project=po_data["project"],
-                    poTotal=po_data["po_total"],
-                    status=po_data["status"],
-                )
-                session.add(header)
-                await session.flush()  # Get the ID
-
-                for item_data in po_data["items"]:
-                    item = POLineItem(
-                        headerId=header.id,
-                        itemName=item_data["name"],
-                        itemDesc=item_data["desc"],
-                        quantity=item_data["qty"],
-                        itemPrice=item_data["price"],
-                        amount=item_data["amount"],
-                        gst=item_data["gst"],
-                        total=item_data["total"],
+                # Scope the "clear existing data" step to exactly the PO
+                # numbers this run is about to re-insert, AND to this tenant
+                # only -- poNumber is unique per tenant, not globally, so an
+                # unscoped-by-tenant delete could remove another tenant's PO
+                # that happens to share a number with one in this Excel file.
+                po_numbers = [po_data["number"] for po_data in pos]
+                if po_numbers:
+                    existing_header_ids = (
+                        await session.execute(
+                            select(POHeader.id).where(
+                                POHeader.tenantId == tid,
+                                POHeader.poNumber.in_(po_numbers),
+                            )
+                        )
+                    ).scalars().all()
+                    if existing_header_ids:
+                        await session.execute(
+                            delete(POLineItem).where(
+                                POLineItem.tenantId == tid,
+                                POLineItem.headerId.in_(existing_header_ids),
+                            )
+                        )
+                        await session.execute(
+                            delete(POHeader).where(
+                                POHeader.tenantId == tid,
+                                POHeader.id.in_(existing_header_ids),
+                            )
+                        )
+                elif ALLOW_FULL_PO_WIPE:
+                    # No PO numbers parsed from the Excel file, so there is
+                    # nothing to scope to. Only wipe this tenant's POs, and
+                    # only if the operator explicitly opted in.
+                    await session.execute(
+                        delete(POLineItem).where(POLineItem.tenantId == tid)
                     )
-                    session.add(item)
+                    await session.execute(delete(POHeader).where(POHeader.tenantId == tid))
+                else:
+                    print(
+                        "No PO numbers parsed from Excel -- skipping delete "
+                        "(set ALLOW_FULL_PO_WIPE=true to force a full wipe instead)."
+                    )
 
-        # Verify
-        result = await session.execute(text("SELECT COUNT(*) FROM po_headers"))
-        po_count = result.scalar()
-        result = await session.execute(text("SELECT COUNT(*) FROM po_line_items"))
-        item_count = result.scalar()
-        print(f"Inserted {po_count} PO headers and {item_count} line items")
+                for po_data in pos:
+                    header = POHeader(
+                        tenantId=tid,
+                        poNumber=po_data["number"],
+                        poDate=po_data["date"],
+                        vendorName=po_data["vendor"],
+                        project=po_data["project"],
+                        poTotal=po_data["po_total"],
+                        status=po_data["status"],
+                    )
+                    session.add(header)
+                    await session.flush()  # Get the ID
+
+                    for item_data in po_data["items"]:
+                        item = POLineItem(
+                            tenantId=tid,
+                            headerId=header.id,
+                            itemName=item_data["name"],
+                            itemDesc=item_data["desc"],
+                            quantity=item_data["qty"],
+                            itemPrice=item_data["price"],
+                            amount=item_data["amount"],
+                            gst=item_data["gst"],
+                            total=item_data["total"],
+                        )
+                        session.add(item)
+
+            # Verify
+            result = await session.execute(text("SELECT COUNT(*) FROM po_headers"))
+            po_count = result.scalar()
+            result = await session.execute(text("SELECT COUNT(*) FROM po_line_items"))
+            item_count = result.scalar()
+            print(f"Inserted {po_count} PO headers and {item_count} line items")
+        finally:
+            if token is not None:
+                TenantContext.reset(token)
 
     await engine.dispose()
 
 
 if __name__ == "__main__":
-    from sqlalchemy import text
-
     asyncio.run(seed())

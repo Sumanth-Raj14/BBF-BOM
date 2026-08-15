@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_current_user
 from app.core.pagination import PageParams, get_page_params, paginate
+from app.core.tenant_context import tenant_sql_clause
 from app.db.session import get_db
 from app.models.order_tracking import OrderTracking, ShipmentUpdate, TrackingMilestone
 from app.models.po_models import POHeader
@@ -145,20 +148,32 @@ async def list_tracking(
 @router.get("/stats")
 async def tracking_stats(db: AsyncSession = Depends(get_db)):
     """Get tracking aggregate statistics."""
+    # tenant-security: order_tracking carries tenantId; the ORM count above is
+    # auto-filtered (tenant_events.py) but these raw text() queries are not,
+    # so scope them explicitly here.
     result = await db.execute(select(func.count(OrderTracking.id)))
     total = result.scalar() or 0
 
+    tc, tp = tenant_sql_clause()
     result = await db.execute(
-        text('SELECT "currentStage", COUNT(*) as cnt FROM "order_tracking" GROUP BY "currentStage"')
+        text(
+            f'SELECT "currentStage", COUNT(*) as cnt FROM "order_tracking" WHERE 1=1 {tc} GROUP BY "currentStage"'
+        ),
+        tp,
     )
     by_stage = {}
     for row in result.fetchall():
         by_stage[row[0]] = row[1]
 
+    # NOW()::text is Postgres-only cast syntax (SQLite errors on the "::"
+    # token); bind the current time as a plain string instead so the
+    # comparison works identically on both dialects.
     result = await db.execute(
         text(
-            'SELECT COUNT(*) FROM "order_tracking" WHERE "estimatedDelivery" < NOW()::text AND "currentStage" NOT IN (\'delivered\', \'completed\')'
-        )
+            'SELECT COUNT(*) FROM "order_tracking" WHERE "estimatedDelivery" < :_now '
+            f"AND \"currentStage\" NOT IN ('delivered', 'completed') {tc}"
+        ),
+        {**tp, "_now": datetime.now(UTC).isoformat()},
     )
     overdue = result.scalar() or 0
 

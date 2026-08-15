@@ -32,7 +32,11 @@ class BarcodeLookupResponse(BaseModel):
 
 def generate_barcode_string(pn: str, part_id: int) -> str:
     raw = f"{pn}-{part_id}-BLACKBOX"
-    hash_val = hashlib.md5(raw.encode()).hexdigest()[:12].upper()
+    # MD5 stays here, deliberately: this derives a stable barcode number from a
+    # part, and barcodes are already printed on physical labels — changing the
+    # hash would renumber every existing part. It is a deterministic identifier,
+    # not a security or integrity check, hence usedforsecurity=False.
+    hash_val = hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()[:12].upper()
     return f"4988600{hash_val[:4]}{hash_val[4:8]}{hash_val[8:12]}"
 
 

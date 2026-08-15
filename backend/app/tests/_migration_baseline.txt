@@ -1,0 +1,14 @@
+# Model tables that NO migration creates. Enforced by test_migration_table_coverage.py.
+#
+# THIS LIST IS NOW EMPTY, and should stay that way.
+#
+# It used to hold 74 tables that existed only because scripts/init_db.py
+# bootstraps a greenfield database with Base.metadata.create_all(). Migration
+# 059 formalized all of them into the chain, so every model table is now
+# created by a migration and a migrate-only deployment gets a complete schema.
+#
+# Adding a name here re-opens the hole that let calendar_events ship broken
+# (a live API on a table no migration made, invisible to CI because every CI
+# path bootstraps a fresh database with create_all). Write the migration
+# instead — see 058_calendar_events.py for the idempotent single-table pattern,
+# or 059 for the bulk one.

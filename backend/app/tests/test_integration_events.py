@@ -35,9 +35,10 @@ async def test_emit_noop_when_no_connections(db_session, test_user):
 
 @pytest.mark.asyncio
 async def test_work_assign_emits_outbox(client, auth_headers, db_session, test_user):
+    from sqlalchemy import select
+
     from app.models.integration import IntegrationConnection, IntegrationOutbox
     from app.models.work_order import WorkOrder
-    from sqlalchemy import select
 
     db_session.add(IntegrationConnection(tenantId=test_user.tenantId, provider="cliq",
                                          is_enabled=True, status="ok"))

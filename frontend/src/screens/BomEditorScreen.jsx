@@ -3,6 +3,8 @@ import PropTypes from "prop-types";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import { ComplianceReportPanel } from "../components/ComplianceReportPanel.jsx";
+import ExportDialog from "../components/modals/ExportDialog.jsx";
+import UomConverterModal from "../components/modals/UomConverterModal.jsx";
 import {
   BomEditor,
   BomShell,
@@ -11,9 +13,6 @@ import {
   INR,
   Icon,
   ROLES,
-  downloadCSV,
-  downloadJSON,
-  generateXLSX,
   printBOM,
   useAppStore,
 } from "../globals";
@@ -38,6 +37,12 @@ function BomEditorScreen({
   const p = ctx?.project || data.project;
   const r = ctx?.rollup || data.rollup;
   const deltaPct = ((r.bomCost - r.lastCost) / r.lastCost) * 100;
+  // Same fallback convention BomEditor uses for the canonical instance-BOM
+  // id (see root/bom-editor.jsx) — neither the demo fixture nor the
+  // Parts-backed row source currently threads a real bom_id through.
+  const bomId = ctx?.bomId || p?.id || p?.bomId || 1;
+  const [exportOpen, setExportOpen] = React.useState(false);
+  const [uomConverterOpen, setUomConverterOpen] = React.useState(false);
 
   const allCats = [
     "Assembly",
@@ -151,6 +156,12 @@ function BomEditorScreen({
                 label: __t("bomShell.rollbackRevision"),
                 onClick: () => openModal("rollback"),
               },
+              "divider",
+              {
+                icon: <Icon.Sparkles size={11} />,
+                label: __t("uom.title") || "Unit Converter",
+                onClick: () => setUomConverterOpen(true),
+              },
             ]}
           />
           <DropdownButton
@@ -162,52 +173,10 @@ function BomEditorScreen({
               </button>
             }
             items={[
-              { header: __t("bomShell.format") },
               {
-                icon: <Icon.Doc size={11} />,
-                label: __t("bomShell.pdfReport"),
-                onClick: () => {
-                  toast("Generating PDF report…");
-                  setTimeout(
-                    () =>
-                      toast("BOM_v3.2.0.pdf ready", {
-                        kind: "success",
-                        action: {
-                          label: "Download",
-                          onClick: () => toast("Downloaded BOM_v3.2.0.pdf"),
-                        },
-                      }),
-                    900,
-                  );
-                },
-              },
-              {
-                icon: <Icon.Doc size={11} />,
-                label: __t("bomShell.excel"),
-                onClick: () => {
-                  generateXLSX(ctx?.rows || data.rows, "BOM_v3.2.0.xls");
-                  toast(__t("bomShell.excel") + " downloaded", {
-                    kind: "success",
-                  });
-                },
-              },
-              {
-                icon: <Icon.Doc size={11} />,
-                label: __t("bomShell.csv"),
-                onClick: () => {
-                  downloadCSV(ctx?.rows || data.rows, "BOM_v3.2.0.csv");
-                  toast(__t("bomShell.csv") + " downloaded", { kind: "success" });
-                },
-              },
-              {
-                icon: <Icon.Doc size={11} />,
-                label: __t("bomShell.json"),
-                onClick: () => {
-                  downloadJSON(ctx?.rows || data.rows, "BOM_v3.2.0.json");
-                  toast(__t("bomShell.json") + " downloaded", {
-                    kind: "success",
-                  });
-                },
+                icon: <Icon.Export size={11} />,
+                label: __t("bomShell.exportDialog") || "Export…",
+                onClick: () => setExportOpen(true),
               },
               "divider",
               {
@@ -261,7 +230,9 @@ function BomEditorScreen({
               {__t("bomShell.days")}
             </span>
           </div>
-          <div className="delta up">▲ +3d STM32H7</div>
+          {/* fixfe: hardcoded fake lead-time delta ("+3d STM32H7") replaced — no prior-lead or per-part
+              trend data exists in the rollup, so an honest "—" replaces the fabricated number. */}
+          <div className="delta flat">—</div>
         </div>
         <div className="ribbon-cell">
           <div className="label">{__t("bomShell.vendors")}</div>
@@ -273,14 +244,18 @@ function BomEditorScreen({
         <div className="ribbon-cell">
           <div className="label">{__t("bomShell.riskFlags")}</div>
           <div className="value">{r.risk}</div>
-          <div className="delta up">▲ 1 supplier · 1 dup · 1 origin</div>
+          {/* fixfe: hardcoded fake risk breakdown ("1 supplier · 1 dup · 1 origin") replaced — rollup
+              only has a total risk count, not a breakdown by cause, so show "—" instead of fabricating one. */}
+          <div className="delta flat">—</div>
         </div>
         <div className="ribbon-cell" style={{ background: "var(--bg-sunk)" }}>
           <div className="label">{__t("bomShell.status")}</div>
           <div className="value" style={{ fontSize: 13, marginTop: 2 }}>
             <span className="status released">{p.status}</span>
           </div>
-          <div className="delta flat">3 of 4 sub-assys approved</div>
+          {/* fixfe: hardcoded fake approval fraction ("3 of 4 sub-assys approved") replaced — rows have
+              no "approved" field, only status strings, so this can't be derived; show "—" instead. */}
+          <div className="delta flat">—</div>
         </div>
       </div>
 
@@ -289,13 +264,17 @@ function BomEditorScreen({
           className={"tab " + (bomTab === "hierarchy" ? "active" : "")}
           onClick={() => setBomTab("hierarchy")}
         >
-          {__t("bomShell.tabHierarchy")} <span className="count">87</span>
+          {/* fixfe: hardcoded fake tab count (87) replaced with the real total-parts count already
+              computed above as r.parts (same source the ribbon "Total Parts" cell uses). */}
+          {__t("bomShell.tabHierarchy")} <span className="count">{r.parts}</span>
         </button>
         <button
           className={"tab " + (bomTab === "flat" ? "active" : "")}
           onClick={() => setBomTab("flat")}
         >
-          {__t("bomShell.tabFlatList")} <span className="count">64</span>
+          {/* fixfe: hardcoded fake tab count (64) replaced with the real unique-parts count already
+              computed above as r.unique (same source the ribbon "unique" delta uses). */}
+          {__t("bomShell.tabFlatList")} <span className="count">{r.unique}</span>
         </button>
         <button
           className={"tab " + (bomTab === "cost" ? "active" : "")}
@@ -497,8 +476,9 @@ function BomEditorScreen({
             </>
           )}
           <div className="flex-1" />
+          {/* fixfe: hardcoded fake row/unique counts (64/87) replaced with the real rollup values r.parts/r.unique. */}
           <span className="hint">
-            {bomTab === "flat" ? "64" : "87"} rows \u00B7 64 unique
+            {bomTab === "flat" ? r.unique : r.parts} rows \u00B7 {r.unique} unique
           </span>
           <button
             className="btn small"
@@ -559,6 +539,16 @@ function BomEditorScreen({
           />
         )}
       </div>
+      <ExportDialog
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        entity="bom"
+        bomId={bomId}
+      />
+      <UomConverterModal
+        open={uomConverterOpen}
+        onClose={() => setUomConverterOpen(false)}
+      />
     </>
   );
 }

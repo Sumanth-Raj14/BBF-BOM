@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+
 # Float import retained: Part.weight (grams) is a physical measurement, not money.
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func

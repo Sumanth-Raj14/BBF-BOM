@@ -54,21 +54,33 @@ const ECO_STATUS_TO_ECR = {
 };
 const ECO_IMPACT_TO_ECR = { minor: "low", major: "med", critical: "high" };
 
-function approvalsForEcoStatus(status) {
-  if (status === "Approved" || status === "Implemented") {
-    return { eng: "approved", proc: "approved", fin: "approved" };
+// Normalizes a row's `approvals` for rendering. Real eco_approvals records
+// (the `approvals` array on GET /eco/{id}) and the local-first demo rows'
+// {eng,proc,fin} shape — also what older localStorage payloads hold — both
+// flatten to the same list. null means "no real approval data for this
+// row", rendered as an explicit unknown dot and never as a grid derived
+// from the ECO's status.
+function approvalList(approvals) {
+  if (Array.isArray(approvals)) {
+    return approvals.map((a) => ({
+      role: `Approver ${a.approver_id}`,
+      value: a.status || "unknown",
+      text: a.approval_order != null ? String(a.approval_order) : undefined,
+    }));
   }
-  if (status === "Rejected") {
-    return { eng: "rejected", proc: "rejected", fin: "rejected" };
+  if (approvals && typeof approvals === "object") {
+    return Object.entries(approvals).map(([role, value]) => ({ role, value }));
   }
-  return { eng: "pending", proc: "pending", fin: "pending" };
+  return null;
 }
 
 // Backend EcoHeader -> local ECR row shape. The ECO model has no
 // project/cost_impact/items_affected columns at all, so those are left at
 // honest, neutral placeholders here rather than fabricated — see
 // needs_followup in the wiring notes for this screen.
-function mapEcoToEcr(eco) {
+// `approvals` is the ECO's real eco_approvals rows, or null when the
+// detail fetch that carries them hasn't resolved or failed.
+function mapEcoToEcr(eco, approvals) {
   const status = ECO_STATUS_TO_ECR[eco.status] || "Draft";
   return {
     id: eco.eco_number || `ECO-${eco.id}`,
@@ -80,7 +92,7 @@ function mapEcoToEcr(eco) {
     date: (eco.requested_at || eco.created_at || "").slice(0, 10) || "—",
     cost_impact: 0,
     items_affected: 0,
-    approvals: approvalsForEcoStatus(status),
+    approvals: Array.isArray(approvals) ? approvals : null,
     ecoId: eco.id,
   };
 }
@@ -92,7 +104,7 @@ function mapEcoToEcr(eco) {
 // mapEcoToEcr. Local-only enrichment (project/cost_impact/items_affected)
 // on already-known rows is left untouched rather than clobbered with
 // mapEcoToEcr's placeholders.
-function mergeBackendEcos(current, ecoRows) {
+function mergeBackendEcos(current, ecoRows, approvalsByEco) {
   const knownEcoIds = new Set(
     current.map((e) => e.ecoId).filter((id) => id != null),
   );
@@ -100,7 +112,7 @@ function mergeBackendEcos(current, ecoRows) {
     if (e.ecoId == null) return e;
     const eco = ecoRows.find((row) => row.id === e.ecoId);
     if (!eco) return e;
-    const mapped = mapEcoToEcr(eco);
+    const mapped = mapEcoToEcr(eco, approvalsByEco.get(eco.id));
     return {
       ...e,
       status: mapped.status,
@@ -110,11 +122,14 @@ function mergeBackendEcos(current, ecoRows) {
   });
   const additions = ecoRows
     .filter((eco) => !knownEcoIds.has(eco.id))
-    .map(mapEcoToEcr);
+    .map((eco) => mapEcoToEcr(eco, approvalsByEco.get(eco.id)));
   return [...additions, ...refreshed];
 }
 
-function ApprovalDot({ role, value }) {
+// `text` overrides the glyph — real approvals are numbered by
+// approval_order, the demo rows' pseudo-roles use their initial.
+function ApprovalDot({ role, value, text }) {
+  const decided = value === "approved" || value === "rejected";
   return (
     <span
       title={role.toUpperCase() + ": " + value}
@@ -122,13 +137,24 @@ function ApprovalDot({ role, value }) {
       style={{
         borderRadius: 99,
         background: APPROVAL_TONE[value] || "var(--bg-subtle)",
-        color: value === "pending" ? "var(--text-muted)" : "white",
-        border: value === "pending" ? "1px solid var(--border-subtle)" : "none",
+        color: decided ? "white" : "var(--text-muted)",
+        border: decided ? "none" : "1px solid var(--border-subtle)",
       }}
     >
-      {role[0].toUpperCase()}
+      {text || role[0].toUpperCase()}
     </span>
   );
+}
+
+// Row-level approval strip: real records, "no approvals recorded", or an
+// explicit unknown — never a synthesized stand-in.
+function ApprovalDots({ approvals }) {
+  const list = approvalList(approvals);
+  if (!list) return <ApprovalDot role="unknown" value="unknown" text="?" />;
+  if (!list.length) return <span className="fs-10 fg-3 font-mono">—</span>;
+  return list.map((a) => (
+    <ApprovalDot key={a.role} role={a.role} value={a.value} text={a.text} />
+  ));
 }
 
 function ECRScreen() {
@@ -231,11 +257,28 @@ function ECRScreen() {
     let cancelled = false;
     api.eco
       .list({ per_page: 200 })
-      .then((res) => {
+      .then(async (res) => {
         if (cancelled) return;
         const rows = Array.isArray(res) ? res : res?.items || [];
         if (!rows.length) return;
-        setEcrs((cur) => mergeBackendEcos(cur, rows));
+        // The real eco_approvals rows only ride on the ECO detail payload
+        // (GET /eco/{id}.approvals), not the list — so who actually
+        // approved what is read per ECO. An ECO whose detail fails stays
+        // at unknown rather than getting a status-shaped guess.
+        // ponytail: one detail request per ECO, swap for a bulk approvals
+        // endpoint if this list ever gets long.
+        const details = await Promise.all(
+          rows.map((eco) =>
+            api?.eco?.get ? api.eco.get(eco.id).catch(() => null) : null,
+          ),
+        );
+        if (cancelled) return;
+        const approvalsByEco = new Map();
+        details.forEach((d, i) => {
+          if (Array.isArray(d?.approvals))
+            approvalsByEco.set(rows[i].id, d.approvals);
+        });
+        setEcrs((cur) => mergeBackendEcos(cur, rows, approvalsByEco));
       })
       .catch(() => {
         // Offline / backend unreachable — local-first data stands as-is.
@@ -337,21 +380,37 @@ function ECRScreen() {
     }
   };
 
+  // Re-reads the ECO's real eco_approvals rows after a state change rather
+  // than assuming what the backend recorded. A failed read leaves the row
+  // at unknown.
+  const refreshApprovals = (ecoId) => {
+    if (ecoId == null || !api?.eco?.get) return;
+    api.eco
+      .get(ecoId)
+      .then((d) => {
+        const approvals = Array.isArray(d?.approvals) ? d.approvals : null;
+        setEcrs((cur) =>
+          cur.map((e) => (e.ecoId === ecoId ? { ...e, approvals } : e)),
+        );
+      })
+      .catch(() => {
+        setEcrs((cur) =>
+          cur.map((e) => (e.ecoId === ecoId ? { ...e, approvals: null } : e)),
+        );
+      });
+  };
+
   const updateStatus = (id, action, opts = {}) => {
     const prevEcr = ecrs.find((e) => e.id === id);
     const next = ecrs.map((e) => {
       if (e.id !== id) return e;
       let status = e.status;
-      let approvals = { ...e.approvals };
       if (action === "approve") {
         status = "Approved";
-        approvals = { eng: "approved", proc: "approved", fin: "approved" };
       } else if (action === "reject") {
         status = "Rejected";
-        approvals = { eng: "rejected", proc: "rejected", fin: "rejected" };
       } else if (action === "implement") {
         status = "Implemented";
-        approvals = { eng: "approved", proc: "approved", fin: "approved" };
       } else if (action === "advance") {
         status =
           e.status === "Draft"
@@ -359,10 +418,12 @@ function ECRScreen() {
             : e.status === "Review"
               ? "Approved"
               : "Implemented";
-        if (status === "Approved" || status === "Implemented")
-          approvals = { eng: "approved", proc: "approved", fin: "approved" };
       }
-      return { ...e, status, approvals };
+      // Approvals are never derived from status — they are the backend's
+      // eco_approvals rows, refreshed below. A local-only row (no ecoId)
+      // has no real approval record to read, so once its status moves it
+      // drops to unknown instead of carrying a made-up grid.
+      return { ...e, status, approvals: e.ecoId != null ? e.approvals : null };
     });
     setEcrs(next);
     const ecr = next.find((e) => e.id === id);
@@ -380,6 +441,9 @@ function ECRScreen() {
       toast(id + " " + label, { kind: action === "reject" ? "warn" : "success" });
     }
     notify("ECR " + label, id + " · " + (ecr?.title || ""));
+    // approve/implement were already applied server-side by ESignDialog
+    // before this ran — re-read the approval rows it actually recorded.
+    if (ESIGN_ACTIONS.has(action)) refreshApprovals(prevEcr?.ecoId);
     // Keep the backend ECO in lockstep when submitting a Draft ECR for
     // review: perform_eco_action's "approve" transition requires the ECO
     // to already be in "review" status, so without this sync a freshly
@@ -411,7 +475,10 @@ function ECRScreen() {
       prevEcr.ecoId != null &&
       api?.eco?.action
     ) {
-      api.eco.action(prevEcr.ecoId, { action: "reject" }).catch(() => {
+      api.eco
+        .action(prevEcr.ecoId, { action: "reject" })
+        .then(() => refreshApprovals(prevEcr.ecoId))
+        .catch(() => {
         // Honest failure — local status still reflects the user's intent.
       });
     }
@@ -604,9 +671,7 @@ function ECRScreen() {
       header: __t("advanced.ecr.approvalsCol") || "Approvals",
       render: (e) => (
         <div className="inline-flex" style={{ gap: 3 }}>
-          {Object.entries(e.approvals).map(([k, v]) => (
-            <ApprovalDot key={k} role={k} value={v} />
-          ))}
+          <ApprovalDots approvals={e.approvals} />
         </div>
       ),
     },
@@ -928,36 +993,46 @@ function ECRScreen() {
               {__t("advanced.ecr.approvalWorkflow") || "Approval Workflow"}
             </div>
             <div className="flex gap-12">
-              {Object.entries(detailEcr.approvals).map(([k, v]) => (
-                <div
-                  key={k}
-                  className="flex items-center gap-6 rounded-r2"
-                  style={{
-                    padding: "6px 10px",
-                    background:
-                      v === "approved"
-                        ? "color-mix(in oklch, var(--status-success) 10%, var(--bg-surface))"
-                        : v === "rejected"
-                          ? "color-mix(in oklch, var(--status-danger) 10%, var(--bg-surface))"
-                          : "var(--bg-subtle)",
-                    border:
-                      "1px solid " +
-                      (v === "approved"
-                        ? "var(--status-success)"
-                        : v === "rejected"
-                          ? "var(--status-danger)"
-                          : "var(--border-subtle)"),
-                  }}
-                >
-                  <ApprovalDot role={k} value={v} />
-                  <div>
-                    <div className="fs-10 fw-600 fs-9 fg-3">
-                      {k.toUpperCase()}
+              {approvalList(detailEcr.approvals)?.length ? (
+                approvalList(detailEcr.approvals).map((a) => (
+                  <div
+                    key={a.role}
+                    className="flex items-center gap-6 rounded-r2"
+                    style={{
+                      padding: "6px 10px",
+                      background:
+                        a.value === "approved"
+                          ? "color-mix(in oklch, var(--status-success) 10%, var(--bg-surface))"
+                          : a.value === "rejected"
+                            ? "color-mix(in oklch, var(--status-danger) 10%, var(--bg-surface))"
+                            : "var(--bg-subtle)",
+                      border:
+                        "1px solid " +
+                        (a.value === "approved"
+                          ? "var(--status-success)"
+                          : a.value === "rejected"
+                            ? "var(--status-danger)"
+                            : "var(--border-subtle)"),
+                    }}
+                  >
+                    <ApprovalDot role={a.role} value={a.value} text={a.text} />
+                    <div>
+                      <div className="fs-10 fw-600 fs-9 fg-3">
+                        {a.role.toUpperCase()}
+                      </div>
+                      <div>{a.value}</div>
                     </div>
-                    <div>{v}</div>
                   </div>
+                ))
+              ) : (
+                <div className="hint">
+                  {approvalList(detailEcr.approvals)
+                    ? __t("advanced.ecr.noApprovals") ||
+                      "No approvals recorded for this ECO"
+                    : __t("advanced.ecr.approvalsUnknown") ||
+                      "Approvals unknown — couldn't read this ECO's approval records"}
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </Modal>

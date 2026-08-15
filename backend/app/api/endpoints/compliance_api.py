@@ -1,6 +1,6 @@
 """Compliance Management API - ISO 9001, AS9100, RoHS, REACH, Conflict Minerals."""
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
+from app.core.tenant_context import tenant_sql_clause
 from app.db.session import get_db
 from app.models.user import User
 
@@ -53,19 +54,23 @@ class PartCertifyCreate(BaseModel):
 # ---- CRUD: Compliance Standards ----
 
 
-@router.get("/compliance")
+@router.get("")
 async def list_compliance(
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
+    # tenant-security: raw text() SQL bypasses the ORM select tenant filter
+    # (tenant_events.py), so scope it explicitly via the shared helper.
+    tc, tp = tenant_sql_clause()
     r = await db.execute(
         text(
-            'SELECT id, name, description, "isActive", "createdAt", "updatedAt" FROM compliance ORDER BY name'
-        )
+            f'SELECT id, name, description, "isActive", "createdAt", "updatedAt" FROM compliance WHERE 1=1 {tc} ORDER BY name'
+        ),
+        tp,
     )
     return [dict(row) for row in r.mappings().all()]
 
 
-@router.post("/compliance")
+@router.post("")
 async def create_compliance(
     body: ComplianceCreate,
     db: AsyncSession = Depends(get_db),
@@ -81,17 +86,19 @@ async def create_compliance(
     return dict(r.mappings().one())
 
 
-@router.get("/compliance/{compliance_id:int}")
+@router.get("/{compliance_id:int}")
 async def get_compliance(
     compliance_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: scope by tenant so ids from another tenant 404 instead of leaking.
+    tc, tp = tenant_sql_clause()
     r = await db.execute(
         text(
-            'SELECT id, name, description, "isActive", "createdAt", "updatedAt" FROM compliance WHERE id = :id'
+            f'SELECT id, name, description, "isActive", "createdAt", "updatedAt" FROM compliance WHERE id = :id {tc}'
         ),
-        {"id": compliance_id},
+        {"id": compliance_id, **tp},
     )
     row = r.mappings().one_or_none()
     if not row:
@@ -99,21 +106,23 @@ async def get_compliance(
     return dict(row)
 
 
-@router.put("/compliance/{compliance_id:int}")
+@router.put("/{compliance_id:int}")
 async def update_compliance(
     compliance_id: int,
     body: ComplianceUpdate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: scope both the existence check and the UPDATE by tenant.
+    tc, tp = tenant_sql_clause()
     existing = await db.execute(
-        text("SELECT id FROM compliance WHERE id = :id"), {"id": compliance_id}
+        text(f"SELECT id FROM compliance WHERE id = :id {tc}"), {"id": compliance_id, **tp}
     )
     if not existing.mappings().one_or_none():
         raise HTTPException(status_code=404, detail="Compliance standard not found")
 
     sets = []
-    params: dict = {"id": compliance_id}
+    params: dict = {"id": compliance_id, **tp}
     if body.name is not None:
         sets.append("name = :name")
         params["name"] = body.name
@@ -126,11 +135,12 @@ async def update_compliance(
     if not sets:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    sets.append('"updatedAt" = NOW()')
+    # CURRENT_TIMESTAMP (not Postgres-only NOW()) so this runs on both Postgres and SQLite.
+    sets.append('"updatedAt" = CURRENT_TIMESTAMP')
     r = await db.execute(
         text(
-            'UPDATE compliance SET {} WHERE id = :id RETURNING id, name, description, "isActive", "createdAt", "updatedAt"'.format(
-                ", ".join(sets)
+            'UPDATE compliance SET {} WHERE id = :id {} RETURNING id, name, description, "isActive", "createdAt", "updatedAt"'.format(
+                ", ".join(sets), tc
             )
         ),
         params,
@@ -139,7 +149,7 @@ async def update_compliance(
     return dict(r.mappings().one())
 
 
-@router.patch("/compliance/{compliance_id:int}")
+@router.patch("/{compliance_id:int}")
 async def patch_compliance(
     compliance_id: int,
     body: ComplianceUpdate,
@@ -149,18 +159,22 @@ async def patch_compliance(
     return await update_compliance(compliance_id, body, db, user)
 
 
-@router.delete("/compliance/{compliance_id:int}")
+@router.delete("/{compliance_id:int}")
 async def delete_compliance(
     compliance_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: scope both the existence check and the DELETE by tenant.
+    tc, tp = tenant_sql_clause()
     existing = await db.execute(
-        text("SELECT id FROM compliance WHERE id = :id"), {"id": compliance_id}
+        text(f"SELECT id FROM compliance WHERE id = :id {tc}"), {"id": compliance_id, **tp}
     )
     if not existing.mappings().one_or_none():
         raise HTTPException(status_code=404, detail="Compliance standard not found")
-    await db.execute(text("DELETE FROM compliance WHERE id = :id"), {"id": compliance_id})
+    await db.execute(
+        text(f"DELETE FROM compliance WHERE id = :id {tc}"), {"id": compliance_id, **tp}
+    )
     await db.commit()
     return {"status": "deleted"}
 
@@ -168,30 +182,54 @@ async def delete_compliance(
 # ---- Compliance Packs ----
 
 
-@router.get("/compliance/packs")
-async def list_packs(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def _fetch_packs(db: AsyncSession, pack_id: Optional[int] = None) -> list[dict]:
+    # json_agg/json_build_object/FILTER + '::json' are Postgres-only and don't
+    # exist on SQLite, so assemble the checklist in Python instead of raw SQL
+    # JSON aggregation — portable across both dialects with no branching.
+    where = "WHERE cp.id = :pid" if pack_id is not None else ""
+    params = {"pid": pack_id} if pack_id is not None else {}
     r = await db.execute(
-        text("""
+        text(f"""
             SELECT cp.id, cp.name, cp.standard_id, cp.description,
-                   c.name AS standard_name, cp."createdAt",
-                   COALESCE(
-                       json_agg(
-                           json_build_object('id', cpi.id, 'requirement', cpi.requirement, 'sort_order', cpi.sort_order)
-                           ORDER BY cpi.sort_order
-                       ) FILTER (WHERE cpi.id IS NOT NULL),
-                       '[]'::json
-                   ) AS checklist
+                   c.name AS standard_name, cp."createdAt"
             FROM compliance_packs cp
             LEFT JOIN compliance c ON c.id = cp.standard_id
-            LEFT JOIN compliance_pack_items cpi ON cpi.pack_id = cp.id
-            GROUP BY cp.id, cp.name, cp.standard_id, cp.description, c.name, cp."createdAt"
+            {where}
             ORDER BY cp.name
-        """)
+        """),
+        params,
     )
-    return [dict(row) for row in r.mappings().all()]
+    packs = [dict(row) for row in r.mappings().all()]
+    if not packs:
+        return []
+
+    pack_ids = [p["id"] for p in packs]
+    placeholders = ", ".join(f":iid{i}" for i in range(len(pack_ids)))
+    items_r = await db.execute(
+        text(f"""
+            SELECT id, pack_id, requirement, sort_order
+            FROM compliance_pack_items
+            WHERE pack_id IN ({placeholders})
+            ORDER BY pack_id, sort_order
+        """),
+        {f"iid{i}": pid for i, pid in enumerate(pack_ids)},
+    )
+    items_by_pack: dict[int, list] = {}
+    for row in items_r.mappings().all():
+        items_by_pack.setdefault(row["pack_id"], []).append(
+            {"id": row["id"], "requirement": row["requirement"], "sort_order": row["sort_order"]}
+        )
+    for p in packs:
+        p["checklist"] = items_by_pack.get(p["id"], [])
+    return packs
 
 
-@router.post("/compliance/packs")
+@router.get("/packs")
+async def list_packs(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    return await _fetch_packs(db)
+
+
+@router.post("/packs")
 async def create_pack(
     body: CompliancePackCreate,
     db: AsyncSession = Depends(get_db),
@@ -213,86 +251,57 @@ async def create_pack(
         )
     await db.commit()
 
-    result = await db.execute(
-        text("""
-            SELECT cp.id, cp.name, cp.standard_id, cp.description,
-                   c.name AS standard_name, cp."createdAt",
-                   COALESCE(
-                       json_agg(
-                           json_build_object('id', cpi.id, 'requirement', cpi.requirement, 'sort_order', cpi.sort_order)
-                           ORDER BY cpi.sort_order
-                       ) FILTER (WHERE cpi.id IS NOT NULL),
-                       '[]'::json
-                   ) AS checklist
-            FROM compliance_packs cp
-            LEFT JOIN compliance c ON c.id = cp.standard_id
-            LEFT JOIN compliance_pack_items cpi ON cpi.pack_id = cp.id
-            WHERE cp.id = :pid
-            GROUP BY cp.id, cp.name, cp.standard_id, cp.description, c.name, cp."createdAt"
-        """),
-        {"pid": pack_id},
-    )
-    return dict(result.mappings().one())
+    packs = await _fetch_packs(db, pack_id)
+    return packs[0]
 
 
-@router.get("/compliance/packs/{pack_id}")
+@router.get("/packs/{pack_id}")
 async def get_pack(
     pack_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    r = await db.execute(
-        text("""
-            SELECT cp.id, cp.name, cp.standard_id, cp.description,
-                   c.name AS standard_name, cp."createdAt",
-                   COALESCE(
-                       json_agg(
-                           json_build_object('id', cpi.id, 'requirement', cpi.requirement, 'sort_order', cpi.sort_order)
-                           ORDER BY cpi.sort_order
-                       ) FILTER (WHERE cpi.id IS NOT NULL),
-                       '[]'::json
-                   ) AS checklist
-            FROM compliance_packs cp
-            LEFT JOIN compliance c ON c.id = cp.standard_id
-            LEFT JOIN compliance_pack_items cpi ON cpi.pack_id = cp.id
-            WHERE cp.id = :pid
-            GROUP BY cp.id, cp.name, cp.standard_id, cp.description, c.name, cp."createdAt"
-        """),
-        {"pid": pack_id},
-    )
-    row = r.mappings().one_or_none()
-    if not row:
+    packs = await _fetch_packs(db, pack_id)
+    if not packs:
         raise HTTPException(status_code=404, detail="Compliance pack not found")
-    return dict(row)
+    return packs[0]
 
 
 # ---- Part Compliance Status ----
 
 
-@router.get("/compliance/parts/{part_id}")
+@router.get("/parts/{part_id}")
 async def get_part_compliance(
     part_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # tenant-security: parts and compliance both carry tenantId; scope both
+    # raw queries so a caller cannot probe another tenant's part/standard by id.
+    tc, tp = tenant_sql_clause()
     r = await db.execute(
-        text("SELECT id, pn, name FROM parts WHERE id = :pid"),
-        {"pid": part_id},
+        text(f"SELECT id, pn, name FROM parts WHERE id = :pid {tc}"),
+        {"pid": part_id, **tp},
     )
     part = r.mappings().one_or_none()
     if not part:
         raise HTTPException(status_code=404, detail="Part not found")
 
+    tc_c, tp_c = tenant_sql_clause("c")
+    # CAST(... AS TEXT), not the Postgres-only "::text" cast, so this runs on SQLite too.
     standards = await db.execute(
-        text("""
+        text(f"""
             SELECT c.id, c.name, c.description,
-                   pc.certified_by, pc.certification_date::text, pc.expiry_date::text,
+                   pc.certified_by,
+                   CAST(pc.certification_date AS TEXT) AS certification_date,
+                   CAST(pc.expiry_date AS TEXT) AS expiry_date,
                    pc.notes, pc."createdAt" AS certified_at
             FROM compliance c
             LEFT JOIN part_certifications pc ON pc.compliance_id = c.id AND pc.part_id = :pid
+            WHERE 1=1 {tc_c}
             ORDER BY c.name
         """),
-        {"pid": part_id},
+        {"pid": part_id, **tp_c},
     )
 
     return {
@@ -301,19 +310,25 @@ async def get_part_compliance(
     }
 
 
-@router.post("/compliance/parts/{part_id}/certify")
+@router.post("/parts/{part_id}/certify")
 async def certify_part(
     part_id: int,
     body: PartCertifyCreate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    part = await db.execute(text("SELECT id FROM parts WHERE id = :pid"), {"pid": part_id})
+    # tenant-security: validate both FKs against the caller's own tenant before
+    # inserting a certification row that links them.
+    tc, tp = tenant_sql_clause()
+    part = await db.execute(
+        text(f"SELECT id FROM parts WHERE id = :pid {tc}"), {"pid": part_id, **tp}
+    )
     if not part.mappings().one_or_none():
         raise HTTPException(status_code=404, detail="Part not found")
 
     std = await db.execute(
-        text("SELECT id FROM compliance WHERE id = :cid"), {"cid": body.compliance_id}
+        text(f"SELECT id FROM compliance WHERE id = :cid {tc}"),
+        {"cid": body.compliance_id, **tp},
     )
     if not std.mappings().one_or_none():
         raise HTTPException(status_code=404, detail="Compliance standard not found")
@@ -331,7 +346,10 @@ async def certify_part(
         text("""
             INSERT INTO part_certifications (part_id, compliance_id, certified_by, certification_date, expiry_date, notes)
             VALUES (:pid, :cid, :cb, :cd, :ed, :notes)
-            RETURNING id, part_id, compliance_id, certified_by, certification_date::text, expiry_date::text, notes, "createdAt"
+            RETURNING id, part_id, compliance_id, certified_by,
+                      CAST(certification_date AS TEXT) AS certification_date,
+                      CAST(expiry_date AS TEXT) AS expiry_date,
+                      notes, "createdAt"
         """),
         {
             "pid": part_id,
@@ -349,7 +367,7 @@ async def certify_part(
 # ---- Dashboard / Aggregated Stats ----
 
 
-@router.get("/compliance/dashboard")
+@router.get("/dashboard")
 async def compliance_dashboard(
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
@@ -360,13 +378,17 @@ async def compliance_dashboard(
     certified_parts = await db.execute(
         text("SELECT COUNT(DISTINCT part_id) AS count FROM part_certifications")
     )
+    # "+ INTERVAL '90 days'" is Postgres-only; compute the cutoff in Python
+    # and bind it so this runs on SQLite too.
+    cutoff_90d = date.today() + timedelta(days=90)
     expiring_soon = await db.execute(
         text("""
             SELECT COUNT(*) AS count
             FROM part_certifications
             WHERE expiry_date IS NOT NULL
-              AND expiry_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '90 days'
-        """)
+              AND expiry_date BETWEEN CURRENT_DATE AND :cutoff
+        """),
+        {"cutoff": cutoff_90d},
     )
     expired = await db.execute(
         text("""

@@ -118,7 +118,7 @@ export { PROJECTS } from '../projects.js';
 
 // ── Auth / Onboarding ──
 export {
-  ROLES, TenantContext, AuthScreen, OnboardingWizard, MobileScanView, TenantSettingsModal,
+  ROLES, TenantContext, AuthScreen, SSOCallbackScreen, OnboardingWizard, MobileScanView, TenantSettingsModal,
 } from './root/auth-onboarding.jsx';
 
 // ── Shared Utilities / Components ──

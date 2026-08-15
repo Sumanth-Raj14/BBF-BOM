@@ -74,7 +74,10 @@ class RfqHeader(Base, TenantAwareMixin):
     response_deadline = Column(DateTime(timezone=True))
     awarded_to_vendor_id = Column(
         Integer, ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True, index=True)
-    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=False, index=True)
+    # nullable=True: ondelete="SET NULL" preserves the RFQ when its creating
+    # user is deleted, but that SET NULL would violate a NOT NULL constraint.
+    # Was nullable=False, which contradicted the FK's own ondelete behaviour.
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
