@@ -6,8 +6,8 @@ models with zero routes), and the EBOM->MBOM derivation helper: it must
 copy structure, never mutate the source, and stay tenant-isolated.
 """
 
-from fastapi import HTTPException
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.core.security import get_password_hash

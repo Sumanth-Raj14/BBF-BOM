@@ -11,8 +11,8 @@ end-to-end today.
 
 import pytest
 
-from app.main import app
 from app.api.endpoints import catalogs as catalogs_module
+from app.main import app
 
 _CATALOGS_PREFIX = "/api/v1/catalogs"
 

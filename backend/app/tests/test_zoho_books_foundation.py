@@ -28,10 +28,10 @@ _ZOHO_TABLES = {"zoho_sync_state", "zoho_sync_cursor", "zoho_sync_log"}
 
 
 def test_migration_head_to_new_applies_on_fresh_sqlite(tmp_path):
-    from alembic import command
     from alembic.config import Config
 
     import app.models  # noqa: F401 — ensure every table is registered on the metadata
+    from alembic import command
 
     db_file = tmp_path / "zoho_migration.db"
     sync_url = f"sqlite:///{db_file.as_posix()}"

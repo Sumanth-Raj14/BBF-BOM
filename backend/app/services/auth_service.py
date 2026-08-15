@@ -286,7 +286,7 @@ async def register_new_user(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username already taken")
 
-    from app.models.role import Role, user_roles
+    from app.models.role import user_roles
     from app.models.tenant import Tenant
 
     # Secure local-first default: self-registration must never let an anonymous

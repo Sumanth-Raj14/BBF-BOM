@@ -441,7 +441,10 @@ async def test_link_part_rejects_cross_tenant_part(client, db_session):
 @pytest.mark.asyncio
 async def test_link_bom_rejects_cross_tenant_bom(client, db_session):
     headers_t1 = await _scoped_login(client, db_session, 1, "reqbom-t1@example.com")
-    headers_t2 = await _scoped_login(client, db_session, 2, "reqbom-t2@example.com")
+    # Called for its side effect — it creates tenant 2's user — not for the
+    # headers, which this test never sends. The bom_b row below is what makes
+    # bom_b_id a real id, so tenant 1's 404 is scoping rather than a bad id.
+    await _scoped_login(client, db_session, 2, "reqbom-t2@example.com")
 
     from app.core.tenant_context import TenantContext
 

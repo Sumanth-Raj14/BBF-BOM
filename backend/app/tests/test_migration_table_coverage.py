@@ -64,9 +64,8 @@ def _tables_created_by_migrations() -> set[str]:
 
 
 def test_new_model_tables_have_a_migration():
-    from app.db.base import Base
-
     import app.models  # noqa: F401  (populate Base.metadata with every model)
+    from app.db.base import Base
 
     baseline = _read_baseline()
     uncovered = set(Base.metadata.tables) - _tables_created_by_migrations()
@@ -87,9 +86,8 @@ def test_baseline_has_no_stale_entries():
     Without this, the baseline only ever grows and slowly stops meaning
     anything.
     """
-    from app.db.base import Base
-
     import app.models  # noqa: F401
+    from app.db.base import Base
 
     baseline = _read_baseline()
     covered_now = _tables_created_by_migrations()

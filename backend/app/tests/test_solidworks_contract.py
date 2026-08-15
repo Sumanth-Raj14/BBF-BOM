@@ -10,7 +10,6 @@ import pytest
 
 from app.models.enterprise_extensions import AutoNumberScheme
 
-
 # ---------------------------------------------------------------------------
 # Property-mapping CRUD
 # ---------------------------------------------------------------------------

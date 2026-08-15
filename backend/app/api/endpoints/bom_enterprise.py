@@ -3,10 +3,9 @@ BOM Management Enterprise API
 Multi-level BOM, quantity rollups, snapshots, where-used, variants
 """
 
+import io
 from decimal import Decimal
 from typing import Any, Literal, Optional
-
-import io
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import StreamingResponse

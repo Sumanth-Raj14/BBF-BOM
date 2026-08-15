@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, text
@@ -173,7 +173,7 @@ async def tracking_stats(db: AsyncSession = Depends(get_db)):
             'SELECT COUNT(*) FROM "order_tracking" WHERE "estimatedDelivery" < :_now '
             f"AND \"currentStage\" NOT IN ('delivered', 'completed') {tc}"
         ),
-        {**tp, "_now": datetime.now(timezone.utc).isoformat()},
+        {**tp, "_now": datetime.now(UTC).isoformat()},
     )
     overdue = result.scalar() or 0
 

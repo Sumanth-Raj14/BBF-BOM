@@ -8,16 +8,16 @@ response. Both call sites now filter by Part.tenantId == tid, matching the
 established convention elsewhere in bom_service.py.
 """
 
+import pytest
+from fastapi import HTTPException
+from sqlalchemy import select
+
 from app.core.tenant_context import TenantContext
 from app.models.bom import BOM
 from app.models.bom_variant import BomVariantItem
 from app.models.part import Part
 from app.models.tenant import Tenant
 from app.services import bom_service
-
-from fastapi import HTTPException
-from sqlalchemy import select
-import pytest
 
 
 async def _commit_as(db_session, tenant_id, *objs):

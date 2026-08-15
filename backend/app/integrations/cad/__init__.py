@@ -1,5 +1,7 @@
-from app.integrations.cad import adapters  # noqa: F401 -- registers Fusion/Altium adapters
-from app.integrations.cad import onshape  # noqa: F401 -- registers OnshapeConnector
+from app.integrations.cad import (
+    adapters,  # noqa: F401 -- registers Fusion/Altium adapters
+    onshape,  # noqa: F401 -- registers OnshapeConnector
+)
 from app.integrations.cad.base import (
     CadAssembly,
     CadAuthError,

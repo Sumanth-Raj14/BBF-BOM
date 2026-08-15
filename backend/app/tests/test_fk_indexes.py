@@ -14,7 +14,6 @@ create_all (fresh install) and the migration chain.
 import app.models  # noqa: F401 — register every model on the metadata
 from app.db.base import Base
 
-
 # Constraint types that actually cause Postgres to build an index. A
 # ForeignKeyConstraint does NOT — this test originally counted every
 # constraint, so eight FK columns with no index at all were reported as

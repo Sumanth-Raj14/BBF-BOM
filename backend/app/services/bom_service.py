@@ -17,7 +17,6 @@ from app.core.s3_storage import s3_storage
 from app.core.tenant_context import get_tenant_id
 from app.models.bom import BOM, BOMItem
 from app.models.bom_closure import BomClosure
-from app.models.mbom import MbomHeader, MbomItem
 from app.models.bom_item import BomItem as TemplateBomItem
 from app.models.bom_item_custom_value import BomItemCustomValue
 from app.models.bom_snapshot import BomBaseline, BomSnapshot
@@ -25,6 +24,7 @@ from app.models.bom_template import BomTemplate
 from app.models.bom_variant import BomVariant, BomVariantItem
 from app.models.document import Document
 from app.models.enterprise_extensions import CustomAttributeDefinition
+from app.models.mbom import MbomHeader, MbomItem
 from app.models.part import Part
 from app.services import uom_service, webhook_service
 
@@ -713,7 +713,10 @@ async def attach_bom_item_image(
     # Never build a path from the client-supplied filename — derive a safe
     # name from the content hash plus a whitelisted extension only (same rule
     # as documents.py's upload_document).
-    file_hash = hashlib.md5(content).hexdigest()[:12]
+    # SHA-256 for the same reason as documents.py's upload_document: this hash
+    # becomes the stored object's name and the key has no tenant prefix, so a
+    # cheap MD5 collision could overwrite another tenant's file.
+    file_hash = hashlib.sha256(content).hexdigest()[:16]
     raw_ext = os.path.splitext(file.filename or "")[1].lower().lstrip(".")
     safe_ext = raw_ext if raw_ext.isalnum() and raw_ext in ALLOWED_EXTENSIONS else "bin"
     safe_filename = f"{file_hash}.{safe_ext}"

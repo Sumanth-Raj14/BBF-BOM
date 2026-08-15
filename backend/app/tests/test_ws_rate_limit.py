@@ -150,7 +150,7 @@ def test_get_client_ip_ignores_spoofed_headers_without_a_proxy(monkeypatch):
 def test_ws_endpoint_resolves_the_ip_through_get_client_ip():
     """Source-level: the endpoint needs a live WS handshake to exercise."""
     source = inspect.getsource(main.websocket_endpoint)
-    code = "\n".join(l for l in source.splitlines() if not l.lstrip().startswith("#"))
+    code = "\n".join(ln for ln in source.splitlines() if not ln.lstrip().startswith("#"))
     assert "get_client_ip(websocket)" in code
     assert "websocket.client.host" not in code, (
         "the WS endpoint must not read the peer address directly — it ignores the proxy"
