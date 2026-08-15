@@ -148,16 +148,15 @@ class ExemptionClaim(Base, TenantAwareMixin):
 
     id = Column(Integer, primary_key=True)
     part_id = Column(Integer, ForeignKey("parts.id", ondelete="CASCADE"), nullable=False, index=True)
-    part_material_id = Column(Integer, ForeignKey("part_materials.id", ondelete="CASCADE"))
+    part_material_id = Column(Integer, ForeignKey("part_materials.id", ondelete="CASCADE"), index=True)
     exemption_id = Column(
         Integer, ForeignKey("rohs_exemptions.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    substance_id = Column(Integer, ForeignKey("substances.id", ondelete="CASCADE"))
+    substance_id = Column(Integer, ForeignKey("substances.id", ondelete="CASCADE"), index=True)
     substance_group_id = Column(Integer, ForeignKey("substance_groups.id", ondelete="CASCADE"), index=True)
     justification = Column(Text)
     source_declaration_id = Column(
-        Integer, ForeignKey("substance_declarations.id", ondelete="SET NULL")
-    )
+        Integer, ForeignKey("substance_declarations.id", ondelete="SET NULL"), index=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

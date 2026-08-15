@@ -47,6 +47,14 @@ export function downloadJSON(rows, filename) {
   downloadBlob(JSON.stringify(rows, null, 2), filename, "application/json");
 }
 
+// Streams a real file (Blob) the backend returned — e.g. api.export.run() —
+// to the user's downloads folder, honoring the filename the server chose via
+// Content-Disposition. Blob is a valid BlobPart, so this just reuses the
+// existing anchor-click helper instead of duplicating it.
+export function downloadFile(blob, filename) {
+  downloadBlob(blob, filename, blob.type);
+}
+
 export function generateXLSX(rows, filename) {
   const list = flattenForCSV(rows);
   const headers = Object.keys(list[0] || {});
@@ -93,4 +101,5 @@ window.downloadCSV = downloadCSV;
 window.downloadJSON = downloadJSON;
 window.generateXLSX = generateXLSX;
 window.downloadBlob = downloadBlob;
+window.downloadFile = downloadFile;
 window.printBOM = printBOM;

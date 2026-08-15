@@ -9,12 +9,14 @@ from sqlalchemy import or_, select
 
 from app.core.tenant_context import TenantContext
 from app.db.rls import apply_rls_tenant_context
-from app.integrations.cliq_client import CliqClient
 from app.integrations.clickup_client import ClickUpClient
+from app.integrations.cliq_client import CliqClient
 from app.integrations.crypto import decrypt_secret
 from app.integrations.zoho_client import ZOHO_MODULES, ZohoAuthError, ZohoBooksClient
 from app.models.integration import (
-    IntegrationConnection, IntegrationExternalLink, IntegrationOutbox,
+    IntegrationConnection,
+    IntegrationExternalLink,
+    IntegrationOutbox,
 )
 
 logger = logging.getLogger(__name__)
@@ -243,7 +245,12 @@ async def _persist_po_line_links(db, row, record):
         return
     local_lines = (await db.execute(select(POLineItem).where(
         POLineItem.headerId == row.entity_id).order_by(POLineItem.id))).scalars().all()
-    for local_ln, zline in zip(local_lines, zoho_lines):
+    # strict=False preserves today's behaviour: if local and Zoho disagree on
+    # line count, the extra lines on the longer side are simply not linked
+    # rather than the whole sync raising. Made explicit rather than changed —
+    # a mismatch means some lines silently never get an external link, which is
+    # worth surfacing, but not by breaking the sync here.
+    for local_ln, zline in zip(local_lines, zoho_lines, strict=False):
         lid = zline.get("line_item_id")
         if not lid:
             continue
@@ -405,11 +412,13 @@ async def deliver_pending(db, clients=None, limit=20, max_attempts=5, tenant_id=
                         # queued rows as pending (never flushed, never dead); a
                         # truly ABSENT connection dead-letters.
                         if await _connection_exists(db, row.tenantId, row.provider):
-                            row.status = "pending"; row.last_error = "connection disabled"
+                            row.status = "pending"
+                            row.last_error = "connection disabled"
                             counts["failed"] += 1
                             await db.commit()
                             continue
-                        row.status = "dead"; row.last_error = "no enabled connection"
+                        row.status = "dead"
+                        row.last_error = "no enabled connection"
                         counts["dead"] += 1
                         await db.commit()
                         continue
@@ -420,7 +429,8 @@ async def deliver_pending(db, clients=None, limit=20, max_attempts=5, tenant_id=
                     await _deliver_zoho_books(db, conn, row, client)
                 else:
                     await _deliver_cliq(db, conn, row, client)
-                row.status = "sent"; counts["sent"] += 1
+                row.status = "sent"
+                counts["sent"] += 1
                 _mark_health(conn, ok=True)
             except Exception as e:  # noqa: BLE001
                 err = _sanitize_error(e)
@@ -431,7 +441,8 @@ async def deliver_pending(db, clients=None, limit=20, max_attempts=5, tenant_id=
                     if cls == "auth":
                         # HOLD: do not consume an attempt; the queue resumes on
                         # reconnect. Surface auth_failed on the connection.
-                        row.status = "pending"; row.last_error = err
+                        row.status = "pending"
+                        row.last_error = err
                         _mark_health(conn, ok=False, error="auth_failed")
                         counts["failed"] += 1
                         await db.commit()
@@ -439,7 +450,8 @@ async def deliver_pending(db, clients=None, limit=20, max_attempts=5, tenant_id=
                     if cls == "validation":
                         # Non-retryable 4xx: log once, mark error, never retry.
                         row.attempts = (row.attempts or 0) + 1
-                        row.status = "error"; row.last_error = err
+                        row.status = "error"
+                        row.last_error = err
                         _mark_health(conn, ok=False, error=err)
                         await _log_zoho_terminal(db, row, err)
                         counts["failed"] += 1
@@ -450,7 +462,8 @@ async def deliver_pending(db, clients=None, limit=20, max_attempts=5, tenant_id=
                 row.last_error = err
                 _mark_health(conn, ok=False, error=err)
                 if row.attempts >= max_attempts:
-                    row.status = "dead"; counts["dead"] += 1
+                    row.status = "dead"
+                    counts["dead"] += 1
                 else:
                     row.status = "pending"
                     row.next_attempt_at = now + timedelta(seconds=2 ** row.attempts)

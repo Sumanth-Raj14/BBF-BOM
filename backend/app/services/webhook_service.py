@@ -3,6 +3,7 @@
 import hashlib
 import ipaddress
 import json
+import logging
 import socket
 from typing import Optional
 from urllib.parse import urlparse
@@ -14,6 +15,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
 from app.models.webhook import WebhookDelivery, WebhookSubscription
+
+logger = logging.getLogger(__name__)
+
+# The event-name catalogue. `WebhookSubscription.events` is a free-text
+# comma-separated string with no DB or schema constraint (and the UI field is
+# free text too), so there was no catalogue to derive from — this is it. Names
+# follow the convention already used in the docs and the UI placeholder
+# ("part.updated", "bom.created"). Every name here has a real producer; do not
+# add one without wiring the emit call, that is the bug this list exists to
+# prevent.
+EVENTS = (
+    "bom.item.created",
+    "bom.item.updated",
+    "bom.item.deleted",
+    "part.created",
+    "part.updated",
+    "part.deleted",
+    "eco.approved",
+    "eco.implemented",
+)
 
 
 def is_safe_webhook_url(url: str) -> bool:
@@ -212,6 +233,70 @@ async def _send_webhook(
     except Exception as e:
         response_text = str(e)
     return status_code, response_text, delivery_status
+
+
+def _subscribed(sub_events: Optional[str], event: str) -> bool:
+    tokens = {t.strip() for t in (sub_events or "").split(",")}
+    return event in tokens or "*" in tokens
+
+
+async def emit_event(db: AsyncSession, event: str, payload: dict, tenant_id: int) -> int:
+    """Dispatch a business event to that tenant's matching active subscriptions.
+
+    Call this AFTER the business commit, never before. It is deliberately
+    total: a bad URL, a timeout, a dead subscriber, or any internal failure is
+    swallowed and logged, so a webhook can never roll back or 500 the mutation
+    that triggered it. Returns the number of subscriptions dispatched to.
+
+    Tenancy: subscriptions are selected by explicit `tenantId` equality, so one
+    tenant's event can never reach another tenant's subscription.
+
+    ponytail: dispatch is inline (same request, same session, up to 10s per
+    subscriber) — same path `test_webhook` already uses. Move it onto the
+    existing outbox drainer in main.py if subscriber latency starts showing up
+    in mutation response times.
+    """
+    try:
+        result = await db.execute(
+            select(WebhookSubscription).where(
+                WebhookSubscription.tenantId == tenant_id,
+                WebhookSubscription.active.is_(True),
+            )
+        )
+        subs = [s for s in result.scalars().all() if _subscribed(s.events, event)]
+        if not subs:
+            return 0
+
+        body = json.dumps({"event": event, "data": payload}, default=str)
+        # SAVEPOINT: anything that blows up while dispatching unwinds only the
+        # delivery rows. A plain db.rollback() here would expire the CALLER's
+        # already-committed ORM objects and 500 the request on next attribute
+        # access — i.e. the exact failure this helper exists to prevent.
+        async with db.begin_nested():
+            for sub in subs:
+                delivery = WebhookDelivery(
+                    subscriptionId=sub.id,
+                    event=event,
+                    payload=body,
+                    status="pending",
+                    tenantId=tenant_id,
+                )
+                db.add(delivery)
+                try:
+                    is_safe_webhook_url(sub.url)
+                except HTTPException as exc:
+                    delivery.status = "failed"
+                    delivery.responseText = str(exc.detail)
+                    continue
+                status_code, response_text, delivery_status = await _send_webhook(sub, body)
+                delivery.status = delivery_status
+                delivery.statusCode = status_code
+                delivery.responseText = response_text
+        await db.commit()
+        return len(subs)
+    except Exception:
+        logger.exception("Webhook emit failed for event %s (tenant %s)", event, tenant_id)
+        return 0
 
 
 async def test_webhook(

@@ -77,6 +77,11 @@ class MbomItem(Base, TenantAwareMixin):
     run_time = Column(Interval)
     scrap_factor = Column(Numeric(5, 2), default=0)
     notes = Column(Text)
+    # Sub-assembly hierarchy (mirrors BOMItem.parent_item_id in app/models/bom.py).
+    # Nullable so pre-existing flat rows stay valid; migration 057_mbom_hierarchy.
+    parent_item_id = Column(
+        Integer, ForeignKey("mbom_items.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -87,6 +92,7 @@ class MbomItem(Base, TenantAwareMixin):
 
     mbom = relationship("MbomHeader", back_populates="items")
     part = relationship("Part")
+    children = relationship("MbomItem", backref="parent", remote_side=[id], lazy="selectin")
 
 
 class MbomOperation(Base, TenantAwareMixin):

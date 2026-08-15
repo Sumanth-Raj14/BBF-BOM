@@ -3,10 +3,12 @@ BOM Management Enterprise API
 Multi-level BOM, quantity rollups, snapshots, where-used, variants
 """
 
+import io
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +16,8 @@ from app.core.deps import get_current_user
 from app.core.rbac import require_engineering, require_viewer
 from app.db.session import get_db
 from app.models.user import User
-from app.services import bom_service
+from app.schemas.bom import BOMRead
+from app.services import bom_service, export_service
 
 router = APIRouter(
     tags=["bom-enterprise"], dependencies=[Depends(get_current_user), Depends(require_viewer)]
@@ -101,23 +104,29 @@ class BomCreateRequest(BaseModel):
     status: Optional[str] = None
     version: Optional[str] = None
     project_id: Optional[int] = None
+    # xBOM (migration 052) — EBOM/MBOM/SBOM. Omit to keep the model's "EBOM"
+    # default, so every existing caller is unaffected.
+    bom_type: Optional[Literal["EBOM", "MBOM", "SBOM"]] = None
 
 
 @router.get("/")
 async def list_boms(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
+    bom_type: Optional[str] = Query(None, pattern="^(EBOM|MBOM|SBOM)$"),
     db: AsyncSession = Depends(get_db),
 ):
-    boms, total = await bom_service.list_boms(db, skip=skip, limit=limit)
+    boms, total = await bom_service.list_boms(db, skip=skip, limit=limit, bom_type=bom_type)
     return {
         "items": [
             {
                 "id": b.id,
+                "bom_number": b.bom_number,
                 "name": b.name,
                 "description": b.description,
                 "status": b.status,
                 "version": b.version,
+                "bom_type": b.bom_type,
             }
             for b in boms
         ],
@@ -138,10 +147,12 @@ async def create_bom(
     )
     return {
         "id": bom.id,
+        "bom_number": bom.bom_number,
         "name": bom.name,
         "description": bom.description,
         "status": bom.status,
         "version": bom.version,
+        "bom_type": bom.bom_type,
     }
 
 
@@ -168,6 +179,61 @@ async def get_cost_rollup(bom_id: int, db: AsyncSession = Depends(get_db)):
 @router.get("/{bom_id}/mass-rollup")
 async def get_mass_rollup(bom_id: int, db: AsyncSession = Depends(get_db)):
     return await bom_service.get_mass_rollup(db, bom_id)
+
+
+# ---------------------------------------------------------------------------
+# VARIANT ROUTES MUST BE REGISTERED BEFORE THE "/{bom_id}/..." ROUTES BELOW.
+#
+# Starlette matches routes in registration order, first match wins. When
+# POST /variants/items was declared *after* POST /{bom_id}/items, every call to
+# it matched the parameterised route with bom_id="variants" and died on int
+# coercion — the endpoint was permanently unreachable despite being published
+# in openapi.json and having a live client wrapper (frontend/api.js
+# variants.addItem). CI never caught it because the variant tests call
+# bom_service.add_variant_item() directly instead of going through HTTP.
+#
+# Keep every literal-prefixed route above the {bom_id} block.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/variants")
+async def create_variant(
+    request: BomVariantRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await bom_service.create_variant(
+        db,
+        request.base_bom_id,
+        request.variant_name,
+        request.description,
+        request.configuration_rules,
+        current_user.id,
+        tenant_id=current_user.tenantId,
+    )
+
+
+@router.post("/variants/items")
+async def add_variant_item(
+    request: BomVariantItemRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await bom_service.add_variant_item(
+        db,
+        request.variant_id,
+        request.part_id,
+        request.quantity,
+        request.substitute_part_id,
+        request.is_optional,
+        request.condition_expression,
+        tenant_id=current_user.tenantId,
+    )
+
+
+@router.get("/variants/{variant_id}")
+async def get_variant(variant_id: int, db: AsyncSession = Depends(get_db)):
+    return await bom_service.get_variant(db, variant_id)
 
 
 @router.get("/{bom_id}/items")
@@ -339,50 +405,27 @@ async def create_baseline(
     return await bom_service.create_baseline(db, bom_id, baseline_name, current_user.id)
 
 
-@router.post("/variants")
-async def create_variant(
-    request: BomVariantRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await bom_service.create_variant(
-        db,
-        request.base_bom_id,
-        request.variant_name,
-        request.description,
-        request.configuration_rules,
-        current_user.id,
-    )
-
-
-@router.get("/variants/{variant_id}")
-async def get_variant(variant_id: int, db: AsyncSession = Depends(get_db)):
-    return await bom_service.get_variant(db, variant_id)
-
-
-@router.post("/variants/items")
-async def add_variant_item(
-    request: BomVariantItemRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    return await bom_service.add_variant_item(
-        db,
-        request.variant_id,
-        request.part_id,
-        request.quantity,
-        request.substitute_part_id,
-        request.is_optional,
-        request.condition_expression,
-    )
-
-
 @router.post("/{bom_id}/export")
 async def export_bom(
     bom_id: int,
     format: str = Query("csv", pattern="^(csv|excel|pdf|json)$"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    return await bom_service.export_bom(db, bom_id, format)
+    # "excel" is this endpoint's historical alias for the shared contract's "xlsx".
+    resolved_format = "xlsx" if format == "excel" else format
+    content, content_type, filename = await export_service.render_export(
+        db,
+        current_user.tenantId,
+        entity="bom",
+        format=resolved_format,
+        bom_id=bom_id,
+    )
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/import")
@@ -422,3 +465,13 @@ async def apply_template(
     current_user: User = Depends(get_current_user),
 ):
     return await bom_service.apply_template(db, template_id, project_id)
+
+
+# NOTE: deliberately declared LAST. "/{bom_id}" is a single-segment catch-all
+# that would otherwise shadow every literal single-segment GET route above it
+# (e.g. GET /templates) — FastAPI/Starlette matches routes in registration
+# order, and an unconverted "{bom_id}" segment matches any string before the
+# int-validation on the path param even runs.
+@router.get("/{bom_id}", response_model=BOMRead)
+async def get_bom(bom_id: int, db: AsyncSession = Depends(get_db)):
+    return await bom_service.get_bom_or_404(db, bom_id)

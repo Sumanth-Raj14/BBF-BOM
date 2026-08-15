@@ -3,7 +3,7 @@
 import os
 import re
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -150,29 +150,33 @@ async def cad_bom_sync(
     }
 
 
-@router.post("/apply-sync")
+@router.post("/apply-sync", status_code=501)
 async def cad_apply_sync(
-    changes: list[dict] = None,
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_parts_write),
 ):
-    if changes is None:
-        changes = []
-    applied = 0
-    for change in changes:
-        pn = change.get("pn")
-        if not pn:
-            continue
-        result = await db.execute(select(Part).where(Part.pn == pn))
-        part = result.scalar_one_or_none()
-        if part:
-            applied += 1
+    """
+    Deliberately not implemented.
 
-    return {
-        "status": "applied",
-        "appliedCount": applied,
-        "message": f"Applied {applied} sync changes",
-    }
+    The diffs produced by POST /cad/sync are comparison metadata only
+    ({"pn", "change": "File parsed: STEP", "metadata": {...}}) - they carry no
+    target field and no target value, so there is nothing here that can be
+    applied to a Part without guessing at the mutation. The previous
+    implementation looked each part up, counted it, wrote nothing, and returned
+    "Applied N sync changes", which the UI printed as a success with an audit
+    entry that was never written.
+
+    Real CAD -> BOM writes live in POST /api/v1/solidworks/apply-sync, which
+    takes a BomSyncRequest with explicit component rows.
+    """
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "CAD apply-sync is not implemented. /cad/sync returns comparison "
+            "metadata with no target field or value to write, so no change was "
+            "applied and nothing was logged. Use POST /api/v1/solidworks/apply-sync "
+            "for real CAD-to-BOM writes."
+        ),
+    )
 
 
 @router.post("/extract-attrs")

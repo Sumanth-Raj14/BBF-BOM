@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 _backup_task = None
 _integration_drain_task = None
 _zoho_poll_task = None
+_notification_drain_task = None
 _INTEGRATION_DRAIN_INTERVAL_SECONDS = 15
 # Scheduler tick for the Zoho inbound poll. Faster than the smallest per-tenant
 # sync_cadence_seconds (default 300s); the poller gates each connection by its
@@ -77,6 +78,78 @@ async def _run_zoho_poll_scheduler(interval: int = _ZOHO_POLL_TICK_SECONDS):
         except Exception as e:
             logger.error("Zoho inbound poll failed: %s", e)
         await asyncio.sleep(interval)
+
+
+async def _run_notification_drainer(interval: int):
+    """Periodically drain the email NotificationQueue with its OWN DB session.
+
+    Mirrors _run_integration_drainer. A single while-loop awaits each drain
+    to finish before sleeping and starting the next one, so runs never
+    overlap by construction — no lock needed.
+
+    Nothing watched this loop's health before (ops-hardening): a drain that
+    started silently failing would just stop sending email forever with no
+    signal anywhere. Every attempt now reports through app.monitoring.metrics
+    (last-drain timestamp, success/failure, consecutive-failure count, last
+    drained count) which /api/v1/health/detailed surfaces — and a failure is
+    logged loudly (exc_info, escalating to CRITICAL after repeated misses)
+    without ever raising out of the loop, so the scheduler itself never dies.
+    """
+    from app.db.session import get_session_maker
+    from app.monitoring.metrics import metrics
+    from app.services.email_service import process_notification_queue
+
+    while True:
+        try:
+            async with (await get_session_maker())() as db:
+                drained = await process_notification_queue(db)
+            metrics.record_notification_drain(success=True, drained=drained)
+            if drained:
+                logger.info("Notification queue drained: %d sent", drained)
+        except Exception as e:
+            metrics.record_notification_drain(success=False)
+            consecutive = int(metrics.notification_queue_consecutive_failures.get())
+            logger.error(
+                "Notification queue drain failed (consecutive failures=%d): %s",
+                consecutive,
+                e,
+                exc_info=True,
+            )
+            if consecutive >= 3:
+                logger.critical(
+                    "Notification queue has failed to drain %d times in a row — "
+                    "notifications are silently backing up",
+                    consecutive,
+                )
+        await asyncio.sleep(interval)
+
+
+async def _cancel_scheduler_tasks():
+    """Cancel AND await every background scheduler task on shutdown.
+
+    Before this, teardown only called .cancel() on each task and moved
+    straight on to engine.dispose() — the tasks were never awaited, so a
+    task could still be mid-flight (e.g. against the DB engine about to be
+    disposed) and the event loop would warn "Task was destroyed but it is
+    pending" on interpreter exit. Awaiting the gather (with
+    return_exceptions=True, since a cancelled task raises CancelledError)
+    guarantees every task has actually finished before shutdown proceeds.
+    """
+    global _backup_task, _integration_drain_task, _zoho_poll_task, _notification_drain_task
+    tasks = [
+        t
+        for t in (
+            _backup_task,
+            _integration_drain_task,
+            _zoho_poll_task,
+            _notification_drain_task,
+        )
+        if t is not None
+    ]
+    for t in tasks:
+        t.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _run_backup_scheduler():
@@ -176,12 +249,19 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Backup system OK (%d existing backups)", backup_count)
 
-    global _backup_task, _integration_drain_task, _zoho_poll_task
+    global _backup_task, _integration_drain_task, _zoho_poll_task, _notification_drain_task
     _backup_task = asyncio.create_task(_run_backup_scheduler())
     _integration_drain_task = asyncio.create_task(_run_integration_drainer())
     logger.info("Integration outbox drainer scheduled (every %ds)", _INTEGRATION_DRAIN_INTERVAL_SECONDS)
     _zoho_poll_task = asyncio.create_task(_run_zoho_poll_scheduler())
     logger.info("Zoho Books inbound poll scheduled (tick %ds)", _ZOHO_POLL_TICK_SECONDS)
+    _notification_drain_task = asyncio.create_task(
+        _run_notification_drainer(settings.NOTIFICATION_QUEUE_DRAIN_INTERVAL_SECONDS)
+    )
+    logger.info(
+        "Notification queue drainer scheduled (every %ds)",
+        settings.NOTIFICATION_QUEUE_DRAIN_INTERVAL_SECONDS,
+    )
 
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -199,12 +279,7 @@ async def lifespan(app: FastAPI):
     from app.core.job_queue import stop_queue_worker
 
     await stop_queue_worker()
-    if _backup_task:
-        _backup_task.cancel()
-    if _integration_drain_task:
-        _integration_drain_task.cancel()
-    if _zoho_poll_task:
-        _zoho_poll_task.cancel()
+    await _cancel_scheduler_tasks()
     try:
         from app.db.session import get_engine
 

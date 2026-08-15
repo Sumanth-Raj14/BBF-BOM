@@ -1,12 +1,16 @@
 import PropTypes from "prop-types";
+import { AppContext } from "../../context/AppCtx.jsx";
 
 import { __t } from "../../i18n";
 import { toast } from "../../utils/toast";
-import { Icon, api, useAppStore } from "../../globals";
+import { Icon, api } from "../../globals";
 import { Modal, Button, Badge, Spinner, EmptyState } from "../ui";
 
 function RollbackModal({ open, onClose }) {
-  const ctx = useAppStore();
+  // Reads the app context directly. (useAppStore() is now equivalent — the
+  // two context objects were unified in context/appContext.js — but the
+  // explicit import keeps the dependency visible.)
+    const ctx = React.useContext(AppContext);
   const [selectedRev, setSelectedRev] = React.useState(null);
   const [revs, setRevs] = React.useState([]);
   const [loading, setLoading] = React.useState(false);

@@ -53,7 +53,11 @@ class Document(Base, TenantAwareMixin):
     )
 
     # Storage tracking
-    storage_type = Column(String(20), default="s3")
+    # Local-first by design: this product must run fully self-hosted with no
+    # cloud dependency, so an unspecified document lives on local disk.
+    # Defaulting to "s3" mislabelled every locally-stored file and made the
+    # download endpoint look for it in object storage that need not exist.
+    storage_type = Column(String(20), default="local")
     local_fallback_path = Column(Text)
     checksum = Column(String(64))
 

@@ -106,3 +106,39 @@ async def test_download_404s_when_the_file_is_gone(
 async def test_download_404s_for_unknown_document(client, auth_headers):
     resp = await client.get("/api/v1/documents/999999/download", headers=auth_headers)
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_download_serves_local_bytes_when_row_claims_s3(
+    client, db_session, auth_headers, test_user, tmp_path, monkeypatch
+):
+    """Local-first regression.
+
+    Until this was fixed the upload never set storage_type, so every document
+    inherited the model default of 's3' even when the bytes were written to
+    local disk. On a self-hosted install with no object storage — the supported
+    default for this product — the download endpoint then looked in S3, found
+    nothing, and 404'd a file sitting in UPLOAD_DIR.
+    """
+    monkeypatch.setattr(documents_endpoint, "UPLOAD_DIR", str(tmp_path))
+    stored = tmp_path / "mislabelled.stl"
+    stored.write_bytes(b"local bytes")
+
+    doc = await _make_document(
+        db_session,
+        test_user.tenantId,
+        filename="mislabelled.stl",
+        path=str(stored),
+        storage="s3",  # what every pre-fix row claims
+    )
+
+    resp = await client.get(f"/api/v1/documents/{doc.id}/download", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.content == b"local bytes"
+
+
+def test_document_storage_defaults_to_local_not_cloud():
+    """The product is local-first: cloud storage is optional, never assumed."""
+    from app.models.document import Document
+
+    assert Document.__table__.c.storage_type.default.arg == "local"

@@ -6,7 +6,12 @@ quote-style = "double"
 
 [lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
-ignore = ["E501", "B904", "N815", "UP045", "B008", "E402", "N803", "F403", "N802", "N806", "SIM102", "SIM105", "SIM115", "SIM117", "B017"]
+# SIM103 joins the existing SIM opt-outs: it fires on the last guard of a
+# symmetric range check (bom_effectivity_service's serial/date bounds), where
+# "return not (hi is not None and key > _serial_key(hi))" would make one bound
+# read differently from the other. The parallel guard clauses are the clearer
+# form there, so the rule is off rather than the code contorted to satisfy it.
+ignore = ["E501", "B904", "N815", "UP045", "B008", "E402", "N803", "F403", "N802", "N806", "SIM102", "SIM103", "SIM105", "SIM115", "SIM117", "B017"]
 
 [lint.per-file-ignores]
 "tests/*" = ["SIM", "F401"]

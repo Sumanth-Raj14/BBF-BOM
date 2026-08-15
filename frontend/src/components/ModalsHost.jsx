@@ -1,6 +1,7 @@
 import React from "react";
 import { navigateTo } from "../services/navigation.js";
 import { AppContext } from "../context/AppCtx.jsx";
+import { api } from "../../api.js";
 
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
@@ -20,6 +21,24 @@ import {
   TenantSettingsModal,
   WebhooksModal,
 } from "../globals";
+
+// Fix (rev-increment bug): charCodeAt(0)+1 only read the first character and
+// had no rollover past 'Z', corrupting multi-char or 'Z' revisions. Increment
+// like a spreadsheet column (A..Z, AA..AZ, BA..) so any valid rev advances
+// correctly.
+function nextRev(rev) {
+  const chars = String(rev || "A").toUpperCase().split("");
+  for (let i = chars.length - 1; i >= 0; i--) {
+    if (chars[i] === "Z") {
+      chars[i] = "A";
+    } else {
+      chars[i] = String.fromCharCode(chars[i].charCodeAt(0) + 1);
+      return chars.join("");
+    }
+  }
+  return "A" + chars.join("");
+}
+
 export default function ModalsHost() {
   const ctx = React.useContext(AppContext);
   const {
@@ -240,16 +259,31 @@ export default function ModalsHost() {
         })}
         body={
           <>
-            This will lock the next revision and create an immutable snapshot.
-            The changelog will be sent to engineering, procurement, and finance.
+            {/* Fix (fabricated release): copy previously claimed a server-side
+                lock + a changelog sent to engineering, procurement, and
+                finance, but onConfirm only touched local React state. There
+                is no notify-departments endpoint, so that claim is dropped;
+                the snapshot claim below is now real (see onConfirm). */}
+            This will create an immutable snapshot of the current BOM.
             You can still create the following revision afterwards.
           </>
         }
         confirmLabel={__t("bomShell.releaseConfirmLabel")}
-        onConfirm={() => {
+        onConfirm={async () => {
           const [maj, min] = project.version.replace(/^v/, "").split(".");
           const newVer = "v" + maj + "." + (parseInt(min) + 1) + ".0";
-          const newRev = String.fromCharCode(project.rev.charCodeAt(0) + 1);
+          const newRev = nextRev(project.rev);
+          try {
+            // Fix (fabricated release): wire to the real snapshot endpoint
+            // instead of only mutating local state and toasting success.
+            await api.bomEnterprise.snapshots.create(project.id, {
+              version: newVer,
+              rev: newRev,
+            });
+          } catch (err) {
+            toast(err?.message || "Failed to release BOM", { kind: "error" });
+            return;
+          }
           setProject({
             ...project,
             version: newVer,

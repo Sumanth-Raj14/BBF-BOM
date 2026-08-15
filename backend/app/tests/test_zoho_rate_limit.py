@@ -22,7 +22,6 @@ import pytest
 
 from app.integrations.zoho_client import TokenBucket, ZohoBooksClient, _parse_retry_after
 
-
 # --- TokenBucket: burst / throttle -----------------------------------------
 
 @pytest.mark.asyncio

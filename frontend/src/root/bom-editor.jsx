@@ -6,6 +6,9 @@ import { useAutosave } from "../hooks/useAutosave.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import { Button, Badge, StatusPill, Switch } from "../components/ui/index.js";
+// Imported, not read off window: the provider is now unconditional, so a
+// load-order slip in the shim layer would take the whole editor down.
+import { CollabProvider, CollaborationBar } from "./collaboration.jsx";
 // BOM editor — multi-level table with hierarchy, expand/collapse, inline edit,
 // bulk select, drag-reorder, sparkline cost trend, lead-time heatbar.
 function getRate() {
@@ -807,13 +810,15 @@ export function BomEditor({
     [setRows, markDirty],
   );
   return (
-    <>
-      {typeof CollabProvider !== "undefined" && CollaborationBar ? (
-        <CollaborationBar
-          channel={collabChannel || "bom-editor"}
-          docId={collabDocId}
-        />
-      ) : null}
+    // The presence bar has to live INSIDE the provider. It reads its state
+    // through useCollab(), which falls back to a no-op {connected:false,
+    // users:[]} when there is no CollabContext above it -- so an unwrapped bar
+    // renders "offline" forever against a WebSocket backend that works fine.
+    <CollabProvider channel={collabChannel || "bom-editor"}>
+      <CollaborationBar
+        channel={collabChannel || "bom-editor"}
+        docId={collabDocId}
+      />
       <div className="bom-wrap" data-density={density}>
         {dirty && (
           <div
@@ -1687,7 +1692,7 @@ export function BomEditor({
           </div>
         )}
       </div>
-    </>
+    </CollabProvider>
   );
 }
 BomEditor.propTypes = {

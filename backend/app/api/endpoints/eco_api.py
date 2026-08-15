@@ -290,7 +290,10 @@ async def create_ecn(
     eco_id: int,
     description: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    # require_engineering: every other ECO mutation in this file gates on this;
+    # create_ecn was skipping it, letting any authenticated (e.g. viewer) user
+    # issue an ECN.
+    current_user: User = Depends(require_engineering),
 ):
     result = await db.execute(select(EcoHeader).where(EcoHeader.id == eco_id))
     eco = result.scalar_one_or_none()
@@ -325,7 +328,8 @@ async def create_ecr(
     description: str,
     requested_by: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    # require_engineering: same gate as every other ECO mutation (see create_ecn).
+    current_user: User = Depends(require_engineering),
 ):
     count = await db.execute(select(func.count()).select_from(EcoHeader))
     total = count.scalar() or 0

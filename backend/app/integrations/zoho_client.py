@@ -18,10 +18,9 @@ client-side rate limiter (a token bucket honoring a 429 Retry-After) IS built
 here — see `TokenBucket` / `ZohoBooksClient._rate_limiter` below.
 """
 
+import asyncio
 import time
 from email.utils import parsedate_to_datetime
-
-import asyncio
 
 import httpx
 
@@ -129,8 +128,8 @@ def _parse_retry_after(value: str | None) -> float | None:
         import datetime as _dt
 
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=_dt.timezone.utc)
-        delta = (dt - _dt.datetime.now(_dt.timezone.utc)).total_seconds()
+            dt = dt.replace(tzinfo=_dt.UTC)
+        delta = (dt - _dt.datetime.now(_dt.UTC)).total_seconds()
         return max(delta, 0.0)
     except (TypeError, ValueError, OverflowError):
         return None
@@ -341,9 +340,3 @@ class ZohoBooksClient:
         resolve opaque Books foreign keys on create (spec §4.1/§4.2). Read-only.
         """
         return await self._request("GET", f"/settings/{kind}")
-
-    async def list_records(self, module: str, *, params: dict | None = None) -> dict:
-        """GET /{module} for the inbound incremental poll / reconciliation. Returns
-        the raw body (records list under the plural module key + `page_context`).
-        Read-only."""
-        return await self._request("GET", f"/{module}", params=params)

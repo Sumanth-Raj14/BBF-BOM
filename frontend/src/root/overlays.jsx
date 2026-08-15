@@ -3,9 +3,18 @@ import { navigateTo } from "../services/navigation.js";
 import { useAutosave } from "../hooks/useAutosave.js";
 import { __t } from "../i18n";
 import { toast, subscribe } from "../utils/toast";
-export const AppCtx = React.createContext(null);
+// One shared context object (see context/appContext.js). These were two
+// separate createContext calls; only the other one was ever provided, so
+// useAppStore() returned null app-wide.
+import { AppContext as AppCtx, useAppStore } from "../context/appContext.js";
+
+export { AppCtx, useAppStore };
+// The src/root/*.jsx shim layer calls `useAppStore` as a BARE identifier
+// without importing it, relying on these window assignments to make it a
+// global. Removing them is part of dismantling the shim layer (#2), not of
+// unifying the context — dropping them here caused
+// "ReferenceError: useAppStore is not defined" across the app.
 window.AppCtx = AppCtx;
-export const useAppStore = () => React.useContext(AppCtx);
 window.useAppStore = useAppStore;
 export function ToastHost() {
   const [toasts, setToasts] = React.useState([]);

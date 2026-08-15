@@ -67,10 +67,19 @@ describe('dataService', () => {
   // failure as a rejection instead of silently resolving as if the write
   // succeeded (previously the try/catch swallowed the error and only
   // enqueued it for a background retry the caller was never told about).
-  it('set() rejects when the API write actually fails while online', async () => {
-    window.api = { parts: { create: vi.fn().mockRejectedValue(new Error('API down')) } };
+  // set() replaces the whole LOCAL collection — its only caller is
+  // AppCtx.jsx passing the BOM rows array. Posting that array to the
+  // single-entity create endpoint was never valid: the server answered 422 and
+  // the failed write was then queued and retried on every app boot forever
+  // (see syncQueue.test.js). So a collection set is local-only and must NOT
+  // call create at all. The R9 "propagate real failures" guarantee still holds
+  // for the per-entity writers and is covered by the update() test below.
+  it('set() with a collection writes locally and does not post the array', async () => {
+    const create = vi.fn().mockRejectedValue(new Error('API down'));
+    window.api = { parts: { create } };
     dataService.setOnline(true);
-    await expect(dataService.set('parts', [{ id: 1 }])).rejects.toThrow('API down');
+    await expect(dataService.set('parts', [{ id: 1 }])).resolves.toBeUndefined();
+    expect(create, 'a collection must never be posted to a single-entity create').not.toHaveBeenCalled();
   });
 
   it('update() rejects when the API write actually fails while online', async () => {

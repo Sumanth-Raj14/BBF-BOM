@@ -226,6 +226,25 @@ class Settings(BaseSettings):
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 60
     RATE_LIMIT_AUTH_PER_MINUTE: int = 5
+    # Token refresh is NOT a login. /auth/refresh shared the 5/minute login
+    # budget, but it is authenticated session upkeep that the client fires
+    # automatically whenever an access token expires — so two tabs, a few
+    # reloads, or several concurrent calls each meeting a 401 exhausted the
+    # allowance and the 429 surfaced to users as
+    # "Save failed — not synced to server ... Session temporarily unavailable".
+    # It still needs a ceiling (a stolen refresh cookie should not be
+    # infinitely replayable), just one sized for normal use rather than for
+    # brute-force password guessing.
+    RATE_LIMIT_REFRESH_PER_MINUTE: int = 30
+    # Per-authenticated-user ceiling, enforced in core/deps.py for EVERY
+    # authenticated request. This was a hardcoded 300 that no deployment could
+    # tune, and it is easy to hit legitimately: the SPA fires 15-20 requests per
+    # screen load, so ~15 navigations in a minute tripped it. When it trips,
+    # api.js backs off 5s per retry, which stalls the whole shell. Configurable
+    # here, with headroom for normal interactive use.
+    RATE_LIMIT_USER_PER_MINUTE: int = 1200
+    # Per-API-key ceiling (machine clients: plugins, integrations).
+    RATE_LIMIT_API_KEY_PER_MINUTE: int = 600
     # Outbound Zoho Books API calls (client-side token bucket in
     # app.integrations.zoho_client.ZohoBooksClient) — conservative default
     # well under Zoho's server-side limit so the tool throttles itself first.
@@ -234,6 +253,11 @@ class Settings(BaseSettings):
     # Backup
     BACKUP_DIR: str = "./backups"
     BACKUP_SCHEDULE_HOURS: int = 6
+
+    # How often the background scheduler drains NotificationQueue (email
+    # channel) via email_service.process_notification_queue. Mirrors the
+    # integration outbox drainer's own interval setting.
+    NOTIFICATION_QUEUE_DRAIN_INTERVAL_SECONDS: int = 30
     BACKUP_MIN_DISK_GB: int = 5
     # WAL archive directory — MUST match postgresql.conf's archive_command
     # target (see backend/postgresql.conf) and scripts/pitr_restore.py, or

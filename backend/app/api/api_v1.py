@@ -148,6 +148,11 @@ api_router.include_router(
     tags=["traceability"],
 )
 api_router.include_router(
+    endpoints.requirements_api.router,
+    prefix="/requirements",
+    tags=["requirements"],
+)
+api_router.include_router(
     endpoints.kanban.router,
     prefix="/kanban",
     tags=["kanban"],
@@ -250,6 +255,20 @@ api_router.include_router(
     prefix="/bom",
     tags=["bom-enterprise"],
 )
+# xBOM: manufacturing BOM (mbom_headers/mbom_items/mbom_operations) — model
+# existed with zero routes; see app/api/endpoints/mbom_api.py.
+api_router.include_router(
+    endpoints.mbom_api.router,
+    prefix="/mbom",
+    tags=["mbom"],
+)
+# CAD connectors: vendor-agnostic routes over the connector registry
+# (app/integrations/cad). Adding a vendor never touches this file again.
+api_router.include_router(
+    endpoints.cad_connectors.router,
+    prefix="/cad-connectors",
+    tags=["cad-connectors"],
+)
 api_router.include_router(
     endpoints.eco_api.router,
     prefix="/eco",
@@ -347,6 +366,13 @@ api_router.include_router(
     tags=["api-keys"],
 )
 
+# Units of Measure + conversion (multi-UOM quantity/cost roll-up support)
+api_router.include_router(
+    endpoints.uom_api.router,
+    prefix="/uom",
+    tags=["uom"],
+)
+
 # SAML SSO
 from app.core.saml_sso import router as saml_router
 
@@ -371,8 +397,19 @@ async def prometheus_metrics(user: User = Depends(get_current_user)):
 
 
 @api_router.get("/health/detailed")
-async def detailed_health(db: AsyncSession = Depends(get_db)):
-    return await get_detailed_health(db)
+async def detailed_health(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    # finding: infra-secrets-health #2 - endpoint had no auth (unlike /metrics above)
+    # and leaked internal row counts/system info to anyone. Require auth like /metrics.
+    # It also echoed hardcoded "security"/"authentication" blocks that were never
+    # actually verified against runtime config (e.g. csrf_protection: True regardless
+    # of real state) - drop them rather than report fabricated status as fact.
+    result = await get_detailed_health(db)
+    result.pop("security", None)
+    result.pop("authentication", None)
+    return result
 
 
 # Health check endpoint

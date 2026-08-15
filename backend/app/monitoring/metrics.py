@@ -128,6 +128,10 @@ class Gauge:
         with self._lock:
             self._values[key] -= value
 
+    def get(self, labels: tuple = ()) -> float:
+        with self._lock:
+            return self._values.get(self._label_key(labels), 0.0)
+
     def _label_key(self, labels: tuple) -> str:
         return "|".join(str(label) for label in labels)
 
@@ -208,6 +212,28 @@ class MetricsCollector:
             "Unix timestamp of the last backup attempt",
         )
 
+        # Notification queue drain health (ops-hardening): process_notification_queue
+        # runs unattended on a scheduler loop (app.main._run_notification_drainer) with
+        # nothing watching it — if it starts failing, notifications silently stop being
+        # sent. These surface through /api/v1/health/detailed so a stuck drainer is
+        # visible instead of silent.
+        self.notification_queue_last_drain_timestamp = Gauge(
+            "notification_queue_last_drain_timestamp",
+            "Unix timestamp of the last notification queue drain attempt (success or failure)",
+        )
+        self.notification_queue_last_drain_success = Gauge(
+            "notification_queue_last_drain_success",
+            "1 if the last notification queue drain attempt succeeded, else 0",
+        )
+        self.notification_queue_consecutive_failures = Gauge(
+            "notification_queue_consecutive_failures",
+            "Number of consecutive failed notification queue drain attempts",
+        )
+        self.notification_queue_last_drained_count = Gauge(
+            "notification_queue_last_drained_count",
+            "Number of notifications sent on the last successful drain",
+        )
+
     def record_request(self, method: str, path: str, status: int, duration: float):
         self.http_requests_total.inc(labels=(method, path, str(status)))
         self.http_request_duration_seconds.observe(duration, labels=(method, path))
@@ -243,6 +269,16 @@ class MetricsCollector:
         if count:
             self.backup_old_removed_total.inc(count)
 
+    def record_notification_drain(self, success: bool, drained: int = 0):
+        self.notification_queue_last_drain_timestamp.set(time.time())
+        if success:
+            self.notification_queue_last_drain_success.set(1.0)
+            self.notification_queue_consecutive_failures.set(0.0)
+            self.notification_queue_last_drained_count.set(float(drained))
+        else:
+            self.notification_queue_last_drain_success.set(0.0)
+            self.notification_queue_consecutive_failures.inc(1.0)
+
     def export_prometheus(self) -> str:
         self.uptime_seconds.set(time.time() - self._start_time)
         parts = []
@@ -259,6 +295,10 @@ class MetricsCollector:
         parts.append(self.backup_last_duration_seconds.export())
         parts.append(self.backup_old_removed_total.export())
         parts.append(self.backup_last_timestamp.export())
+        parts.append(self.notification_queue_last_drain_timestamp.export())
+        parts.append(self.notification_queue_last_drain_success.export())
+        parts.append(self.notification_queue_consecutive_failures.export())
+        parts.append(self.notification_queue_last_drained_count.export())
         return "".join(parts)
 
 

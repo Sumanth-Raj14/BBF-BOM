@@ -19,7 +19,6 @@ from datetime import date, timedelta
 
 import pytest
 import pytest_asyncio
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -36,7 +35,6 @@ from app.models.substance import (
 )
 from app.models.tenant import Tenant
 from app.services import substance_compliance_service as svc
-
 
 # ---------------------------------------------------------------------------
 # Reference data fixtures (self-contained — no dependency on the bundled

@@ -126,6 +126,40 @@ async def get_detailed_health(db: AsyncSession = None) -> dict:
         except Exception as e:
             health["integrity"] = {"status": "check_failed", "error": str(e)[:200]}
 
+    # Notification queue observability (ops-hardening): process_notification_queue
+    # runs unattended on app.main._run_notification_drainer's scheduler loop with
+    # nothing watching it — a drain that starts failing would silently stop
+    # delivering notifications forever. Surface both the drain loop's own health
+    # (from app.monitoring.metrics, updated on every tick) and the actual queue
+    # depth so a stuck drainer is visible here instead of invisible.
+    from app.monitoring.metrics import metrics
+
+    last_drain_ts = metrics.notification_queue_last_drain_timestamp.get()
+    notification_queue = {
+        "lastDrainTimestamp": last_drain_ts or None,
+        "lastDrainSuccess": bool(metrics.notification_queue_last_drain_success.get()),
+        "consecutiveFailures": int(metrics.notification_queue_consecutive_failures.get()),
+        "lastDrainedCount": int(metrics.notification_queue_last_drained_count.get()),
+    }
+    if db and db_status == "connected":
+        try:
+            # Global (cross-tenant) pending count, same convention as the
+            # integrity checks above — this is an ops-only aggregate, not a
+            # tenant-scoped request. Portable SQL (no casts/NOW/INTERVAL);
+            # `IS NOT TRUE` (not `= 0`) is supported by both SQLite and
+            # Postgres and also treats NULL as pending, unlike `= 0`.
+            r = await db.execute(
+                text(
+                    "SELECT COUNT(*) FROM notifications_queue "
+                    "WHERE channel = 'email' AND is_sent IS NOT TRUE"
+                )
+            )
+            notification_queue["pendingEmailCount"] = r.scalar() or 0
+        except Exception as e:
+            notification_queue["pendingEmailCount"] = None
+            notification_queue["error"] = str(e)[:200]
+    health["notificationQueue"] = notification_queue
+
     return health
 
 

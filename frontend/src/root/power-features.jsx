@@ -307,72 +307,14 @@ export function runUndo() {
 window.runUndo = runUndo;
 function WorkOrdersScreen() {
   const [orders, setOrders] = React.useState([]);
-  const DEFAULT_ORDERS = [
-    {
-      id: "WO-2026-0042",
-      bom: "ATLAS Mainframe v3.2.0",
-      qty: 25,
-      scheduled: "2026-06-15",
-      status: "Released",
-      built: 0,
-      good: 0,
-      defect: 0,
-    },
-    {
-      id: "WO-2026-0041",
-      bom: "HORIZON Sensor Pod v1.4.0",
-      qty: 10,
-      scheduled: "2026-06-08",
-      status: "In Progress",
-      built: 7,
-      good: 7,
-      defect: 0,
-    },
-    {
-      id: "WO-2026-0040",
-      bom: "ATLAS Mainframe v3.2.0",
-      qty: 10,
-      scheduled: "2026-05-28",
-      status: "In Progress",
-      built: 6,
-      good: 5,
-      defect: 1,
-    },
-    {
-      id: "WO-2026-0039",
-      bom: "ATLAS-LITE Eval v1.0.0",
-      qty: 50,
-      scheduled: "2026-05-25",
-      status: "Complete",
-      built: 50,
-      good: 48,
-      defect: 2,
-    },
-    {
-      id: "WO-2026-0038",
-      bom: "ATLAS Mainframe v3.1.4",
-      qty: 5,
-      scheduled: "2026-05-20",
-      status: "Complete",
-      built: 5,
-      good: 5,
-      defect: 0,
-    },
-  ];
   React.useEffect(() => {
+    // Fix: was substituting 5 hardcoded DEFAULT_ORDERS whenever the real list
+    // came back empty or errored, presenting fake work orders as real data.
+    // Now shows the real list, or the honest EmptyState via DataTable below.
     screenData.workOrders
       .list()
-      .then((data) => {
-        if (data && data.length) setOrders(data);
-        else {
-          const saved = null;
-          setOrders(saved && saved.length ? saved : DEFAULT_ORDERS);
-        }
-      })
-      .catch(() => {
-        const saved = null;
-        setOrders(saved && saved.length ? saved : DEFAULT_ORDERS);
-      });
+      .then((data) => setOrders(data || []))
+      .catch(() => setOrders([]));
   }, []);
   const [showForm, setShowForm] = React.useState(false);
   const [newWo, setNewWo] = React.useState({
@@ -380,9 +322,6 @@ function WorkOrdersScreen() {
     qty: 10,
     scheduled: "",
   });
-  const persist = (next) => {
-    setOrders(next);
-  };
   const counts = orders.reduce((a, o) => {
     a[o.status] = (a[o.status] || 0) + 1;
     return a;
@@ -476,12 +415,13 @@ function WorkOrdersScreen() {
               icon: <Icon.Plus size={11} />,
               label: __t("power.workOrders.reportBuild") || "Report build",
               onSelect: () => {
-                const next = orders.map((x) =>
-                  x.id === o.id
-                    ? { ...x, built: x.built + 1, good: x.good + 1 }
-                    : x,
-                );
-                persist(next);
+                const updated = { ...o, built: o.built + 1, good: o.good + 1 };
+                const next = orders.map((x) => (x.id === o.id ? updated : x));
+                setOrders(next);
+                // Fix: was local-state-only (never hit the server) while
+                // toasting success; now saves via the real workOrders.update
+                // wrapper (screenDataBridge already toasts on save failure).
+                screenData.workOrders.update(o.id, updated).catch(() => {});
                 toast(
                   __t("power.workOrders.buildReported") ||
                     "Build reported \u00B7 1 good unit",
@@ -492,12 +432,12 @@ function WorkOrdersScreen() {
               icon: <Icon.Flag size={11} />,
               label: __t("power.workOrders.reportDefect") || "Report defect",
               onSelect: () => {
-                const next = orders.map((x) =>
-                  x.id === o.id
-                    ? { ...x, built: x.built + 1, defect: x.defect + 1 }
-                    : x,
-                );
-                persist(next);
+                const updated = { ...o, built: o.built + 1, defect: o.defect + 1 };
+                const next = orders.map((x) => (x.id === o.id ? updated : x));
+                setOrders(next);
+                // Fix: same local-state-only issue as "Report build" above \u2014
+                // now saves via the real workOrders.update wrapper.
+                screenData.workOrders.update(o.id, updated).catch(() => {});
                 toast(
                   __t("power.workOrders.defectReported") ||
                     "Defect reported \u00B7 NCR drafted",
@@ -597,19 +537,20 @@ function WorkOrdersScreen() {
                   }
                   const id =
                     "WO-2026-" + String(43 + orders.length).padStart(4, "0");
-                  persist([
-                    {
-                      id,
-                      bom: newWo.bom,
-                      qty: newWo.qty,
-                      scheduled: newWo.scheduled,
-                      status: "Draft",
-                      built: 0,
-                      good: 0,
-                      defect: 0,
-                    },
-                    ...orders,
-                  ]);
+                  const entry = {
+                    id,
+                    bom: newWo.bom,
+                    qty: newWo.qty,
+                    scheduled: newWo.scheduled,
+                    status: "Draft",
+                    built: 0,
+                    good: 0,
+                    defect: 0,
+                  };
+                  setOrders([entry, ...orders]);
+                  // Fix: "Create Work Order" was local-state-only; now saves
+                  // via the real workOrders.create wrapper.
+                  screenData.workOrders.create(entry).catch(() => {});
                   setShowForm(false);
                   toast(
                     id + " " + (__t("power.workOrders.created") || "created"),
@@ -717,52 +658,16 @@ function WorkOrdersScreen() {
 }
 function NCRScreen() {
   const ctx = useAppStore();
-  const [ncrs, setNcrs] = React.useState([
-    {
-      id: "NCR-2026-018",
-      pn: "EL-PSU-240W",
-      wo: "WO-2026-0040",
-      defect: "Output voltage 11.7V (spec 12.0\u00B10.2)",
-      severity: "Major",
-      action: "Return to vendor",
-      status: "Open",
-      reporter: "M. Park",
-      date: "2026-05-23",
-    },
-    {
-      id: "NCR-2026-017",
-      pn: "MEC-PL-040A",
-      wo: "WO-2026-0039",
-      defect: "Anodize finish blotchy on 2 of 50",
-      severity: "Minor",
-      action: "Rework",
-      status: "In review",
-      reporter: "R. Sato",
-      date: "2026-05-21",
-    },
-    {
-      id: "NCR-2026-016",
-      pn: "EL-MCU-STM32H7",
-      wo: "WO-2026-0038",
-      defect: "Failed in-circuit boot test",
-      severity: "Critical",
-      action: "Return + RMA",
-      status: "Resolved",
-      reporter: "E. Chen",
-      date: "2026-05-18",
-    },
-    {
-      id: "NCR-2026-015",
-      pn: "CB-FFC-40P-100",
-      wo: "WO-2026-0040",
-      defect: "Cable too short by 5mm",
-      severity: "Minor",
-      action: "Use as-is (waiver)",
-      status: "Resolved",
-      reporter: "M. Park",
-      date: "2026-05-15",
-    },
-  ]);
+  // Fix: was seeding 4 hardcoded fake NCRs. Now loads the real list via the
+  // existing screenData.quality.ncr wrapper, falling back to an honest empty
+  // state (DataTable `empty` prop below) instead of invented records.
+  const [ncrs, setNcrs] = React.useState([]);
+  React.useEffect(() => {
+    screenData.quality.ncr
+      .list()
+      .then((data) => setNcrs(data || []))
+      .catch(() => setNcrs([]));
+  }, []);
   const [showForm, setShowForm] = React.useState(false);
   const [newNcr, setNewNcr] = React.useState({
     pn: "",
@@ -786,7 +691,10 @@ function NCRScreen() {
     const entry = {
       id,
       pn: newNcr.pn,
-      wo: "WO-2026-" + String(40 + ncrs.length).padStart(4, "0"),
+      // Fix: was fabricating a WO reference ("WO-2026-" + a counter) with no
+      // link to any real work order — the form never collects one. Left
+      // unset rather than inventing an ID that would point at nothing.
+      wo: "",
       defect: newNcr.defect,
       severity: newNcr.severity,
       action: newNcr.action,
@@ -795,6 +703,10 @@ function NCRScreen() {
       date: new Date().toISOString().slice(0, 10),
     };
     setNcrs([entry, ...ncrs]);
+    // Fix: createNcr() only called setNcrs() (local React state) while
+    // toasting success — never reached the server. Now saves via the real
+    // screenData.quality.ncr.create wrapper (it already toasts on failure).
+    screenData.quality.ncr.create(entry).catch(() => {});
     setNewNcr({ pn: "", defect: "", severity: "Minor", action: "Rework" });
     setShowForm(false);
     toast(

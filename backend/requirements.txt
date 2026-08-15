@@ -17,13 +17,13 @@ python-barcode[pil]>=0.15,<1.0
 qrcode[pil]>=7.4,<8.0
 openpyxl>=3.1,<4.0
 reportlab>=4.1,<5.0
-Pillow>=10.3,<11.0
+Pillow>=12.3,<13.0        # 10.4.0 carried 24 known CVEs (pip-audit); 12.3.0 clears them
 python-magic>=0.4.27,<1.0
 aiobotocore>=2.12,<3.0
 botocore>=1.34,<2.0
 
 # Missing critical dependencies (were transitive only)
-cryptography>=42.0,<43.0
+cryptography>=50.0,<51.0  # 42.0.8 carried 8 known CVEs (pip-audit); backs Fernet credential encryption
 redis[hiredis]>=5.0,<6.0
 sentry-sdk[fastapi]>=2.0,<3.0
 psutil>=5.9,<6.0

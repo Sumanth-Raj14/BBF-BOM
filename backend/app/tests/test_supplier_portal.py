@@ -149,6 +149,18 @@ async def test_submit_price_update(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_admin_session_gets_403_not_401_on_price_updates(client, auth_headers):
+    """By design, not a bug: GET /price-updates is scoped to a supplier's own
+    login (get_current_supplier_user), a separate token realm from the app's
+    regular auth. An admin session is authenticated but holds no supplier
+    token, so it must get 403 here — the frontend renders an honest "not
+    available for your role" panel for this response rather than treating it
+    as a failed/empty request (see SupplierPortalScreen)."""
+    resp = await client.get("/api/v1/supplier-portal/price-updates", headers=auth_headers)
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_submit_price_update_unauthorized(client, auth_headers):
     resp = await client.post(
         "/api/v1/supplier-portal/price-updates",

@@ -80,3 +80,21 @@ test-results/
 coverage/
 htmlcov/
 .rtk/
+
+# Runtime sweep artifacts (see frontend/e2e/route-sweep.spec.js)
+frontend/e2e/sweep-report/
+backend/sweep.db
+backend/.env.sweep
+backend/sweep_uvicorn*.log
+
+# SQLite test scratch DBs (*.db already ignored; the WAL/journal siblings were not)
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Local Claude Code settings/scratch — machine-specific, not project config
+.claude/
+
+# Raw pytest run logs — transient output, never project content
+test_output*.txt
+backend/test_output*.txt

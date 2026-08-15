@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import os
+import re
 import sys
 import time
 from collections.abc import AsyncGenerator
@@ -41,10 +43,45 @@ def _after_cursor_execute(conn, cursor, statement, parameters, context, executem
 pool_size = getattr(settings, "DB_POOL_SIZE", 10)
 max_overflow = getattr(settings, "DB_MAX_OVERFLOW", 20)
 
+_url_logged = False
+
+
+def redact_url(url: str) -> str:
+    """Strip a password out of a DB URL for safe logging, e.g. in error/log text."""
+    return re.sub(r"://([^:/@]+):[^@/]*@", r"://\1:***@", url)
+
+
+def resolve_database_url() -> str:
+    """Single source of truth for which database this process talks to.
+
+    Precedence (highest first): TEST_DATABASE_URL > DATABASE_URL > settings.DATABASE_URI.
+
+    INCIDENT (2026-08-09): this used to be `str(settings.DATABASE_URI)` only, so
+    every app code path (API server, seed scripts) ignored DATABASE_URL and
+    TEST_DATABASE_URL entirely and silently fell through to the live Postgres
+    DB from .env — even when an operator had deliberately pointed those vars at
+    a throwaway sqlite file. scripts/init_db.py *did* honour them, so the
+    sqlite file really did get created, making the divergence invisible until
+    test fixtures and a password reset landed in production. TEST_DATABASE_URL
+    is checked first because it's the variable the test suite/CI (see
+    app/tests/conftest.py) already treats as authoritative — do not reorder
+    this without fixing that convention too.
+    """
+    global _url_logged
+    url = (
+        os.environ.get("TEST_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
+        or str(settings.DATABASE_URI)
+    )
+    if not _url_logged:
+        logger.info("Database URL resolved to %s", redact_url(url))
+        _url_logged = True
+    return url
+
 
 async def init_engine() -> "AsyncEngine":
     global _engine, _session_maker
-    uri = str(settings.DATABASE_URI)
+    uri = resolve_database_url()
     last_exc = None
     for attempt in range(1, _RETRY_ATTEMPTS + 1):
         try:

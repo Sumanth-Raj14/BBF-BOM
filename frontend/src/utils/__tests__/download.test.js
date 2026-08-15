@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { flattenForCSV, generateXLSX } from '../download.js';
+import { flattenForCSV, generateXLSX, downloadFile } from '../download.js';
 import { resetInrRate } from '../currency.js';
 
 beforeEach(() => {
@@ -99,6 +99,40 @@ describe('generateXLSX', () => {
 
     expect(capturedBlob).not.toBeNull();
     expect(capturedBlob.type).toBe('application/vnd.ms-excel');
+
+    URL.createObjectURL = origCreateObjectURL;
+  });
+});
+
+describe('downloadFile', () => {
+  it('streams a real server Blob to disk under the server-chosen filename', () => {
+    const serverBlob = new Blob(['pdf-bytes'], { type: 'application/pdf' });
+
+    downloadFile(serverBlob, 'bom-42-20260809.pdf');
+
+    const calls = document.body.appendChild.mock.calls;
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    const anchor = calls[0][0];
+    expect(anchor.download).toBe('bom-42-20260809.pdf');
+  });
+
+  it('preserves the blob type it was given, instead of guessing one', () => {
+    const origCreateObjectURL = URL.createObjectURL;
+    let capturedBlob = null;
+    URL.createObjectURL = vi.fn((blob) => {
+      capturedBlob = blob;
+      return 'blob:mock';
+    });
+
+    const serverBlob = new Blob(['xlsx-bytes'], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    downloadFile(serverBlob, 'export.xlsx');
+
+    expect(capturedBlob).not.toBeNull();
+    expect(capturedBlob.type).toBe(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
 
     URL.createObjectURL = origCreateObjectURL;
   });

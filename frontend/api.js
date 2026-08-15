@@ -283,6 +283,21 @@ export const authAPI = {
   },
 };
 
+// SSO API — real OAuth2 wiring against backend/app/api/endpoints/sso.py.
+// providers() drives which login buttons render enabled; authorize() starts
+// a real provider redirect; callback() completes the code exchange and
+// establishes the same httpOnly session cookies /auth/login sets.
+export const ssoAPI = {
+  providers: () => apiRequest('/sso/providers'),
+  authorize: (provider) => apiRequest(`/sso/authorize/${provider}`),
+  callback: (provider, code, state) =>
+    apiRequest(`/sso/callback/${provider}`, {
+      method: 'POST',
+      body: JSON.stringify({ code, state, provider }),
+      credentials: 'include',
+    }),
+};
+
 // Parts API
 export const partsAPI = {
   list: (params = {}) => {
@@ -700,16 +715,11 @@ export const barcodesAPI = {
     return apiRequest(`/barcodes/lookup/${barcode}`);
   },
   
-  assign: async (partId) => {
-    return apiRequest(`/barcodes/assign/${partId}`, {
-      method: 'POST',
-    });
-  },
-  
-  batchGenerate: async (partIds) => {
-    const idsStr = partIds.join(',');
-    return apiRequest(`/barcodes/batch-generate?part_ids=${idsStr}`);
-  },
+  // Removed: assign() and batchGenerate() called /barcodes/assign/{id} and
+  // /barcodes/batch-generate, neither of which the backend serves (it has
+  // generate | image | lookup | qr). Nothing in the UI called them; they were
+  // guaranteed 404s. Re-add alongside the backend routes if the feature is
+  // wanted.
 };
 
 // OCR API
@@ -906,6 +916,29 @@ export const traceabilityAPI = {
   },
 };
 
+// Requirements management + traceability links + coverage
+export const requirementAPI = {
+  list: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiRequest(`/requirements${q ? '?' + q : ''}`);
+  },
+  get: (id) => apiRequest(`/requirements/${id}`),
+  create: (data) => apiRequest('/requirements', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id, data) => apiRequest(`/requirements/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id) => apiRequest(`/requirements/${id}`, { method: 'DELETE' }),
+  coverage: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiRequest(`/requirements/coverage${q ? '?' + q : ''}`);
+  },
+  byPart: (partId) => apiRequest(`/requirements/by-part/${partId}`),
+  linkedParts: (id) => apiRequest(`/requirements/${id}/parts`),
+  linkPart: (id, partId) => apiRequest(`/requirements/${id}/parts`, { method: 'POST', body: JSON.stringify({ partId }) }),
+  unlinkPart: (id, partId) => apiRequest(`/requirements/${id}/parts/${partId}`, { method: 'DELETE' }),
+  linkedBoms: (id) => apiRequest(`/requirements/${id}/boms`),
+  linkBom: (id, bomId) => apiRequest(`/requirements/${id}/boms`, { method: 'POST', body: JSON.stringify({ bomId }) }),
+  unlinkBom: (id, bomId) => apiRequest(`/requirements/${id}/boms/${bomId}`, { method: 'DELETE' }),
+};
+
 // Kanban Triggers
 export const kanbanAPI = {
   list: (params = {}) => {
@@ -995,6 +1028,86 @@ export const bulkImportAPI = {
   errors: (jobId) => apiRequest(`/import/${jobId}/errors`),
 };
 
+// Export API — shared contract (see CLUSTER export-import-frontend):
+//   POST /export                       -> streaming file (blob + filename)
+//   GET  /export/columns?entity=<e>    -> authoritative column list for that entity
+//   GET/POST/DELETE /export/templates  -> saved per-tenant export presets
+export const exportAPI = {
+  columns: (entity) => apiRequest(`/export/columns?entity=${encodeURIComponent(entity)}`),
+  templates: {
+    list: (entity) => apiRequest(`/export/templates?entity=${encodeURIComponent(entity)}`),
+    create: (data) => apiRequest('/export/templates', { method: 'POST', body: JSON.stringify(data) }),
+    delete: (id) => apiRequest(`/export/templates/${id}`, { method: 'DELETE' }),
+  },
+  // apiRequest always calls response.json(), which throws on a streamed
+  // binary body — so this goes straight through fetch(), same as the
+  // multipart uploads above. Returns the blob plus the filename the server
+  // chose via Content-Disposition, so the caller never has to guess an
+  // extension or fabricate one.
+  run: async (body) => {
+    const csrfToken = getCSRFToken();
+    const response = await fetch(`${API_BASE}/export`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: 'Export failed' }));
+      throw new Error(err.detail || `HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    const filename = match ? match[1] : `export.${body.format || 'csv'}`;
+    return { blob, filename };
+  },
+};
+
+// Units of Measure + conversion (see backend/app/api/endpoints/uom_api.py).
+// convert() throws with the backend's exact error message (422 detail) on
+// an unknown unit or a cross-dimension mismatch — never returns a guessed
+// 1:1 value, so callers can show the real reason a conversion failed.
+export const uomAPI = {
+  units: () => apiRequest('/uom/units'),
+  convert: (quantity, fromUom, toUom) => {
+    const q = new URLSearchParams({ quantity, from_uom: fromUom, to_uom: toUom }).toString();
+    return apiRequest(`/uom/convert?${q}`);
+  },
+  rollupQuantities: (lines) => apiRequest('/uom/rollup-quantities', { method: 'POST', body: JSON.stringify({ lines }) }),
+};
+
+// Import API — shared contract (see CLUSTER export-import-frontend):
+//   POST /import/upload             (multipart: file, entity) -> job_id + preview
+//   POST /import/{job_id}/mapping   -> validates WITHOUT writing
+//   POST /import/{job_id}/commit    -> actually creates/updates records
+// Distinct from the legacy `bulkImportAPI` above (process/status/errors),
+// which is a different job lifecycle still used by integration-screens.jsx's
+// Bulk Import history screen.
+export const importAPI = {
+  upload: async (file, entity) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('entity', entity);
+    const response = await fetch(`${API_BASE}/import/upload`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: csrfHeaders(),
+      body: formData,
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(err.detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
+  mapping: (jobId, mapping) => apiRequest(`/import/${jobId}/mapping`, { method: 'POST', body: JSON.stringify({ mapping }) }),
+  commit: (jobId) => apiRequest(`/import/${jobId}/commit`, { method: 'POST' }),
+};
+
 // ERP Connectors
 export const erpConnectorsAPI = {
   list: (params = {}) => {
@@ -1013,8 +1126,44 @@ export const erpConnectorsAPI = {
   testConnection: (id) => apiRequest(`/erp-connectors/${id}/test-connection`, { method: 'POST' }),
 };
 
+// CAD Connectors — generic framework (Onshape/Fusion/Altium cloud) + the
+// credential-free Altium file-upload path. See
+// app/api/endpoints/cad_connectors.py. Distinct from the legacy `cadAPI`
+// above, which is the older CAD-sync/PDM-vault surface, not this connector
+// framework.
+export const cadConnectorsAPI = {
+  types: () => apiRequest('/cad-connectors/types'),
+  list: () => apiRequest('/cad-connectors'),
+  create: (data) => apiRequest('/cad-connectors', { method: 'POST', body: JSON.stringify(data) }),
+  delete: (id) => apiRequest(`/cad-connectors/${id}`, { method: 'DELETE' }),
+  test: (id) => apiRequest(`/cad-connectors/${id}/test`, { method: 'POST' }),
+  documents: (id) => apiRequest(`/cad-connectors/${id}/documents`),
+  importAssembly: (id, data) => apiRequest(`/cad-connectors/${id}/import`, { method: 'POST', body: JSON.stringify(data) }),
+  // No stored connection / no credentials — the multipart upload every
+  // Altium customer can use day one. `dryRun: true` parses and previews
+  // without writing a row (mirrors importAPI.upload's multipart handling).
+  importAltiumFile: async (file, { bomName, dryRun = false } = {}) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (bomName) formData.append('bom_name', bomName);
+    formData.append('dry_run', dryRun ? 'true' : 'false');
+    const response = await fetch(`${API_BASE}/cad-connectors/altium/import-file`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: csrfHeaders(),
+      body: formData,
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: 'Import failed' }));
+      throw new Error(err.detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
+};
+
 // BOM Enterprise API
 export const bomEnterpriseAPI = {
+  list: () => apiRequest('/bom/'),
   explosion: (bomId, level = 10) => apiRequest(`/bom/${bomId}/explosion?level=${level}`),
   quantityRollup: (bomId) => apiRequest(`/bom/${bomId}/quantity-rollup`),
   costRollup: (bomId) => apiRequest(`/bom/${bomId}/cost-rollup`),
@@ -1118,28 +1267,27 @@ export const aiAPI = {
 };
 
 // Compliance API (ISO 9001, AS9100, RoHS, REACH)
-// Backend mounts the compliance router under the /compliance prefix and its
-// routes are themselves /compliance/... , so the effective base is doubled:
-// /compliance/compliance.
+// Backend mounts the compliance router under the /compliance prefix; its
+// routes are relative to that (e.g. "" -> /compliance, "/packs" -> /compliance/packs).
 export const complianceAPI = {
   list: (params = {}) => {
     const q = new URLSearchParams(params).toString();
-    return apiRequest(`/compliance/compliance${q ? '?' + q : ''}`);
+    return apiRequest(`/compliance${q ? '?' + q : ''}`);
   },
-  create: (data) => apiRequest('/compliance/compliance', { method: 'POST', body: JSON.stringify(data) }),
-  get: (id) => apiRequest(`/compliance/compliance/${id}`),
-  update: (id, data) => apiRequest(`/compliance/compliance/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id) => apiRequest(`/compliance/compliance/${id}`, { method: 'DELETE' }),
+  create: (data) => apiRequest('/compliance', { method: 'POST', body: JSON.stringify(data) }),
+  get: (id) => apiRequest(`/compliance/${id}`),
+  update: (id, data) => apiRequest(`/compliance/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id) => apiRequest(`/compliance/${id}`, { method: 'DELETE' }),
   packs: {
-    list: () => apiRequest('/compliance/compliance/packs'),
-    get: (id) => apiRequest(`/compliance/compliance/packs/${id}`),
-    create: (data) => apiRequest('/compliance/compliance/packs', { method: 'POST', body: JSON.stringify(data) }),
+    list: () => apiRequest('/compliance/packs'),
+    get: (id) => apiRequest(`/compliance/packs/${id}`),
+    create: (data) => apiRequest('/compliance/packs', { method: 'POST', body: JSON.stringify(data) }),
   },
   parts: {
-    status: (partId) => apiRequest(`/compliance/compliance/parts/${partId}`),
-    certify: (partId, data) => apiRequest(`/compliance/compliance/parts/${partId}/certify`, { method: 'POST', body: JSON.stringify(data) }),
+    status: (partId) => apiRequest(`/compliance/parts/${partId}`),
+    certify: (partId, data) => apiRequest(`/compliance/parts/${partId}/certify`, { method: 'POST', body: JSON.stringify(data) }),
   },
-  dashboard: () => apiRequest('/compliance/compliance/dashboard'),
+  dashboard: () => apiRequest('/compliance/dashboard'),
 };
 
 // Production Scheduling API
@@ -1183,7 +1331,10 @@ export const workOrdersAPI = {
   create: (data) => apiRequest('/work-orders', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => apiRequest(`/work-orders/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id) => apiRequest(`/work-orders/${id}`, { method: 'DELETE' }),
-  advance: (id) => apiRequest(`/work-orders/${id}/advance`, { method: 'POST' }),
+  // Removed: advance() hit /work-orders/{id}/advance, which does not exist —
+  // the backend advances a work order through /work-orders/{id}/action.
+  // Unused in the UI. Use action() with the intended transition instead of
+  // guessing a mapping here.
   materials: (id) => apiRequest(`/work-orders/${id}/materials`),
   operations: (id) => apiRequest(`/work-orders/${id}/operations`),
 };
@@ -1205,8 +1356,9 @@ export const ecoAPI = {
   // the backend rejects (401/403/409) without mutating state on failure.
   action: (id, data) => apiRequest(`/eco/${id}/action`, { method: 'POST', body: JSON.stringify(data) }),
   approve: (id, data) => apiRequest(`/eco/${id}/approve`, { method: 'POST', body: JSON.stringify(data) }),
-  reject: (id, reason) => apiRequest(`/eco/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
-  changes: (id) => apiRequest(`/eco/${id}/changes`),
+  // Removed: reject() and changes() hit /eco/{id}/reject and /eco/{id}/changes,
+  // neither of which the backend serves — rejection goes through
+  // /eco/{id}/action. Both were unused in the UI and always 404'd.
   notifications: (id) => apiRequest(`/eco/${id}/notifications`),
   impact: (id) => apiRequest(`/eco/${id}/impact`),
   addItem: (id, data) => apiRequest(`/eco/${id}/items`, { method: 'POST', body: JSON.stringify(data) }),
@@ -1479,10 +1631,23 @@ export const bomItemsAPI = {
       method: 'POST',
       body: JSON.stringify(itemIds),
     }),
+
+  // Effectivity resolution — "give me this template's BOM as of X" (migration
+  // 053_bom_effectivity). Pass exactly one of asOfDate/asOfSerial/asOfLot;
+  // with none given the backend defaults asOfDate to today.
+  resolved: (bomTemplateId, { asOfDate, asOfSerial, asOfLot } = {}) => {
+    const params = { bomTemplateId };
+    if (asOfDate) params.asOfDate = asOfDate;
+    if (asOfSerial) params.asOfSerial = asOfSerial;
+    if (asOfLot) params.asOfLot = asOfLot;
+    const query = new URLSearchParams(params).toString();
+    return apiRequest(`/bom-items/resolved?${query}`);
+  },
 };
 
 export const api = {
   auth: authAPI,
+  sso: ssoAPI,
   tenants: tenantsAPI,
   parts: partsAPI,
   projects: projectsAPI,
@@ -1519,11 +1684,14 @@ export const api = {
   fai: faiAPI,
   deviation: deviationAPI,
   traceability: traceabilityAPI,
+  requirement: requirementAPI,
   kanban: kanbanAPI,
   contract: contractAPI,
   health: healthAPI,
   webhooks: webhooksAPI,
   bulkImport: bulkImportAPI,
+  export: exportAPI,
+  import: importAPI,
   erpConnectors: erpConnectorsAPI,
   supplierPortal: supplierPortalAPI,
   monitoring: monitoringAPI,
@@ -1539,8 +1707,11 @@ export const api = {
   userDataSync: userDataSyncAPI,
   calendarEvents: calendarEventsAPI,
   catalogs: catalogsAPI,
+  uom: uomAPI,
+  cadConnectors: cadConnectorsAPI,
 };
 window.api = api;
+window.uomAPI = uomAPI;
 
 window.poOrdersAPI = poOrdersAPI;
 window.analyticsAPI = analyticsAPI;
@@ -1550,6 +1721,7 @@ window.scrapingAPI = scrapingAPI;
 window.webhooksAPI = webhooksAPI;
 window.bulkImportAPI = bulkImportAPI;
 window.erpConnectorsAPI = erpConnectorsAPI;
+window.cadConnectorsAPI = cadConnectorsAPI;
 window.supplierPortalAPI = supplierPortalAPI;
 window.monitoringAPI = monitoringAPI;
 window.aiAPI = aiAPI;
@@ -1584,6 +1756,56 @@ bomEnterpriseAPI.list = (params = {}) => {
   const q = new URLSearchParams(params).toString();
   return apiRequest(`/bom/${q ? '?' + q : ''}`);
 };
+// list() above already passes through arbitrary params, so { bom_type: 'MBOM' }
+// (xBOM, migration 052) filters for free — see app/api/endpoints/bom_enterprise.py.
+// get/create fill in the two BOM-header routes that had no client wrapper yet.
+bomEnterpriseAPI.get = (bomId) => apiRequest(`/bom/${bomId}`);
+bomEnterpriseAPI.create = (data) =>
+  apiRequest('/bom/', { method: 'POST', body: JSON.stringify(data) });
+
+// xBOM: manufacturing BOM (mbom_headers/mbom_items/mbom_operations) — see
+// app/api/endpoints/mbom_api.py, mounted at prefix "/mbom" in api_v1.py.
+export const mbomAPI = {
+  headers: {
+    list: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return apiRequest(`/mbom/headers${q ? '?' + q : ''}`);
+    },
+    get: (id) => apiRequest(`/mbom/headers/${id}`),
+    create: (data) =>
+      apiRequest('/mbom/headers', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id, data) =>
+      apiRequest(`/mbom/headers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  },
+  items: {
+    list: (mbomId) => apiRequest(`/mbom/headers/${mbomId}/items`),
+    create: (mbomId, data) =>
+      apiRequest(`/mbom/headers/${mbomId}/items`, { method: 'POST', body: JSON.stringify(data) }),
+    update: (mbomId, itemId, data) =>
+      apiRequest(`/mbom/headers/${mbomId}/items/${itemId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+  },
+  operations: {
+    list: (mbomId) => apiRequest(`/mbom/headers/${mbomId}/operations`),
+    create: (mbomId, data) =>
+      apiRequest(`/mbom/headers/${mbomId}/operations`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (mbomId, operationId, data) =>
+      apiRequest(`/mbom/headers/${mbomId}/operations/${operationId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+  },
+  // The actual point of xBOM: derive a manufacturing BOM from an existing
+  // EBOM's structure (POST /mbom/derive, see bom_service.derive_mbom_from_ebom).
+  derive: (data) => apiRequest('/mbom/derive', { method: 'POST', body: JSON.stringify(data) }),
+};
+api.mbom = mbomAPI;
+window.mbomAPI = mbomAPI;
 
 // Appended for modals-extra.jsx (API Keys modal): user-scoped API key
 // management backing GET/POST /api-keys, POST /api-keys/{id}/rotate and
