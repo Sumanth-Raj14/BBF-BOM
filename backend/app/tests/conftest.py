@@ -92,6 +92,28 @@ def event_loop():
 @pytest_asyncio.fixture(scope="session")
 async def test_engine():
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+
+    # Make SQLite enforce foreign keys, like PostgreSQL always does.
+    #
+    # SQLite ships with FK enforcement OFF and the setting is PER-CONNECTION,
+    # so the `PRAGMA foreign_keys = ON` in clean_db's teardown only ever
+    # applied to that one teardown connection — every test connection still
+    # ran with FKs unenforced. The effect: a test could insert a row pointing
+    # at a tenant/user/part that does not exist, pass locally, and then fail
+    # only on the Postgres CI gate 17 minutes later. That exact class broke
+    # the gate three separate times in one day (requirements, seed_po, sso).
+    #
+    # Registering it on "connect" applies it to every pooled connection, so
+    # the local suite is as strict as production and these surface here.
+    if engine.dialect.name == "sqlite":
+        from sqlalchemy import event
+
+        @event.listens_for(engine.sync_engine, "connect")
+        def _sqlite_enforce_foreign_keys(dbapi_connection, _connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
