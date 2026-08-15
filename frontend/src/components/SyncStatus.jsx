@@ -53,11 +53,15 @@ export default function SyncStatus() {
 
   if (syncStatus.lastSync) {
     const ago = Math.floor((Date.now() - syncStatus.lastSync) / 60000);
+    // The "SAVED" label uses --green-text, not --green: the bright hue is only
+    // 2.54:1 on white and was the last axe color-contrast violation in the
+    // suite. The token flips per theme so light and dark both clear 4.5:1.
+    // The 8px dot below keeps --green — it is decorative, not text.
     return (
       <span
         className="fs-9 ml-6 fw-500 fg-3"
         title={`Last synced ${ago > 0 ? ago + "m ago" : "just now"}`}
-        style={{ color: "var(--green, #10b981)" }}
+        style={{ color: "var(--green-text, #047857)" }}
       >
         <span
           className="inline-block"
