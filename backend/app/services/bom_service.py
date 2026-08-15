@@ -2172,47 +2172,12 @@ async def add_variant_item(
 
 
 # ============ Import/Export ============
-
-
-async def export_bom(db: AsyncSession, bom_id: int, format: str) -> dict:
-    bom = await get_bom_or_404(db, bom_id)
-    tid = get_tenant_id()
-    items_stmt = select(BOMItem).where(BOMItem.bom_id == bom_id)
-    if tid is not None:
-        items_stmt = items_stmt.where(BOMItem.tenantId == tid)
-    items_result = await db.execute(items_stmt)
-    items = items_result.scalars().all()
-
-    part_ids = [i.part_id for i in items if i.part_id]
-    parts_map = {}
-    if part_ids:
-        parts_stmt = select(Part).where(Part.id.in_(set(part_ids)))
-        if tid is not None:
-            parts_stmt = parts_stmt.where(Part.tenantId == tid)
-        pr = await db.execute(parts_stmt)
-        for p in pr.scalars().all():
-            parts_map[p.id] = p
-
-    export_data = []
-    for item in items:
-        part = parts_map.get(item.part_id) if item.part_id else None
-        export_data.append(
-            {
-                "part_number": part.pn if part else "",
-                "part_name": part.name if part else "",
-                "quantity": item.quantity,
-                "reference_designator": item.reference_designator,
-                "notes": item.notes,
-            }
-        )
-
-    return {
-        "bom_id": bom_id,
-        "bom_name": bom.name,
-        "format": format,
-        "item_count": len(export_data),
-        "items": export_data,
-    }
+#
+# export_bom() lived here and was removed: POST /bom/{bom_id}/export routes to
+# export_service.render_export() instead (the shared column/format/filter
+# contract), so nothing called it. It produced a flat 5-field dict that no
+# longer matched what the endpoint returned — a second, diverging definition of
+# "export a BOM". import_bom() below IS live; the endpoint calls it directly.
 
 
 async def import_bom(

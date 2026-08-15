@@ -35,44 +35,10 @@ also ships a **guard** (`test_migration_table_coverage.py`) that fails when any
 
 ## What still needs doing
 
-### 1. HIGH — 74 model tables are `create_all`-only, not in any migration
+Items 1, 2, 5, 6 and 8 of the original list are **closed** — see "Closed in the
+follow-up pass" below. What remains:
 
-The single largest structural inconsistency. `scripts/init_db.py` bootstraps a
-greenfield database with `Base.metadata.create_all()` and stamps head, because
-the early alembic chain cannot build from base (migration 004 references
-`po_headers`, which no migration creates). Migration 022's docstring claims it
-"formalizes ~73 tables" into alembic — **it creates 9**. The rest were never
-ported.
-
-Live features sit on these tables: RBAC (`roles`, `permissions`, `user_roles`,
-`role_permissions`), inventory, ECO, PO. Six are not referenced by any
-migration at all, not even as a foreign key.
-
-Why it is not a live break today: any database bootstrapped through
-`init_db.py` has these tables, because `create_all` made them. It becomes a
-break the moment a table enters the models *after* a deployment was
-bootstrapped — which is exactly how `calendar_events` shipped broken.
-
-The guard stops the list from growing. Porting the existing 74 into the chain
-is real work and a schema-management decision, so it is written up rather than
-patched silently. Baseline and reasoning: `backend/app/tests/_migration_baseline.txt`.
-
-### 2. MEDIUM — ~20 auto-generated router tests assert almost nothing
-
-They accept "any status code", so they would pass if authentication were
-removed entirely. They inflate the pass count without proving anything about
-auth or correctness. Weakest real coverage is concentrated in the newer
-routers.
-
-### 3. MEDIUM — four dead model tables
-
-`audit_log_changes`, `contract_attachments`, `deviation_attachments`,
-`fai_attachments` have models but no migration, no endpoint, no service and no
-test. Inert today; a landmine the moment someone wires an attachments or
-audit-diff feature to them, because it will work in every test suite and fail
-in production. Either delete the models or give them migrations.
-
-### 4. MEDIUM — four features have a backend and a client, but no screen
+### 1. MEDIUM — four features have a backend and a client, but no screen
 
 Verified three ways for each (no `api.X.*` caller in `src`, no `screenData.X`
 caller, no screen or modal that even names the feature):
@@ -90,40 +56,72 @@ caller, no screen or modal that even names the feature):
 
 Not a break — nothing calls them, so nothing fails. But it is the largest
 functional gap in the product: paid-for backend work with no way to reach it.
-**Building these screens is UI work, so it waits for your go-ahead** — flagged
-here so it is on the list when the UI phase starts, not discovered then.
+**Building these screens is UI work, so it waits for your go-ahead.**
 
-### 5. LOW — `ComplianceRollupView.jsx` is orphaned
-
-A fully built component, cloned from `CostRollupView`, that nothing imports or
-renders — the compliance tab renders `ComplianceReportPanel` instead. It also
-guards for an `api.compliance.boms.rollup` endpoint that does not exist. Either
-delete it or finish the endpoint and wire it. Left in place because deleting a
-built component is your call, not a safe patch.
-
-### 6. LOW — index drift on `cad_connections`
-
-Migration 056 creates a composite index on `(tenantId, connector_type)`; the
-model declares only a single-column index. A `create_all` database and a
-migrated one differ. Cosmetic until someone relies on the composite.
-
-### 7. LOW — a $0 `unit_cost_snapshot` is treated as "no snapshot"
+### 2. LOW — a $0 `unit_cost_snapshot` is treated as "no snapshot"
 
 The rollup's truthy fallback means a deliberate zero-cost line falls back to
 the part's cost instead of costing zero. Export now matches the rollup exactly,
 so the two agree — but whether zero *should* mean free is a semantics decision
 that changes existing cost numbers, so it belongs to you, not to a patch.
 
-### 8. LOW — `bom_service.export_bom` / `import_bom` are dead
-
-Superseded by `export_service` / `import_service`. Deletion candidates.
-
-### 9. Verification still requiring your credentials
+### 3. Verification still requiring your credentials
 
 The CAD cloud connectors (Onshape, Fusion/APS, Altium 365) are built and
 unit-tested against mocks, but have never run against a live account. Needs an
 Onshape API key, an Autodesk APS app, and Altium 365 credentials. Altium
 **file** import needs nothing and does work.
+
+---
+
+## Closed in the follow-up pass
+
+**Migration coverage — the HIGH item, now closed.** Migration
+`059_formalize_create_all_tables` creates all 74 tables that previously existed
+only via `create_all()`, including the tables behind RBAC, inventory, ECO and
+PO. The DDL is a frozen snapshot compiled from the models for Postgres, using
+the same `CREATE TABLE IF NOT EXISTS` convention as migration 022, ordered by
+foreign-key dependency. Verified by executing all 306 statements against real
+Postgres inside a transaction that was rolled back: 74 tables created, then
+fully reverted, with the public schema unchanged at 161 tables before and
+after.
+
+`_migration_baseline.txt` is now **empty**, so the coverage guard enforces that
+every model table has a migration rather than blessing a legacy list.
+
+Note this does not make the chain buildable from base — migrations 004-021
+still reference tables created earlier. `scripts/init_db.py` remains the
+supported greenfield bootstrap. What changed is that an already-managed
+database is no longer missing tables.
+
+**Weak router tests — closed.** 73 assertions across 25 files were tightened.
+The important ones were the 25 unauthenticated tests asserting
+`status_code in (200, 401)`, which passed whether or not authentication
+worked. They now require `(401, 403)`. Verified by stubbing out
+`get_current_user` to accept anonymous requests and confirming the tightened
+test fails, where the old assertion passed silently. Authenticated list/detail
+tests now require exactly 200/404 instead of accepting 401/403.
+
+**Dead code — closed.** `ComplianceRollupView.jsx` deleted (orphaned; the
+endpoint it waited for does not exist) along with the gap-analysis line that
+claimed it was live UI. `bom_service.export_bom` deleted — the endpoint of the
+same name routes to `export_service.render_export`, so it was a second,
+diverging definition of "export a BOM".
+
+**Index drift — closed.** The `cad_connections` composite index on
+`(tenantId, connector_type)` is now declared on the model, matching migration
+056, so a `create_all` database and a migrated one agree.
+
+### Corrected finding: the "four dead models" were not dead
+
+The audit reported `audit_log_changes`, `contract_attachments`,
+`deviation_attachments` and `fai_attachments` as models with no callers, safe
+to delete. Three of the four have live ORM relationships from their parent
+models (`Contract.attachment_items`, `Deviation.attachment_items`,
+`FAIReport.attachment_items`); deleting the classes would break mapper
+configuration at startup. The audit checked for endpoint and service callers
+and missed the relationships. They were given migrations as part of 059
+instead of being deleted.
 
 ---
 

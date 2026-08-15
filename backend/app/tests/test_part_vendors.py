@@ -4,13 +4,13 @@ import pytest
 @pytest.mark.asyncio
 async def test_part_vendors_list(client, auth_headers):
     resp = await client.get("/api/v1/part-vendors/", headers=auth_headers)
-    assert resp.status_code in (200, 401, 403)
+    assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_part_vendors_create(client, auth_headers):
     resp = await client.post("/api/v1/part-vendors/", headers=auth_headers, json={"name": "test"})
-    assert resp.status_code in (201, 200, 401, 403, 422)
+    assert resp.status_code in (200, 201, 422)
 
 
 @pytest.mark.asyncio
@@ -18,10 +18,10 @@ async def test_part_vendors_delete_not_found(client, auth_headers):
     # There is no GET-by-id endpoint (GET /{id} -> 405). DELETE /{link_id} is the
     # id-taking route; it raises 404 for a missing link.
     resp = await client.delete("/api/v1/part-vendors/99999", headers=auth_headers)
-    assert resp.status_code in (404, 401, 403)
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_part_vendors_without_auth(client):
     resp = await client.get("/api/v1/part-vendors/")
-    assert resp.status_code in (200, 401)
+    assert resp.status_code in (401, 403)

@@ -1,96 +1,14 @@
-# Model tables that NO migration creates. Enforced by test_migration_table_coverage.py:
-# nothing may be ADDED to this list without a migration.
+# Model tables that NO migration creates. Enforced by test_migration_table_coverage.py.
 #
-# These exist only because scripts/init_db.py bootstraps a greenfield database
-# with Base.metadata.create_all() and then stamps head — the early alembic
-# chain genuinely cannot build from base (migration 004 references po_headers,
-# which no migration creates). Migration 022's docstring claims it "formalizes
-# ~73 tables" into alembic; it actually creates 9. The rest were never ported.
+# THIS LIST IS NOW EMPTY, and should stay that way.
 #
-# Consequence, and why this file is a liability rather than a clean baseline:
-# a database bootstrapped BEFORE one of these tables entered the models will
-# never get it, because the incremental path only runs `alembic upgrade head`.
-# That is exactly how calendar_events shipped broken (fixed in migration 058).
-# Live features sit on these tables — RBAC (roles, permissions, user_roles,
-# role_permissions), inventory, ECO, PO. Porting them into the chain is a real
-# piece of work, tracked as a major improvement, not a safe patch.
+# It used to hold 74 tables that existed only because scripts/init_db.py
+# bootstraps a greenfield database with Base.metadata.create_all(). Migration
+# 059 formalized all of them into the chain, so every model table is now
+# created by a migration and a migrate-only deployment gets a complete schema.
 #
-# Six of these are not referenced by ANY migration, not even as a foreign key,
-# so they never existed under alembic at all: audit_log_changes,
-# contract_attachments, deviation_attachments, fai_attachments,
-# role_permissions, user_roles. The four *_attachments/audit ones are inert
-# today (no endpoint, service or test imports them); the two RBAC ones are not.
-api_keys
-approval_automation_rules
-audit_log_changes
-auto_number_schemes
-bin_locations
-bom_baselines
-bom_snapshots
-bom_variant_items
-bom_variants
-capa_actions
-capacity_reports
-comments
-compliance
-compliance_certificates
-contract_attachments
-contract_pricing_tiers
-currencies
-custom_attribute_definitions
-demand_forecasts
-deviation_attachments
-digital_signatures
-eco_approvals
-eco_changes
-eco_headers
-eco_items
-eco_notifications
-exchange_rates
-fai_attachments
-inspection_plans
-inspection_records
-interchangeability_suggestions
-inventory
-inventory_reservations
-inventory_transactions
-labor_rates
-lifecycle_definitions
-mbom_headers
-mbom_items
-mbom_operations
-ncr_reports
-notifications
-notifications_queue
-part_compliance
-part_lifecycles
-part_tags
-permissions
-po_headers
-price_history
-pricing_agreement_volume_tiers
-process_plan_steps
-process_plans
-resource_schedules
-rfq_headers
-rfq_line_items
-rfq_supplier_responses
-role_permissions
-roles
-routing_operations
-routing_tables
-service_bom_headers
-service_bom_items
-tags
-tenants
-timesheet_entries
-token_blacklist
-user_mfa
-user_roles
-user_sessions
-validation_results
-warehouses
-work_centers
-work_order_materials
-work_order_operations
-work_orders
+# Adding a name here re-opens the hole that let calendar_events ship broken
+# (a live API on a table no migration made, invisible to CI because every CI
+# path bootstraps a fresh database with create_all). Write the migration
+# instead — see 058_calendar_events.py for the idempotent single-table pattern,
+# or 059 for the bulk one.

@@ -10,7 +10,7 @@ async def test_list_parts(client, auth_headers):
 @pytest.mark.asyncio
 async def test_list_parts_without_auth(client):
     resp = await client.get("/api/v1/parts/")
-    assert resp.status_code in (200, 401)
+    assert resp.status_code in (401, 403)
 
 
 @pytest.mark.asyncio
