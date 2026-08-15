@@ -173,7 +173,23 @@ python -m scripts.init_db
 
 ### Database rollback
 
+> **Check the migration's `downgrade()` before running any of this.** Not every
+> migration has a safe inverse. Migrations that only *record* pre-existing
+> tables in the chain (their `upgrade()` is `CREATE TABLE IF NOT EXISTS` and is
+> a no-op on your database) would, if reversed literally, drop tables they never
+> created. `059_formalize_create_all_tables` is exactly that case and raises
+> `NotImplementedError` rather than let you do it — for that one, move the
+> version marker without touching the schema:
+>
+> ```bash
+> alembic stamp 058_calendar_events
+> ```
+
 ```bash
+# Show where you are, and read the target revision's downgrade() first
+alembic current
+alembic history
+
 # Rollback one migration
 alembic downgrade -1
 
@@ -197,7 +213,11 @@ git checkout <previous-tag>
 # 3. Rebuild and restart
 docker compose up -d --build
 
-# 4. Apply any necessary down-migrations
+# 4. Apply any necessary down-migrations.
+#    NOT unconditional — read the target revision's downgrade() first (see the
+#    warning under "Database rollback"). If the schema does not actually need to
+#    change, stamp the marker instead of downgrading.
+docker compose exec api alembic current
 docker compose exec api alembic downgrade -1
 
 # 5. Verify
@@ -207,7 +227,9 @@ curl http://localhost:8000/api/v1/health/detailed
 ### Rollback decision tree
 
 - **Data-only migration issue** → Restore from backup
-- **Schema migration issue** → `alembic downgrade -1`
+- **Schema migration issue** → read the revision's `downgrade()`, then either
+  `alembic downgrade -1` (it really does reverse a schema change) or
+  `alembic stamp <previous>` (the schema needs no change — see the warning above)
 - **Application code issue** → Docker image rollback + down-migration
 - **Corrupted data** → Point-in-time recovery from backups
 

@@ -2854,78 +2854,37 @@ CREATE INDEX IF NOT EXISTS ix_timesheet_entries_work_order_operation_id ON times
 
 
 def downgrade() -> None:
-    # Reverse FK order. CASCADE because these tables reference each other.
-    op.execute('DROP TABLE IF EXISTS "timesheet_entries" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "capa_actions" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "work_order_operations" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "work_order_materials" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "resource_schedules" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "ncr_reports" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "deviation_attachments" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "work_orders" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "routing_operations" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "rfq_supplier_responses" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "pricing_agreement_volume_tiers" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "mbom_operations" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "mbom_items" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "inspection_records" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "fai_attachments" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "eco_changes" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "bom_variant_items" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "bom_baselines" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "service_bom_items" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "routing_tables" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "rfq_line_items" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "process_plan_steps" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "price_history" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "part_tags" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "part_lifecycles" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "part_compliance" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "mbom_headers" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "inventory_transactions" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "inventory_reservations" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "inventory" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "interchangeability_suggestions" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "inspection_plans" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "eco_notifications" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "eco_items" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "eco_approvals" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "demand_forecasts" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "contract_pricing_tiers" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "contract_attachments" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "compliance_certificates" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "bom_variants" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "bom_snapshots" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "audit_log_changes" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "user_sessions" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "user_roles" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "user_mfa" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "service_bom_headers" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "role_permissions" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "rfq_headers" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "process_plans" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "po_headers" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "notifications_queue" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "notifications" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "eco_headers" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "digital_signatures" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "comments" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "capacity_reports" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "bin_locations" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "api_keys" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "work_centers" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "warehouses" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "validation_results" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "token_blacklist" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "tags" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "roles" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "permissions" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "lifecycle_definitions" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "labor_rates" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "exchange_rates" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "custom_attribute_definitions" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "currencies" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "compliance" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "auto_number_schemes" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "approval_automation_rules" CASCADE')
-    op.execute('DROP TABLE IF EXISTS "tenants" CASCADE')
+    """Deliberately refuses to run. This migration has no safe inverse.
+
+    upgrade() is a NO-OP on every existing database: every statement is
+    CREATE TABLE IF NOT EXISTS, and each of these 74 tables already exists on
+    any database bootstrapped by scripts.init_db (which is all of them). So
+    this migration did not CREATE those tables — it only recorded them in the
+    alembic chain.
+
+    A literal inverse would therefore drop 74 tables it never created, with
+    live data in them: tenants, roles, permissions, user_roles, user_sessions,
+    api_keys, inventory, inventory_transactions, po_headers, work_orders,
+    eco_headers, notifications, bom_snapshots and 61 more. Worse, dropping
+    `tenants` CASCADE also strips the tenantId foreign key from ~90 surviving
+    tables (parts, boms, documents, ...), and re-running upgrade() would NOT
+    put them back — an up/down/up cycle would leave the schema permanently
+    degraded even after restoring rows from backup.
+
+    That mattered because backend/docs/deployment-runbook.md documents
+    `alembic downgrade -1` as the standard application-rollback step, which
+    resolves to exactly this revision once it is head. An operator following
+    the runbook during an incident would have destroyed the database.
+
+    To roll the application back past this revision, stamp instead of
+    downgrade — the schema needs no change, only the version marker:
+
+        alembic stamp 058_calendar_events
+    """
+    raise NotImplementedError(
+        "059_formalize_create_all_tables has no safe downgrade: its upgrade is "
+        "a no-op on existing databases, so reversing it would DROP 74 live "
+        "tables (including tenants, CASCADE) that it never created. To move the "
+        "version marker back without touching the schema, run: "
+        "alembic stamp 058_calendar_events"
+    )
