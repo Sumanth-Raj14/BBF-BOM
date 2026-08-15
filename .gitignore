@@ -94,3 +94,7 @@ backend/sweep_uvicorn*.log
 
 # Local Claude Code settings/scratch — machine-specific, not project config
 .claude/
+
+# Raw pytest run logs — transient output, never project content
+test_output*.txt
+backend/test_output*.txt

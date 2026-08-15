@@ -273,7 +273,11 @@ jobs:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
     needs: [lint-backend, lint-frontend, test-backend, test-frontend, security-scan, dependency-audit]
-    if: github.event_name == 'push'
+    # Ref gate matters now that `on.push` covers every branch. Without it, every
+    # push to any feature branch would publish a :sha/:branch image to GHCR —
+    # registry noise from unreviewed code. Publish only from the default branch
+    # and from release tags.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
     permissions:
       contents: read
       packages: write
@@ -313,6 +317,23 @@ jobs:
     name: Deploy Staging
     runs-on: ubuntu-latest
     needs: build-and-push
+    # DELIBERATELY UNREACHABLE — do not "fix" this ref without reading on.
+    #
+    # `main` does not exist (the default branch is master), so this job never
+    # runs. That is currently the CORRECT state: the repo has ZERO Actions
+    # secrets and ZERO environments configured, and this job needs STAGING_HOST,
+    # STAGING_USER and STAGING_SSH_KEY. Pointing it at master would make it fire
+    # on every push and fail on missing credentials — turning master permanently
+    # red without deploying anything.
+    #
+    # To actually enable staging deploys:
+    #   1. create the `staging` environment (add reviewers if you want a gate)
+    #   2. add secrets STAGING_HOST / STAGING_USER / STAGING_SSH_KEY
+    #   3. fix the deploy script — it runs `docker compose pull backend`, but
+    #      docker-compose.yml builds the backend from source and never references
+    #      the GHCR image build-and-push publishes, so it would not pull what CI
+    #      just built
+    #   4. only then change this to refs/heads/master
     if: github.ref == 'refs/heads/main'
     environment: staging
     steps:
@@ -342,6 +363,15 @@ jobs:
     name: Deploy Production
     runs-on: ubuntu-latest
     needs: build-and-push
+    # DELIBERATELY UNREACHABLE — twice over, and both are intentional for now.
+    # (a) `on.push` declares only `branches:`, no `tags:`, so pushing a v* tag
+    #     does not start this workflow at all; this condition can never be true.
+    # (b) Same as deploy-staging: PRODUCTION_HOST / PRODUCTION_USER /
+    #     PRODUCTION_SSH_KEY are not configured, and neither is the `production`
+    #     environment, so enabling the trigger would only produce a red job.
+    # Enabling an automatic production deploy is a decision with real blast
+    # radius — it needs the environment protection rules, the secrets, and the
+    # image-pull fix noted on deploy-staging above. Left off on purpose.
     if: startsWith(github.ref, 'refs/tags/v')
     environment:
       name: production
