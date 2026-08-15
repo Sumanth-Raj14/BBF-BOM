@@ -112,7 +112,15 @@ async def test_configured_provider_yields_authorize_redirect(client, configured_
 
 
 @pytest.mark.asyncio
-async def test_sso_callback_completes_a_real_session(client, configured_google, monkeypatch):
+async def test_sso_callback_completes_a_real_session(
+    client, configured_google, monkeypatch, test_tenant
+):
+    # test_tenant is required, not incidental: the callback provisions a User
+    # row, and on Postgres that FK is enforced --
+    #   insert or update on "users" violates fk_users_tenantId_tenants
+    #   DETAIL: Key (tenantId)=(1) is not present in table "tenants"
+    # SQLite does not enforce foreign keys by default, so without this fixture
+    # the test passed locally and failed only on the Postgres CI track.
     monkeypatch.setattr(sso_module.httpx, "AsyncClient", _FakeAsyncClient)
 
     # Spy on set_auth_cookies (still delegates to the real implementation) so
