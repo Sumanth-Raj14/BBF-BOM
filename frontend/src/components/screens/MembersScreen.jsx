@@ -208,7 +208,7 @@ export default function MembersScreen() {
     <div className="members">
       <ScreenHeader
         title={__t("members.title") || "Members & Privileges"}
-        subtitle={
+        description={
           __t("members.subtitle") ||
           "Manage who has access to this workspace and what they can do"
         }
@@ -247,7 +247,7 @@ export default function MembersScreen() {
       {!loading && !error && filtered.length === 0 && (
         <EmptyState
           title={__t("members.emptyTitle") || "No members found"}
-          description={
+          message={
             search
               ? __t("members.emptySearch") || "No member matches that search."
               : __t("members.empty") ||
