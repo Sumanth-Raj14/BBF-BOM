@@ -40,6 +40,9 @@ const ROUTES = [
   // wave 2 parity screens
   "/requirements", "/mbom",
   "/cad-connectors",
+
+  // Screens added for backends that previously had no UI surface.
+  "/contracts", "/supplier-scorecards", "/make-vs-buy", "/esignatures",
 ];
 
 

@@ -65,6 +65,9 @@ export const SECTIONS = [
     items: [
       { id: "order-tracking", label: "Order Tracking", icon: <Icon.Send size={size} /> },
       { id: "supplier-portal", label: "Supplier Portal", icon: <Icon.Export size={size} /> },
+      { id: "contracts", label: "Contracts", icon: <Icon.Doc size={size} /> },
+      { id: "supplier-scorecards", label: "Supplier Scorecards", icon: <Icon.Chart size={size} /> },
+      { id: "make-vs-buy", label: "Make vs Buy", icon: <Icon.Diff size={size} /> },
     ],
   },
   {
@@ -82,6 +85,7 @@ export const SECTIONS = [
       { id: "ai", label: "AI & Automation", icon: <Icon.Sparkles size={size} /> },
       { id: "activity", label: "Team Activity", icon: <Icon.User size={size} /> },
       { id: "audit-trail", label: "Audit Trail", icon: <Icon.Activity size={size} /> },
+      { id: "esignatures", label: "E-Signatures", icon: <Icon.Check size={size} /> },
     ],
   },
   {

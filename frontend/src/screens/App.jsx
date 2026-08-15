@@ -1,5 +1,9 @@
 import { Routes, Route, useLocation } from "react-router-dom";
 import MembersScreen from "../components/screens/MembersScreen.jsx";
+import ContractsScreen from "../components/screens/ContractsScreen.jsx";
+import MakeVsBuyScreen from "../components/screens/MakeVsBuyScreen.jsx";
+import SupplierScorecardsScreen from "../components/screens/SupplierScorecardsScreen.jsx";
+import ESignaturesScreen from "../components/screens/ESignaturesScreen.jsx";
 import { storage } from "../utils/storage.js";
 import { isOfflineCapableError } from "../utils/offlineAuth.js";
 import { ACCENT_PRESETS } from "../utils/constants.js";
@@ -143,6 +147,41 @@ function MembersScreenWrapper() {
   return (
     <ErrBD>
       <MembersScreen />
+    </ErrBD>
+  );
+}
+
+// These four features had a complete backend AND a working api.js client, but no
+// screen ever called them — so they were unreachable from the product. Adding the
+// missing surface; nothing existing is changed.
+function ContractsScreenWrapper() {
+  return (
+    <ErrBD>
+      <ContractsScreen />
+    </ErrBD>
+  );
+}
+
+function MakeVsBuyScreenWrapper() {
+  return (
+    <ErrBD>
+      <MakeVsBuyScreen />
+    </ErrBD>
+  );
+}
+
+function SupplierScorecardsScreenWrapper() {
+  return (
+    <ErrBD>
+      <SupplierScorecardsScreen />
+    </ErrBD>
+  );
+}
+
+function ESignaturesScreenWrapper() {
+  return (
+    <ErrBD>
+      <ESignaturesScreen />
     </ErrBD>
   );
 }
@@ -493,6 +532,19 @@ function AppShell() {
             />
             <Route path="/vendors" element={<VendorsScreenWrapper />} />
             <Route path="/members" element={<MembersScreenWrapper />} />
+            <Route path="/contracts" element={<ContractsScreenWrapper />} />
+            <Route
+              path="/make-vs-buy"
+              element={<MakeVsBuyScreenWrapper />}
+            />
+            <Route
+              path="/supplier-scorecards"
+              element={<SupplierScorecardsScreenWrapper />}
+            />
+            <Route
+              path="/esignatures"
+              element={<ESignaturesScreenWrapper />}
+            />
             <Route path="/procurement" element={<ProcurementScreenWrapper />} />
             <Route path="/diff" element={<DiffScreenWrapper />} />
             <Route
