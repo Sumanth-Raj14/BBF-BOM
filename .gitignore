@@ -86,3 +86,11 @@ frontend/e2e/sweep-report/
 backend/sweep.db
 backend/.env.sweep
 backend/sweep_uvicorn*.log
+
+# SQLite test scratch DBs (*.db already ignored; the WAL/journal siblings were not)
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Local Claude Code settings/scratch — machine-specific, not project config
+.claude/

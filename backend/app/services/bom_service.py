@@ -1999,9 +1999,16 @@ async def create_variant(
     description: Optional[str] = None,
     configuration_rules: Optional[dict[str, Any]] = None,
     user_id: int = None,
+    tenant_id: Optional[int] = None,
 ) -> BomVariant:
     await get_bom_or_404(db, base_bom_id)
-    tid = get_tenant_id()
+    # Prefer the explicitly-passed tenant (from current_user.tenantId), same as
+    # create_bom / create_bom_item. Relying on the ambient context ALONE made
+    # this 500 on every HTTP call — bom_variants.tenantId is NOT NULL and the
+    # request path does not populate that context, so every real variant
+    # creation failed with an IntegrityError. Service-layer tests missed it
+    # because they set TenantContext by hand before calling in.
+    tid = tenant_id if tenant_id is not None else get_tenant_id()
     variant = BomVariant(
         base_bom_id=base_bom_id,
         variant_name=variant_name,
@@ -2076,8 +2083,12 @@ async def add_variant_item(
     substitute_part_id: Optional[int] = None,
     is_optional: bool = False,
     condition_expression: Optional[str] = None,
+    tenant_id: Optional[int] = None,
 ) -> BomVariantItem:
-    tid = get_tenant_id()
+    # Same as create_variant: explicit tenant first, ambient context as
+    # fallback. The tenant filters below are the cross-tenant guard, so this
+    # must resolve to a real tenant on the HTTP path.
+    tid = tenant_id if tenant_id is not None else get_tenant_id()
     variant_stmt = select(BomVariant).where(BomVariant.id == variant_id)
     if tid is not None:
         variant_stmt = variant_stmt.where(BomVariant.tenantId == tid)
@@ -2098,6 +2109,10 @@ async def add_variant_item(
         substitute_part_id=substitute_part_id,
         is_optional=is_optional,
         condition_expression=condition_expression,
+        # Set explicitly rather than leaning on tenant_events' before_insert
+        # listener: that only populates tenantId when the AMBIENT context is
+        # set, which it is not on the HTTP path (see create_variant above).
+        tenantId=tid,
     )
     db.add(item)
     await db.commit()

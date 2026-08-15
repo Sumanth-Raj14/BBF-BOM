@@ -182,6 +182,61 @@ async def get_mass_rollup(bom_id: int, db: AsyncSession = Depends(get_db)):
     return await bom_service.get_mass_rollup(db, bom_id)
 
 
+# ---------------------------------------------------------------------------
+# VARIANT ROUTES MUST BE REGISTERED BEFORE THE "/{bom_id}/..." ROUTES BELOW.
+#
+# Starlette matches routes in registration order, first match wins. When
+# POST /variants/items was declared *after* POST /{bom_id}/items, every call to
+# it matched the parameterised route with bom_id="variants" and died on int
+# coercion — the endpoint was permanently unreachable despite being published
+# in openapi.json and having a live client wrapper (frontend/api.js
+# variants.addItem). CI never caught it because the variant tests call
+# bom_service.add_variant_item() directly instead of going through HTTP.
+#
+# Keep every literal-prefixed route above the {bom_id} block.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/variants")
+async def create_variant(
+    request: BomVariantRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await bom_service.create_variant(
+        db,
+        request.base_bom_id,
+        request.variant_name,
+        request.description,
+        request.configuration_rules,
+        current_user.id,
+        tenant_id=current_user.tenantId,
+    )
+
+
+@router.post("/variants/items")
+async def add_variant_item(
+    request: BomVariantItemRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await bom_service.add_variant_item(
+        db,
+        request.variant_id,
+        request.part_id,
+        request.quantity,
+        request.substitute_part_id,
+        request.is_optional,
+        request.condition_expression,
+        tenant_id=current_user.tenantId,
+    )
+
+
+@router.get("/variants/{variant_id}")
+async def get_variant(variant_id: int, db: AsyncSession = Depends(get_db)):
+    return await bom_service.get_variant(db, variant_id)
+
+
 @router.get("/{bom_id}/items")
 async def list_bom_items(bom_id: int, db: AsyncSession = Depends(get_db)):
     return await bom_service.list_bom_items(db, bom_id)
@@ -349,43 +404,6 @@ async def create_baseline(
     current_user: User = Depends(get_current_user),
 ):
     return await bom_service.create_baseline(db, bom_id, baseline_name, current_user.id)
-
-
-@router.post("/variants")
-async def create_variant(
-    request: BomVariantRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await bom_service.create_variant(
-        db,
-        request.base_bom_id,
-        request.variant_name,
-        request.description,
-        request.configuration_rules,
-        current_user.id,
-    )
-
-
-@router.get("/variants/{variant_id}")
-async def get_variant(variant_id: int, db: AsyncSession = Depends(get_db)):
-    return await bom_service.get_variant(db, variant_id)
-
-
-@router.post("/variants/items")
-async def add_variant_item(
-    request: BomVariantItemRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    return await bom_service.add_variant_item(
-        db,
-        request.variant_id,
-        request.part_id,
-        request.quantity,
-        request.substitute_part_id,
-        request.is_optional,
-        request.condition_expression,
-    )
 
 
 @router.post("/{bom_id}/export")
