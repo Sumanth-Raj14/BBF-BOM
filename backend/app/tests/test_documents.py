@@ -4,7 +4,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_documents_list(client, auth_headers):
     resp = await client.get("/api/v1/documents/", headers=auth_headers)
-    assert resp.status_code in (200, 401, 403)
+    assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -23,10 +23,10 @@ async def test_documents_upload_validation(client, auth_headers):
 @pytest.mark.asyncio
 async def test_documents_get_not_found(client, auth_headers):
     resp = await client.get("/api/v1/documents/99999", headers=auth_headers)
-    assert resp.status_code in (404, 401, 403)
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_documents_without_auth(client):
     resp = await client.get("/api/v1/documents/")
-    assert resp.status_code in (200, 401)
+    assert resp.status_code in (401, 403)

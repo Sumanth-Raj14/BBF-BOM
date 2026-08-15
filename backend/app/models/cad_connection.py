@@ -15,6 +15,7 @@ from sqlalchemy import (
     JSON,
     Column,
     DateTime,
+    Index,
     Integer,
     String,
     Text,
@@ -42,7 +43,15 @@ class CadConnection(Base, TenantAwareMixin):
     createdAt = Column(DateTime(timezone=True), server_default=func.now())
     updatedAt = Column(DateTime(timezone=True), onupdate=func.now())
 
-    __table_args__ = (UniqueConstraint("tenantId", "name", name="uq_cad_connections_tenant_name"),)
+    __table_args__ = (
+        UniqueConstraint("tenantId", "name", name="uq_cad_connections_tenant_name"),
+        # Mirrors the composite index migration 056 creates. Without it a
+        # create_all database (every test run, and any greenfield bootstrap via
+        # scripts.init_db) had only the single-column connector_type index,
+        # while a migrated database had both — so the two disagreed on the
+        # index set for the same table.
+        Index("idx_cad_connections_tenant_type", "tenantId", "connector_type"),
+    )
 
     def __repr__(self):
         return f"<CadConnection {self.name}: {self.connector_type}>"
