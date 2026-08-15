@@ -186,19 +186,35 @@ async def derive_mbom_from_ebom(
 
     # mbom_items.part_id is NOT NULL — an EBOM line with no part assigned has
     # nothing to manufacture against, so it's skipped rather than faked.
+    #
+    # Two passes to preserve the EBOM's parent/child structure (migration
+    # 057_mbom_hierarchy): the source rows can't be assumed to arrive
+    # parent-before-child, so pass 1 creates every new item and flushes once
+    # to obtain new ids, then pass 2 maps each old parent_item_id -> the new
+    # item created for it. An old parent that was itself skipped (partless,
+    # or belongs to a different tenant and never made it into ebom_items)
+    # simply leaves the child with no parent — same "skip, don't fake" rule
+    # as the partless-line case.
+    old_to_new: list[tuple[Any, MbomItem]] = []
     for item in ebom_items:
         if item.part_id is None:
             continue
-        db.add(
-            MbomItem(
-                mbom_id=header.id,
-                part_id=item.part_id,
-                quantity=item.quantity if item.quantity is not None else 1,
-                unit=item.unit or "EA",
-                notes=item.notes,
-                tenantId=tid,
-            )
+        new_item = MbomItem(
+            mbom_id=header.id,
+            part_id=item.part_id,
+            quantity=item.quantity if item.quantity is not None else 1,
+            unit=item.unit or "EA",
+            notes=item.notes,
+            tenantId=tid,
         )
+        db.add(new_item)
+        old_to_new.append((item, new_item))
+
+    await db.flush()  # assigns each new_item.id for the parent-mapping pass below
+    id_map = {old.id: new.id for old, new in old_to_new}
+    for old_item, new_item in old_to_new:
+        if old_item.parent_item_id is not None and old_item.parent_item_id in id_map:
+            new_item.parent_item_id = id_map[old_item.parent_item_id]
 
     await db.commit()
     await db.refresh(header)

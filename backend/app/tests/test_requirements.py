@@ -303,6 +303,45 @@ async def test_coverage_reports_uncovered_requirements(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_coverage_paginates_with_a_true_total(client, auth_headers):
+    """The uncovered list is bounded per page, but total/has_next must always
+    reflect the TRUE uncovered count (a real COUNT(*), never len(this page))
+    so the UI can say "showing 2 of 3 uncovered" and never mistake a partial
+    page for the whole list."""
+    for i in range(3):
+        resp = await client.post(
+            "/api/v1/requirements/",
+            headers=auth_headers,
+            json={"key": f"REQ-PAGE-{i}", "title": f"Uncovered {i}", "type": "functional"},
+        )
+        assert resp.status_code == 201
+
+    page1 = await client.get(
+        "/api/v1/requirements/coverage",
+        headers=auth_headers,
+        params={"page": 1, "per_page": 2},
+    )
+    assert page1.status_code == 200
+    body1 = page1.json()
+    assert len(body1["items"]) == 2
+    assert len(body1["uncovered"]) == 2
+    assert body1["total"] == 3  # true total, not len(this page)
+    assert body1["page"] == 1
+    assert body1["per_page"] == 2
+    assert body1["has_next"] is True
+
+    page2 = await client.get(
+        "/api/v1/requirements/coverage",
+        headers=auth_headers,
+        params={"page": 2, "per_page": 2},
+    )
+    body2 = page2.json()
+    assert len(body2["items"]) == 1
+    assert body2["total"] == 3
+    assert body2["has_next"] is False
+
+
+@pytest.mark.asyncio
 async def test_create_requirement_duplicate_key_returns_409(client, auth_headers):
     """uq_requirements_tenant_key is DB-enforced only; a collision used to
     surface as an unhandled IntegrityError -> generic 500 instead of a clean

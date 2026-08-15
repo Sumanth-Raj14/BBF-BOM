@@ -12,6 +12,7 @@ import { __t } from "../i18n";
 import { toast } from "../utils/toast";
 import {
   AuthScreen,
+  SSOCallbackScreen,
   Drawer,
   ErrorBoundary,
   ErrorScreen,
@@ -261,6 +262,36 @@ function AppShell() {
       sessionStorage.setItem("intended_route", route);
     }
   }, [authed, authChecking, route]);
+
+  // SSO provider redirect lands here (?code&state, or ?error on denied
+  // consent) — must render regardless of authed/authChecking, since the
+  // user isn't authenticated yet when they arrive. Placed after every hook
+  // call above (not before) so this early return never changes the hook
+  // call order/count across renders of the same AppShell instance — e.g.
+  // when onComplete's setRoute("dashboard") re-renders this same instance
+  // straight out of the "auth/callback" branch.
+  if (route === "auth/callback") {
+    return (
+      <SSOCallbackScreen
+        onComplete={(result) => {
+          const u = result?.user || {};
+          const authedUser = {
+            id: u.id,
+            email: u.email,
+            name:
+              u.fullName || u.username || (u.email || "").split("@")[0] || "",
+            avatarUrl: u.avatarUrl,
+          };
+          storage.auth.set(authedUser);
+          ctx.setAuthed(authedUser);
+          toast(__t("common.apiConnected") + " - " + authedUser.name, {
+            kind: "success",
+          });
+          setRoute("dashboard");
+        }}
+      />
+    );
+  }
 
   if (authChecking) {
     return React.createElement(

@@ -283,6 +283,21 @@ export const authAPI = {
   },
 };
 
+// SSO API — real OAuth2 wiring against backend/app/api/endpoints/sso.py.
+// providers() drives which login buttons render enabled; authorize() starts
+// a real provider redirect; callback() completes the code exchange and
+// establishes the same httpOnly session cookies /auth/login sets.
+export const ssoAPI = {
+  providers: () => apiRequest('/sso/providers'),
+  authorize: (provider) => apiRequest(`/sso/authorize/${provider}`),
+  callback: (provider, code, state) =>
+    apiRequest(`/sso/callback/${provider}`, {
+      method: 'POST',
+      body: JSON.stringify({ code, state, provider }),
+      credentials: 'include',
+    }),
+};
+
 // Parts API
 export const partsAPI = {
   list: (params = {}) => {
@@ -911,7 +926,10 @@ export const requirementAPI = {
   create: (data) => apiRequest('/requirements', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => apiRequest(`/requirements/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id) => apiRequest(`/requirements/${id}`, { method: 'DELETE' }),
-  coverage: () => apiRequest('/requirements/coverage'),
+  coverage: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiRequest(`/requirements/coverage${q ? '?' + q : ''}`);
+  },
   byPart: (partId) => apiRequest(`/requirements/by-part/${partId}`),
   linkedParts: (id) => apiRequest(`/requirements/${id}/parts`),
   linkPart: (id, partId) => apiRequest(`/requirements/${id}/parts`, { method: 'POST', body: JSON.stringify({ partId }) }),
@@ -1629,6 +1647,7 @@ export const bomItemsAPI = {
 
 export const api = {
   auth: authAPI,
+  sso: ssoAPI,
   tenants: tenantsAPI,
   parts: partsAPI,
   projects: projectsAPI,

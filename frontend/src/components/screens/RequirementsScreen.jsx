@@ -90,6 +90,7 @@ export default function RequirementsScreen() {
 
   const [coverage, setCoverage] = React.useState(null);
   const [showCoverage, setShowCoverage] = React.useState(false);
+  const [coveragePage, setCoveragePage] = React.useState(1);
 
   const load = React.useCallback(
     async (pageNum, append) => {
@@ -119,10 +120,15 @@ export default function RequirementsScreen() {
     load(1, false);
   }, [load]);
 
-  const loadCoverage = async () => {
+  const loadCoverage = async (pageNum = 1, append = false) => {
     try {
-      const result = await api.requirement.coverage();
-      setCoverage(result);
+      const result = await api.requirement.coverage({ page: pageNum, per_page: 50 });
+      setCoverage((prev) =>
+        append && prev
+          ? { ...result, uncovered: [...prev.uncovered, ...(result.uncovered || [])] }
+          : result,
+      );
+      setCoveragePage(pageNum);
       setShowCoverage(true);
     } catch (e) {
       toast(
@@ -291,7 +297,7 @@ export default function RequirementsScreen() {
         }
         actions={
           <>
-            <Button variant="secondary" size="sm" onClick={loadCoverage}>
+            <Button variant="secondary" size="sm" onClick={() => loadCoverage()}>
               {__t("requirements.coverage") || "Coverage"}
             </Button>
             <Button variant="secondary" size="sm" onClick={() => load(1, false)}>
@@ -600,24 +606,44 @@ export default function RequirementsScreen() {
       >
         {coverage && (
           <>
-            <p className="fs-12 fg-2 mb-14">
+            <p className="fs-12 fg-2 mb-4">
               {(__t("requirements.coverageSummary") || "{covered} of {total} covered")
                 .replace("{covered}", coverage.covered_count)
-                .replace("{total}", coverage.total)}
+                .replace("{total}", coverage.total_requirements)}
             </p>
+            {coverage.total > 0 && (
+              <p className="fs-11 fg-3 mb-14">
+                {(__t("requirements.coverageShowing") || "Showing {shown} of {total} uncovered")
+                  .replace("{shown}", coverage.uncovered.length)
+                  .replace("{total}", coverage.total)}
+              </p>
+            )}
             {coverage.uncovered.length === 0 ? (
               <EmptyState
                 title={__t("requirements.fullyCovered") || "All requirements are covered"}
                 message={__t("requirements.fullyCoveredMsg") || "Every requirement has at least one linked part."}
               />
             ) : (
-              <ul className="req__links">
-                {coverage.uncovered.map((r) => (
-                  <li key={r.id} className="fs-12">
-                    <span className="font-mono">{r.key}</span> — {r.title}
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="req__links">
+                  {coverage.uncovered.map((r) => (
+                    <li key={r.id} className="fs-12">
+                      <span className="font-mono">{r.key}</span> — {r.title}
+                    </li>
+                  ))}
+                </ul>
+                {coverage.has_next && (
+                  <div className="flex justify-center mt-14">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => loadCoverage(coveragePage + 1, true)}
+                    >
+                      {__t("common.loadMore") || "Load more"}
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </>
         )}

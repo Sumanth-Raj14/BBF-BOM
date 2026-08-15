@@ -801,10 +801,16 @@ function WebhooksScreen() {
   );
 }
 // ============ BULK IMPORT ============
+// The actual upload -> column-mapping -> validate -> commit flow lives in
+// the shared BulkImportModal (frontend/src/components/modals/BulkImportModal.jsx),
+// already wired into ModalsHost.jsx under modal key "bulk-import" and used
+// by NavRail/command-palette/onboarding. This screen used to bypass all of
+// that and call the legacy /process endpoint with an empty {} mapping —
+// honestly reporting 0 created because no mapping was ever supplied. Reuse
+// the existing modal instead of rebuilding mapping UI here.
 function BulkImportScreen() {
+  const ctx = useAppStore();
   const [jobs, setJobs] = React.useState([]);
-  const [uploading, setUploading] = React.useState(false);
-  const [selectedFile, setSelectedFile] = React.useState(null);
   const loadJobs = React.useCallback(() => {
     return Promise.resolve(bulkImportAPI?.list?.())
       .then((d) => {
@@ -819,37 +825,17 @@ function BulkImportScreen() {
   React.useEffect(() => {
     loadJobs();
   }, [loadJobs]);
-  const handleUpload = async () => {
-    if (!selectedFile) return;
-    setUploading(true);
-    try {
-      const result = await bulkImportAPI?.upload(selectedFile);
-      const totalRows = result?.totalRows || 0;
-      toast("File uploaded" + (totalRows ? ", " + totalRows + " rows detected" : ""), {
-        kind: "success",
-      });
-      const jobId = result?.jobId || result?.id;
-      if (jobId) {
-        // Backend requires a mappingConfig dict in the body (no default) —
-        // pass {} when no column mapping UI has been configured yet.
-        const processed = await bulkImportAPI?.process(jobId, {});
-        const done = processed?.processedRows;
-        const errs = processed?.errorRows;
-        toast(
-          "Import processing started" +
-            (typeof done === "number"
-              ? " (" + done + " processed" + (errs ? ", " + errs + " errors" : "") + ")"
-              : ""),
-          { kind: "success" },
-        );
-      }
-      loadJobs();
-    } catch (e) {
-      toast("Import failed: " + (e?.message || ""), { kind: "error" });
-    } finally {
-      setUploading(false);
-    }
-  };
+  // The modal is mounted once, globally, by ModalsHost. Re-fetch the job
+  // history right after it closes so a completed import shows up here
+  // without a manual reload (same pattern VendorsScreen uses for its own
+  // bulk-import/new-vendor modals).
+  const prevModalRef = React.useRef(ctx?.modal);
+  React.useEffect(() => {
+    const prevModal = prevModalRef.current;
+    const justClosed = prevModal === "bulk-import" && ctx?.modal !== "bulk-import";
+    prevModalRef.current = ctx?.modal;
+    if (justClosed) loadJobs();
+  }, [ctx?.modal, loadJobs]);
   const jobColumns = [
     {
       key: "filename",
@@ -911,68 +897,16 @@ function BulkImportScreen() {
           __t("integrations.bulkImport.subtitle") ||
           "Import parts, BOMs, and vendor data from CSV or Excel files"
         }
-      />
-      <Card className="mb-12">
-        <div className="flex gap-16 items-center">
-          <div className="flex-1">
-            <div
-              role="button"
-              tabIndex={0}
-              style={{
-                border: "2px dashed var(--line)",
-                borderRadius: "var(--r-2)",
-                padding: 24,
-                textAlign: "center",
-                cursor: "pointer",
-              }}
-              onClick={() => document.getElementById("import-file").click()}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  document.getElementById("import-file").click();
-                }
-              }}
-            >
-              <Icon.Upload
-                size={24}
-                style={{ opacity: 0.3, marginBottom: 8 }}
-              />
-              <div className="fs-12 fw-500">
-                {selectedFile
-                  ? selectedFile.name
-                  : __t("integrations.bulkImport.selectFile") ||
-                    "Click to select CSV or XLSX file"}
-              </div>
-              <div className="fs-10 fg-3 mt-4">
-                {__t("integrations.bulkImport.supports") ||
-                  "Supports: Parts, BOMs, Vendors, Purchase Orders"}
-              </div>
-              <label className="sr-only" htmlFor="import-file">
-                {__t("integrations.bulkImport.selectFile") ||
-                  "Click to select CSV or XLSX file"}
-              </label>
-              <input
-                id="import-file"
-                type="file"
-                accept=".csv,.xlsx,.xls"
-                style={{ display: "none" }}
-                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-              />
-            </div>
-          </div>
+        actions={
           <Button
             variant="primary"
-            disabled={!selectedFile || uploading}
-            loading={uploading}
-            onClick={handleUpload}
+            onClick={() => ctx?.openModal?.("bulk-import")}
           >
             <Icon.Import size={12} />{" "}
-            {uploading
-              ? __t("integrations.bulkImport.uploading") || "Importing..."
-              : __t("integrations.bulkImport.uploadAndImport") || "Start Import"}
+            {__t("integrations.bulkImport.uploadAndImport") || "Start Import"}
           </Button>
-        </div>
-      </Card>
+        }
+      />
       <Card
         bodyClassName="p-0"
         title={__t("integrations.bulkImport.importHistory") || "Import History"}

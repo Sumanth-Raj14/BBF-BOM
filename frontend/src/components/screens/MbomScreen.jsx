@@ -195,11 +195,31 @@ export default function MbomScreen() {
     },
   ];
 
+  // Sub-assembly depth from the flat parent_item_id list (migration
+  // 057_mbom_hierarchy) — just enough to indent the tree, not a full
+  // nested-render (that's wider frontend work, out of scope here).
+  const itemDepth = (i, byId = new Map((detail?.items || []).map((x) => [x.id, x]))) => {
+    let depth = 0;
+    const seen = new Set();
+    let cur = i;
+    while (cur?.parent_item_id != null && !seen.has(cur.parent_item_id)) {
+      seen.add(cur.parent_item_id);
+      cur = byId.get(cur.parent_item_id);
+      depth++;
+    }
+    return depth;
+  };
+
   const detailItemColumns = [
     {
       key: "part_id",
       header: __t("mbom.colPart") || "Part",
-      render: (i) => <span className="font-mono fs-11">{`part #${i.part_id}`}</span>,
+      render: (i) => (
+        <span className="font-mono fs-11" style={{ paddingLeft: itemDepth(i) * 16 }}>
+          {itemDepth(i) > 0 ? "└ " : ""}
+          {`part #${i.part_id}`}
+        </span>
+      ),
     },
     { key: "quantity", header: __t("mbom.colQty") || "Qty", align: "num" },
     { key: "unit", header: __t("mbom.colUnit") || "Unit" },
