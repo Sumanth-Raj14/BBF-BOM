@@ -33,6 +33,15 @@ BACKEND = pathlib.Path(__file__).resolve().parents[2]
 BASELINE = pathlib.Path(__file__).parent / "_migration_baseline.txt"
 
 
+def _read_baseline() -> set[str]:
+    """Table names from the baseline file, ignoring `#` comments and blanks."""
+    return {
+        line.strip()
+        for line in BASELINE.read_text(encoding="utf8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+
 def _tables_created_by_migrations() -> set[str]:
     """Table names any migration creates, via op.create_table or raw DDL.
 
@@ -59,11 +68,7 @@ def test_new_model_tables_have_a_migration():
 
     import app.models  # noqa: F401  (populate Base.metadata with every model)
 
-    baseline = {
-        line.strip()
-        for line in BASELINE.read_text(encoding="utf8").splitlines()
-        if line.strip()
-    }
+    baseline = _read_baseline()
     uncovered = set(Base.metadata.tables) - _tables_created_by_migrations()
     new = sorted(uncovered - baseline)
 
@@ -86,11 +91,7 @@ def test_baseline_has_no_stale_entries():
 
     import app.models  # noqa: F401
 
-    baseline = {
-        line.strip()
-        for line in BASELINE.read_text(encoding="utf8").splitlines()
-        if line.strip()
-    }
+    baseline = _read_baseline()
     covered_now = _tables_created_by_migrations()
     gone = sorted(t for t in baseline if t not in Base.metadata.tables)
     now_migrated = sorted(baseline & covered_now)

@@ -1,3 +1,25 @@
+# Model tables that NO migration creates. Enforced by test_migration_table_coverage.py:
+# nothing may be ADDED to this list without a migration.
+#
+# These exist only because scripts/init_db.py bootstraps a greenfield database
+# with Base.metadata.create_all() and then stamps head — the early alembic
+# chain genuinely cannot build from base (migration 004 references po_headers,
+# which no migration creates). Migration 022's docstring claims it "formalizes
+# ~73 tables" into alembic; it actually creates 9. The rest were never ported.
+#
+# Consequence, and why this file is a liability rather than a clean baseline:
+# a database bootstrapped BEFORE one of these tables entered the models will
+# never get it, because the incremental path only runs `alembic upgrade head`.
+# That is exactly how calendar_events shipped broken (fixed in migration 058).
+# Live features sit on these tables — RBAC (roles, permissions, user_roles,
+# role_permissions), inventory, ECO, PO. Porting them into the chain is a real
+# piece of work, tracked as a major improvement, not a safe patch.
+#
+# Six of these are not referenced by ANY migration, not even as a foreign key,
+# so they never existed under alembic at all: audit_log_changes,
+# contract_attachments, deviation_attachments, fai_attachments,
+# role_permissions, user_roles. The four *_attachments/audit ones are inert
+# today (no endpoint, service or test imports them); the two RBAC ones are not.
 api_keys
 approval_automation_rules
 audit_log_changes

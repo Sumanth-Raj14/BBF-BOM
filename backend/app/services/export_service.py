@@ -23,6 +23,7 @@ from app.models.export_template import ExportTemplate
 from app.models.part import Part
 from app.models.po_models import POHeader
 from app.models.vendor import Vendor
+from app.services import uom_service
 from app.services.bom_service import (
     _compute_levels_and_effective_qty,
     _drop_excluded_subtrees,
@@ -339,10 +340,39 @@ async def _rows_bom(
     rows = []
     for item in ordered:
         part = parts_map.get(item.part_id)
-        unit_cost = item.unit_cost_snapshot if item.unit_cost_snapshot is not None else (
-            part.cost if part else None
-        )
+        # Mirror get_bom_cost_rollup's rule EXACTLY (bom_service.py, "A snapshot
+        # cost is what was recorded FOR this line..."), or the exported
+        # Extended Cost column disagrees with the Cost Rollup screen for the
+        # same BOM. Two differences used to exist:
+        #   1. the fallback test was `is not None` here but truthy there, so a
+        #      snapshot of 0 exported as 0 while the rollup fell through to
+        #      part.cost;
+        #   2. extended cost was a naive unit_cost * qty, ignoring UOM, so a
+        #      part costed per M on a line counted in CM was off by 100x.
+        if item.unit_cost_snapshot:
+            unit_cost = float(item.unit_cost_snapshot)
+            cost_uom = item.unit or "EA"
+        elif part is not None and part.cost:
+            unit_cost = float(part.cost)
+            cost_uom = part.uom or "EA"
+        else:
+            unit_cost = None
+            cost_uom = None
+
         qty = effective_qty[item.id] if indented else float(item.quantity or 0)
+
+        if unit_cost is None:
+            extended = None
+        else:
+            extended_decimal, _warning = await uom_service.extended_cost(
+                db, qty, item.unit or "EA", unit_cost, cost_uom, tenant_id
+            )
+            # Warnings are surfaced by the rollup endpoint, which is the place
+            # users go to reconcile costs; a spreadsheet cell has nowhere to
+            # put one. The number matches the rollup either way, because
+            # extended_cost falls back to the unconverted product identically.
+            extended = round(float(extended_decimal), 4)
+
         rows.append(
             {
                 "level": levels[item.id],
@@ -356,9 +386,7 @@ async def _rows_bom(
                 "vendor": part.vendor if part else None,
                 "manufacturer": part.manufacturer if part else None,
                 "unit_cost": _num(unit_cost),
-                "extended_cost": (
-                    round(float(unit_cost or 0) * qty, 4) if unit_cost is not None else None
-                ),
+                "extended_cost": extended,
                 "notes": item.notes,
                 "status": part.status if part else None,
             }
