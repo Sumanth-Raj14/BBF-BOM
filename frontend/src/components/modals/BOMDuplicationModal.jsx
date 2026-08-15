@@ -32,6 +32,12 @@ function BOMDuplicationModal({ open, onClose }) {
         id: r.id + "-dup-" + stamp,
         children: r.children ? relabel(r.children) : undefined,
         cost: includeCosts ? r.cost : 0,
+        // The "Reset revision to A" checkbox was rendered and bound to state,
+        // but includeRev was never read here — so the duplicate silently kept
+        // the source revision whichever way the box was ticked. Rows do carry
+        // a real `rev` (see bom-editor.jsx), so there was always something to
+        // reset.
+        rev: includeRev ? "A" : r.rev,
       }));
     const dupRows = relabel(newRows);
 

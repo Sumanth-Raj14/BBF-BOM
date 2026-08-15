@@ -1612,30 +1612,52 @@ async def get_where_used(db: AsyncSession, part_id: int) -> list[dict]:
         for b in br.scalars().all():
             boms_map[b.id] = b
 
-    parent_item_ids = {item.parent_item_id for item in items if item.parent_item_id}
+    # Walk UP the whole ancestor chain, not just one hop.
+    #
+    # This used to fetch only the direct parents of the matching items. The
+    # resolve_level_and_parent loop below then asked ancestor_map for the
+    # grandparent, got None because it was never fetched, and stopped — so
+    # `level` saturated at 2 and `parent_bom_id` froze at the first hop for
+    # every part nested 3+ deep. Keep fetching each newly-discovered
+    # generation until the chain runs out.
     ancestor_map: dict[int, Optional[int]] = {}
     ancestor_bom_map: dict[int, Optional[int]] = {}
-    if parent_item_ids:
+    pending = {item.parent_item_id for item in items if item.parent_item_id}
+    while pending:
         ancestors = await db.execute(
             select(BOMItem.id, BOMItem.parent_item_id, BOMItem.bom_id).where(
-                BOMItem.id.in_(parent_item_ids)
+                BOMItem.id.in_(pending)
             )
         )
+        next_pending: set[int] = set()
         for row in ancestors:
             ancestor_map[row.id] = row.parent_item_id
             ancestor_bom_map[row.id] = row.bom_id
+            if row.parent_item_id and row.parent_item_id not in ancestor_map:
+                next_pending.add(row.parent_item_id)
+        # `- ancestor_map.keys()` also breaks the loop on a cyclic parent
+        # chain, which the walk below already guards against with `while cur`.
+        pending = next_pending - ancestor_map.keys()
 
     def resolve_level_and_parent(pid: Optional[int]) -> tuple[int, Optional[int]]:
         level = 1
         pbom_id = None
         cur = pid
-        while cur:
+        # Now that ancestor_map spans the full chain, a corrupt parent cycle
+        # would spin here forever — it only terminated before because the map
+        # was one generation deep. Stop on a revisit.
+        seen: set[int] = set()
+        while cur and cur not in seen:
+            seen.add(cur)
             pbom_id = ancestor_bom_map.get(cur, pbom_id)
-            nxt = ancestor_map.get(cur)
-            if nxt is None:
-                break
+            # Count THIS ancestor, then move up. The old code incremented only
+            # when a further ancestor existed, so it was short by one for every
+            # non-root item: a direct child of a root line reported level 1,
+            # same as the root itself. The convention here is the one
+            # _compute_levels_and_effective_qty documents — root items are
+            # level 1 — so level == 1 + number of ancestors.
             level += 1
-            cur = nxt
+            cur = ancestor_map.get(cur)
         return level, pbom_id
 
     results = []
@@ -1855,8 +1877,38 @@ async def compare_boms(db: AsyncSession, bom_id_1: int, bom_id_2: int) -> dict:
         items2_stmt = items2_stmt.where(BOMItem.tenantId == tid)
     items1_r = await db.execute(items1_stmt)
     items2_r = await db.execute(items2_stmt)
-    items1 = {i.part_id: i for i in items1_r.scalars().all() if i.part_id}
-    items2 = {i.part_id: i for i in items2_r.scalars().all() if i.part_id}
+
+    def _aggregate_by_part(rows) -> dict[int, dict[str, Any]]:
+        """Collapse a BOM's lines to one entry per part.
+
+        A part legitimately appears on MANY lines of a single BOM — the same
+        resistor on four reference designators, or a fastener reused across
+        sub-assemblies. This used to build `{i.part_id: i for i in rows}`,
+        which keeps only the LAST line for such a part: every earlier
+        occurrence vanished from the comparison, and the quantities reported
+        were one arbitrary line's rather than the part's total. Two BOMs
+        differing only in how many times a part appears compared as identical.
+
+        Aggregate instead: total quantity, union of reference designators.
+        """
+        agg: dict[int, dict[str, Any]] = {}
+        for r in rows:
+            if not r.part_id:
+                continue
+            entry = agg.setdefault(r.part_id, {"quantity": 0, "refdes": set()})
+            if r.quantity is not None:
+                entry["quantity"] += r.quantity
+            if r.reference_designator:
+                entry["refdes"].add(r.reference_designator)
+        return agg
+
+    def _refdes(entry: dict[str, Any]) -> Optional[str]:
+        # Sorted so the same set of designators always renders identically —
+        # otherwise a pure ordering difference would read as "modified".
+        return ", ".join(sorted(entry["refdes"])) if entry["refdes"] else None
+
+    items1 = _aggregate_by_part(items1_r.scalars().all())
+    items2 = _aggregate_by_part(items2_r.scalars().all())
 
     all_ids = set(items1.keys()) | set(items2.keys())
     parts_stmt = select(Part).where(Part.id.in_(all_ids))
@@ -1866,29 +1918,28 @@ async def compare_boms(db: AsyncSession, bom_id_1: int, bom_id_2: int) -> dict:
     parts = {p.id: p for p in parts_r.scalars().all()}
 
     added, removed, modified, unchanged = [], [], [], []
-    for pid, item in items2.items():
+    for pid, entry in items2.items():
         pn = parts[pid].pn if pid in parts else f"ID:{pid}"
         if pid not in items1:
-            added.append({"part_number": pn, "quantity": item.quantity})
-        elif (
-            items1[pid].quantity != item.quantity
-            or items1[pid].reference_designator != item.reference_designator
-        ):
+            added.append({"part_number": pn, "quantity": entry["quantity"]})
+        elif items1[pid]["quantity"] != entry["quantity"] or _refdes(
+            items1[pid]
+        ) != _refdes(entry):
             modified.append(
                 {
                     "part_number": pn,
-                    "old_quantity": items1[pid].quantity,
-                    "new_quantity": item.quantity,
-                    "old_refdes": items1[pid].reference_designator,
-                    "new_refdes": item.reference_designator,
+                    "old_quantity": items1[pid]["quantity"],
+                    "new_quantity": entry["quantity"],
+                    "old_refdes": _refdes(items1[pid]),
+                    "new_refdes": _refdes(entry),
                 }
             )
         else:
-            unchanged.append({"part_number": pn, "quantity": item.quantity})
-    for pid, item in items1.items():
+            unchanged.append({"part_number": pn, "quantity": entry["quantity"]})
+    for pid, entry in items1.items():
         pn = parts[pid].pn if pid in parts else f"ID:{pid}"
         if pid not in items2:
-            removed.append({"part_number": pn, "quantity": item.quantity})
+            removed.append({"part_number": pn, "quantity": entry["quantity"]})
 
     return {
         "bom_id_1": bom_id_1,
