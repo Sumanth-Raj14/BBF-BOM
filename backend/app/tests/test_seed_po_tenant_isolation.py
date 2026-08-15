@@ -81,7 +81,13 @@ async def test_seed_po_sets_tenant_and_does_not_cross_tenant_delete(
     xlsx_path = tmp_path / "pos.xlsx"
     _write_po_workbook(xlsx_path, "PO-SHARED")
 
-    monkeypatch.setenv("TEST_DATABASE_URL", str(test_engine.url))
+    # render_as_string(hide_password=False), NOT str(): SQLAlchemy's __str__
+    # masks the password as "***", so on the Postgres CI track seed_po would
+    # connect with a literal *** and fail with InvalidPasswordError. On SQLite
+    # there is no password, which is why this only broke on Postgres.
+    monkeypatch.setenv(
+        "TEST_DATABASE_URL", test_engine.url.render_as_string(hide_password=False)
+    )
 
     seed_po = importlib.import_module("seed_po")
     importlib.reload(seed_po)

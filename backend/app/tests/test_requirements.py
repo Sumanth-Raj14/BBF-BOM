@@ -1,11 +1,38 @@
 import pytest
+from sqlalchemy import select
 
 from app.core.security import get_password_hash
 from app.models.bom import BOM
 from app.models.permission import Permission
 from app.models.role import Role
+from app.models.tenant import Tenant
 from app.models.user import User
 from app.tests.conftest import no_tenant_filter
+
+
+async def _ensure_tenant(db_session, tenant_id):
+    """Create the tenant row with this explicit id if it is not already there.
+
+    These tests pin tenantId to literal 1 and 2 so they can assert genuine
+    cross-tenant isolation. On Postgres those rows must actually exist or every
+    FK to `tenants` rejects the insert; on SQLite the FK is unenforced, which
+    is why this gap only surfaced in CI.
+    """
+    with no_tenant_filter():
+        existing = (
+            await db_session.execute(select(Tenant).where(Tenant.id == tenant_id))
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing
+        tenant = Tenant(
+            id=tenant_id,
+            tenant_name=f"Test Tenant {tenant_id}",
+            tenant_code=f"REQTEST{tenant_id}",
+        )
+        db_session.add(tenant)
+        await db_session.commit()
+        await db_session.refresh(tenant)
+        return tenant
 
 
 async def _scoped_login(client, db_session, tenant_id, email):
@@ -40,6 +67,13 @@ async def _scoped_login(client, db_session, tenant_id, email):
     )
     role.permissions = [read_perm, write_perm]
     role.users = [user]
+    # The tenant row must EXIST before anything references it. SQLite does not
+    # enforce foreign keys by default, so these tests passed locally while
+    # failing on the Postgres CI track with
+    #   insert or update on "permissions" violates fk_permissions_tenantId_tenants
+    #   DETAIL: Key (tenantId)=(1) is not present in table "tenants"
+    # Postgres is right; the test was relying on SQLite's leniency.
+    await _ensure_tenant(db_session, tenant_id)
     db_session.add_all([user, role, read_perm, write_perm])
     await db_session.commit()
 
