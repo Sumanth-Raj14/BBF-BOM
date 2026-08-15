@@ -1,6 +1,5 @@
 from app.api.endpoints import (
     ai_features,
-    calendar_events,
     analytics,
     api_keys,
     approval_automation,
@@ -16,8 +15,9 @@ from app.api.endpoints import (
     bulk_import,
     cad,
     cad_connectors,
-    catalogs,
+    calendar_events,
     capa,
+    catalogs,
     comments,
     compliance_api,
     contract,

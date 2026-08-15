@@ -395,7 +395,9 @@ async def get_import_errors(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    job = await _get_job_or_404(db, job_id, current_user.tenantId)
+    # Called for the 404 guard, not the value: it is what stops one tenant
+    # reading another tenant's import errors. Do not drop it.
+    await _get_job_or_404(db, job_id, current_user.tenantId)
 
     rows_result = await db.execute(
         select(BulkImportRow).where(

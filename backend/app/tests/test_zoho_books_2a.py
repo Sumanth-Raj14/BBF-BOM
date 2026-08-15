@@ -26,7 +26,9 @@ from app.integrations.worker import deliver_pending
 from app.integrations.zoho_client import ZohoBooksClient
 from app.integrations.zoho_oauth import dump_auth_blob
 from app.models.integration import (
-    IntegrationConnection, IntegrationExternalLink, IntegrationOutbox,
+    IntegrationConnection,
+    IntegrationExternalLink,
+    IntegrationOutbox,
 )
 from app.models.part import Part
 from app.models.zoho_sync import ZohoSyncLog, ZohoSyncState

@@ -154,7 +154,12 @@ async def upload_document(
             detail="File rejected by security scan.",
         )
 
-    file_hash = hashlib.md5(content).hexdigest()[:12]
+    # SHA-256, not MD5. This hash IS the stored object's name, and the S3 key
+    # below carries no tenant prefix — so two files that hash alike collide on
+    # one object and the later upload silently replaces the earlier one.
+    # MD5 collisions are cheap to construct, which made that a cross-tenant
+    # document-overwrite vector rather than a theoretical one.
+    file_hash = hashlib.sha256(content).hexdigest()[:16]
 
     # Never build a path from the client-supplied filename. Derive a safe name
     # from the content hash plus a sanitized, whitelisted extension only. The

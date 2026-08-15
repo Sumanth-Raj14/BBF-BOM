@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select, text
@@ -144,7 +144,7 @@ async def analytics_trends(
     # bind it as a parameter, and bucket by month in Python — identical results
     # on both engines, and it also removes an f-string interpolation into SQL.
     days_map = {"1mo": 30, "3mo": 91, "6mo": 182, "1yr": 365}
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days_map.get(range_, 182))
+    cutoff = datetime.now(UTC) - timedelta(days=days_map.get(range_, 182))
 
     rows = await db.execute(
         text(f"""

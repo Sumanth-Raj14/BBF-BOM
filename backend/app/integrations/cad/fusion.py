@@ -247,7 +247,7 @@ class FusionConnector:
         self._http = http
 
     @classmethod
-    def from_connection(cls, conn) -> "FusionConnector":
+    def from_connection(cls, conn) -> FusionConnector:
         blob = load_auth_blob(conn.auth) if conn and conn.auth else {}
         return cls(auth_blob=blob)
 

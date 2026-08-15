@@ -227,7 +227,11 @@ def _rows_from_csv(content: bytes) -> tuple[list[str], list[dict]]:
     if not rows:
         raise AltiumParseError("empty CSV file")
     headers = rows[0]
-    dict_rows = [dict(zip(headers, r)) for r in rows[1:]]
+    # strict=False deliberately: a ragged row (trailing empty cells dropped by
+    # the exporter, or an extra column) is ordinary in real Altium CSV output,
+    # and truncating to the shorter of the two is the tolerant behaviour an
+    # importer wants. strict=True would abort the whole file over one row.
+    dict_rows = [dict(zip(headers, r, strict=False)) for r in rows[1:]]
     return headers, dict_rows
 
 

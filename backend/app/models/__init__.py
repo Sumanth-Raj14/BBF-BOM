@@ -9,7 +9,6 @@ from app.models.approval import Approval
 from app.models.audit_log import AuditLog
 from app.models.audit_log_change import AuditLogChange
 from app.models.backup_history import BackupHistory
-from app.models.calendar_event import CalendarEvent
 
 # Enterprise models
 from app.models.bom import BOM
@@ -21,10 +20,17 @@ from app.models.bom_template import BomTemplate
 from app.models.bom_variant import BomVariant, BomVariantItem
 from app.models.bulk_import import BulkImportJob, BulkImportRow
 from app.models.cad_connection import CadConnection
-from app.models.catalog import Catalog, PartCatalog
+from app.models.calendar_event import CalendarEvent
 from app.models.capa import CAPA, CapaAttachment
+from app.models.catalog import Catalog, PartCatalog
 from app.models.comment import Comment
 from app.models.compliance import Compliance
+
+# RoHS/REACH substance compliance — GLOBAL reference (substance.py), tenant-owned
+# composition/declarations (part_composition.py) and evaluation caches
+# (compliance_evaluation.py). The tenant-aware ones subclass TenantAwareMixin so
+# register_tenant_listeners() sees them via __subclasses__().
+from app.models.compliance_evaluation import ComplianceEvaluation, ReachObligation
 from app.models.contract import (
     Contract,
     ContractAttachment,
@@ -51,17 +57,17 @@ from app.models.erp_connector import ERPConnector, ERPSyncLog
 from app.models.esignature import ESignature
 from app.models.export_template import ExportTemplate
 from app.models.fai import FaiAttachment, FaiCharacteristic, FAIReport
+from app.models.integration import (
+    IntegrationConnection,
+    IntegrationExternalLink,
+    IntegrationOutbox,
+)
 from app.models.inventory import (
     BinLocation,
     Inventory,
     InventoryReservation,
     InventoryTransaction,
     Warehouse,
-)
-from app.models.integration import (
-    IntegrationConnection,
-    IntegrationExternalLink,
-    IntegrationOutbox,
 )
 from app.models.kanban import KanbanTrigger
 from app.models.labor import LaborRate, TimesheetEntry
@@ -71,6 +77,12 @@ from app.models.notification import Notification
 from app.models.notification_queue import NotificationQueue
 from app.models.order_tracking import OrderTracking, ShipmentUpdate, TrackingMilestone
 from app.models.part import Part
+from app.models.part_composition import (
+    ExemptionClaim,
+    PartMaterial,
+    PartMaterialSubstance,
+    SubstanceDeclaration,
+)
 from app.models.part_country_history import PartCountryHistory, PartVendorPrice
 from app.models.part_custom_field import PartCustomField
 from app.models.part_derivative import PartDerivative
@@ -96,18 +108,6 @@ from app.models.routing import (
 from app.models.service_bom import ServiceBomHeader, ServiceBomItem
 from app.models.session import UserSession
 from app.models.should_cost import ShouldCostModel
-
-# RoHS/REACH substance compliance — GLOBAL reference (substance.py), tenant-owned
-# composition/declarations (part_composition.py) and evaluation caches
-# (compliance_evaluation.py). The tenant-aware ones subclass TenantAwareMixin so
-# register_tenant_listeners() sees them via __subclasses__().
-from app.models.compliance_evaluation import ComplianceEvaluation, ReachObligation
-from app.models.part_composition import (
-    ExemptionClaim,
-    PartMaterial,
-    PartMaterialSubstance,
-    SubstanceDeclaration,
-)
 from app.models.substance import (
     RegulationVersion,
     RestrictedSubstanceEntry,
@@ -143,10 +143,10 @@ from app.models.user_data import (
 )
 from app.models.vendor import Vendor
 
-# Zoho Books two-way sync state (spec §2) — imported here so
-# register_tenant_listeners() sees them as TenantAwareMixin subclasses.
-from app.models.zoho_sync import ZohoSyncCursor, ZohoSyncLog, ZohoSyncState
-
 # Integration models
 from app.models.webhook import WebhookDelivery, WebhookSubscription
 from app.models.work_order import WorkOrder, WorkOrderMaterial, WorkOrderOperation
+
+# Zoho Books two-way sync state (spec §2) — imported here so
+# register_tenant_listeners() sees them as TenantAwareMixin subclasses.
+from app.models.zoho_sync import ZohoSyncCursor, ZohoSyncLog, ZohoSyncState

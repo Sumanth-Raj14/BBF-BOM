@@ -1,10 +1,19 @@
 name: Blackbox BOM CI/CD
 
+# This workflow gated nothing for months. It triggered on `main` and `develop`,
+# neither of which exists in this repo — the default branch is `master`. So it
+# never fired on a push or a pull request, and the only runs it ever had came
+# from the weekly cron: 4 runs, against Postgres CI's 106, every one of them red
+# with nobody watching. Since lint, security scan, dependency audit, the Docker
+# build AND the deploy pipeline all live here, an automated deploy could never
+# have triggered either.
+#
+# Keep these branch names in sync with the real default branch.
 on:
   push:
-    branches: [main, develop]
+    branches: ['**']
   pull_request:
-    branches: [main]
+    branches: [master]
   schedule:
     - cron: '0 6 * * 1'  # Weekly security scan Monday 6 AM
 
@@ -47,6 +56,12 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          # The lockfile lives in frontend/, not the repo root. `defaults.run.
+          # working-directory` only affects `run:` steps — it does NOT move where
+          # this action looks — so without this the step died with "Dependencies
+          # lock file is not found in /home/runner/work/BBF-BOM/BBF-BOM" and took
+          # the whole job with it.
+          cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
       - name: ESLint
@@ -135,8 +150,16 @@ jobs:
         run: pip install bandit safety pip-audit
       - name: Bandit SAST scan (fail on high-severity/high-confidence)
         run: bandit -r backend/app/ -f json -o bandit-report.json --severity-level high --confidence-level high
-      - name: Safety dependency scan
+      # `safety check` is deprecated upstream and, on the free tier, silently
+      # withholds most findings — a local run reported "0 vulnerabilities" while
+      # also saying "18 vulnerabilities from 5 packages were ignored". Kept only
+      # as a second opinion; it is NOT the gate. Do not read a green tick here as
+      # "no vulnerable dependencies". (Switching to `safety scan` needs an API
+      # key, which would just fail the job instead.)
+      - name: Safety dependency scan (advisory only — see note above)
         run: safety check -r backend/requirements.txt
+      # This is the real dependency gate: it fails the job on any known CVE.
+      # It is what caught pillow 10.4.0 (24 CVEs) and cryptography 42.0.8 (8).
       - name: pip-audit
         run: pip-audit -r backend/requirements.txt
       - uses: actions/upload-artifact@v4
@@ -178,10 +201,23 @@ jobs:
       - name: Build Docker images
         run: |
           docker compose -f docker-compose.yml build
+        # docker-compose.yml marks five variables as REQUIRED via the
+        # ${VAR:?message} form: POSTGRES_PASSWORD, REDIS_PASSWORD, SECRET_KEY,
+        # ENCRYPTION_KEY and S3_SECRET_KEY. Compose resolves every one of them
+        # before it will build anything, so a missing value fails the whole job
+        # with "required variable ... is missing a value" — which is exactly how
+        # this job died, because POSTGRES_PASSWORD came from secrets.CI_PG_PASSWORD
+        # and that secret is not configured, so it interpolated to empty.
+        #
+        # These are literals on purpose. `build` only needs them to satisfy
+        # interpolation; none of them is baked into an image or used at build
+        # time, so depending on a repo secret bought nothing and broke the job.
         env:
-          POSTGRES_PASSWORD: ${{ secrets.CI_PG_PASSWORD }}
+          POSTGRES_PASSWORD: ci-build-pg-donotuse-4b2d9f3a5a8b6d4f
+          REDIS_PASSWORD: ci-build-redis-donotuse-7c1e4b2d9f3a5a8b
           SECRET_KEY: ci-build-signkey-donotuse-f0e1d2c3b4a5968778695a4b3c2d
-          ENCRYPTION_KEY: build_encryption_key_32char!
+          ENCRYPTION_KEY: ci-build-enckey-donotuse-b2c3d4e5f6a708192a3b4c5d9e0f
+          S3_SECRET_KEY: ci-build-s3key-donotuse-9f3a5a8b6d4f2a0c8e7b
 
   build-frontend:
     name: Build Frontend
@@ -195,6 +231,12 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          # The lockfile lives in frontend/, not the repo root. `defaults.run.
+          # working-directory` only affects `run:` steps — it does NOT move where
+          # this action looks — so without this the step died with "Dependencies
+          # lock file is not found in /home/runner/work/BBF-BOM/BBF-BOM" and took
+          # the whole job with it.
+          cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
       - name: Production build
@@ -216,6 +258,12 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          # The lockfile lives in frontend/, not the repo root. `defaults.run.
+          # working-directory` only affects `run:` steps — it does NOT move where
+          # this action looks — so without this the step died with "Dependencies
+          # lock file is not found in /home/runner/work/BBF-BOM/BBF-BOM" and took
+          # the whole job with it.
+          cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
       - name: Run Vitest tests

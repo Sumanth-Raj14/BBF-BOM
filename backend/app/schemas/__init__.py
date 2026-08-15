@@ -27,15 +27,15 @@ from app.schemas.kanban import (
 )
 from app.schemas.make_vs_buy import MakeVsBuyCreate, MakeVsBuyResponse, MakeVsBuyUpdate
 from app.schemas.part import PartCreate, PartResponse, PartUpdate
-from app.schemas.should_cost import (
-    ShouldCostCreate,
-    ShouldCostResponse,
-    ShouldCostUpdate,
-)
 from app.schemas.requirement import (
     RequirementCreate,
     RequirementResponse,
     RequirementUpdate,
+)
+from app.schemas.should_cost import (
+    ShouldCostCreate,
+    ShouldCostResponse,
+    ShouldCostUpdate,
 )
 from app.schemas.supplier_scorecard import (
     SupplierScorecardCreate,

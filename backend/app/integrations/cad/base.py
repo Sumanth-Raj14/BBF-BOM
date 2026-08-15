@@ -80,7 +80,7 @@ class CadNode:
     part_number: str | None = None
     is_assembly: bool = False
     metadata: CadPartMetadata | None = None
-    children: list["CadNode"] = field(default_factory=list)
+    children: list[CadNode] = field(default_factory=list)
 
 
 @dataclass

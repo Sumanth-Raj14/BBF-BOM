@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user
 from app.core.pagination import PageParams, get_page_params
 from app.core.rbac import require_parts_read, require_parts_write
 from app.db.session import get_db

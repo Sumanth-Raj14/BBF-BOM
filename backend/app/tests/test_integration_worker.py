@@ -6,7 +6,9 @@ from app.integrations.clickup_client import ClickUpClient
 from app.integrations.cliq_client import CliqClient
 from app.integrations.worker import deliver_pending
 from app.models.integration import (
-    IntegrationConnection, IntegrationExternalLink, IntegrationOutbox,
+    IntegrationConnection,
+    IntegrationExternalLink,
+    IntegrationOutbox,
 )
 
 
@@ -122,10 +124,10 @@ async def test_deliver_pending_redacts_secrets_in_last_error(db_session, test_us
 async def test_deliver_pending_redacts_url_in_generic_error(db_session, test_user):
     from app.integrations.worker import _sanitize_error
 
-    class Boom(Exception):
+    class BoomError(Exception):
         pass
 
-    msg = _sanitize_error(Boom("connect fail https://cliq.zoho.com/x?zapikey=SECRET123"))
+    msg = _sanitize_error(BoomError("connect fail https://cliq.zoho.com/x?zapikey=SECRET123"))
     assert "SECRET123" not in msg
     assert "zapikey" not in msg
     assert "cliq.zoho.com" not in msg

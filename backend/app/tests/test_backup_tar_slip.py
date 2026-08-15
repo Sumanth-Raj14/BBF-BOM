@@ -34,7 +34,11 @@ def test_bare_extractall_would_escape(tmp_path):
     dest.mkdir()
 
     with tarfile.open(archive, "r:gz") as tar:
-        tar.extractall(path=dest, filter="fully_trusted")
+        # nosec B202 - the unsafe extraction is the POINT of this test: it
+        # establishes the baseline escape that filter="data" must prevent in
+        # test_data_filter_blocks_the_escape below. Making this one "safe"
+        # would delete the evidence the next test is measured against.
+        tar.extractall(path=dest, filter="fully_trusted")  # nosec B202
 
     assert (tmp_path / "escaped.txt").exists(), "expected the unsafe baseline to escape"
     assert not (dest / "escaped.txt").exists()

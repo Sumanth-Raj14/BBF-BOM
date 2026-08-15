@@ -76,6 +76,45 @@ Onshape API key, an Autodesk APS app, and Altium 365 credentials. Altium
 
 ## Closed in the follow-up pass
 
+**CI was lying by omission — closed.** `ci.yml` (lint, security scan,
+dependency audit, Docker build, and the whole deploy pipeline) triggered on
+`main` and `develop`. Neither branch exists; the default branch is `master`. So
+it never ran on a push or a pull request — 4 runs ever, all red, all from its
+weekly cron, against Postgres CI's 106. An automated deploy could never have
+fired either. Triggers now point at `master`, and every job it contains was
+repaired:
+
+- **3 frontend jobs** died at `actions/setup-node@v4`, because `cache: npm`
+  looks for the lockfile at the repo root while it lives in `frontend/`
+  (`defaults.run.working-directory` does not affect the action). Fixed with
+  `cache-dependency-path`.
+- **Docker build** failed on the missing required compose variables — see the
+  retraction below.
+- **Bandit**: 4 high/high findings, now 0. Two were more than lint:
+  `documents.py` and `bom_service.py` derived the *stored object's filename*
+  from an MD5 of file content, on an S3 key with no tenant prefix. MD5
+  collisions are cheap to construct, making cross-tenant document overwrite a
+  practical vector rather than a theoretical one. Both now use SHA-256. The
+  barcode hash stays MD5 (`usedforsecurity=False`) because changing it would
+  renumber every already-printed label.
+- **npm audit**: 7 high-severity vulnerabilities. `package-lock.json` still
+  pinned vulnerable react-router and undici while `node_modules` had fixed
+  ones — and CI runs `npm ci`, which installs from the lock. Lock updated, 0
+  vulnerabilities, build and 282 tests still green.
+- **pip-audit** (which never got to run, because bandit failed first): **32
+  known CVEs** — pillow 10.4.0 (24) and cryptography 42.0.8 (8). The version
+  pins were the blocker (`<11.0`, `<43.0`). Now `Pillow>=12.3` and
+  `cryptography>=50.0`; clean. cryptography backs Fernet credential
+  encryption, so the bump was verified with 125 crypto/auth/document/barcode
+  tests plus a direct Fernet round-trip.
+- **ruff**: `app/` clean under CI's exact command. It also surfaced a real
+  duplicate — `zoho_client.list_records` was defined twice, the second
+  silently shadowing the first.
+- **`safety check`** is left in place but marked advisory: it is deprecated and
+  its own output says "18 vulnerabilities from 5 packages were ignored" while
+  reporting zero. `pip-audit` is the gate.
+
+
 **Migration coverage — the HIGH item, now closed.** Migration
 `059_formalize_create_all_tables` creates all 74 tables that previously existed
 only via `create_all()`, including the tables behind RBAC, inventory, ECO and
@@ -127,11 +166,23 @@ instead of being deleted.
 
 ## Reported by the audit, verified NOT real
 
-- **"`docker-build` CI job will fail — missing compose secrets."** Every
-  interpolated variable in `docker-compose.yml` has a default, and
-  `docker compose build` consumes no runtime secrets. No fix needed.
-- **"Route-sweep E2E does not fail on API errors."** Correct as written — it is
-  a diagnostic sweep, not a gate.
+- **"The route-sweep E2E does not fail on API errors."** Correct as written — it
+  is a diagnostic sweep, not a gate.
+
+### Retracted: the docker-build finding WAS real
+
+I previously recorded the audit's "`docker-build` job will fail — missing
+compose secrets" as a false positive, on the grounds that every interpolated
+variable in `docker-compose.yml` had a default. That was wrong. My check only
+matched `${VAR}` and `${VAR:-default}` and missed compose's *required* form,
+`${VAR:?message}` — of which there are five: `POSTGRES_PASSWORD`,
+`REDIS_PASSWORD`, `SECRET_KEY`, `ENCRYPTION_KEY`, `S3_SECRET_KEY`.
+
+The CI log is unambiguous: `required variable POSTGRES_PASSWORD is missing a
+value`. The job supplied three of the five, and `POSTGRES_PASSWORD` came from
+`secrets.CI_PG_PASSWORD`, which is not configured, so it interpolated to empty.
+Fixed — all five are now literals, since `build` needs them only to satisfy
+interpolation and none reaches an image.
 
 ---
 

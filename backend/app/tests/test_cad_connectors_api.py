@@ -145,7 +145,7 @@ async def test_test_connection_reports_auth_failure_honestly(client, auth_header
     assert data["reason"] == "auth_failed"
 
     # The connection's own stored status reflects the honest failure too.
-    get_resp = await client.get(f"/api/v1/cad-connectors", headers=auth_headers)
+    get_resp = await client.get("/api/v1/cad-connectors", headers=auth_headers)
     row = next(c for c in get_resp.json()["items"] if c["id"] == connection_id)
     assert row["status"] == "error"
 

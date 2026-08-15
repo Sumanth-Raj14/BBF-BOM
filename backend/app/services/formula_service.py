@@ -13,7 +13,7 @@ any part of the expression is evaluated.
 
 import ast
 import operator
-from typing import Optional, Union
+from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.enterprise_extensions import CustomAttributeDefinition
 from app.models.part import Part
 
-Number = Union[int, float]
+Number = int | float
 
 
 class FormulaError(ValueError):
