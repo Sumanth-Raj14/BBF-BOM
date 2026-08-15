@@ -36,6 +36,13 @@
      text meet; keep --bbf-olive itself for decorative marks/borders/bars. */
   --bbf-olive-fill: #686E21;               /* white text on it: 5.47:1 (theme-stable, white is fixed) */
   --bbf-olive-text: var(--bbf-olive-fill); /* olive AS text: 5.47:1 on white, 4.80:1 on --bg-app */
+  /* Success green, split the same way as olive: the bright hue is fine as a
+     FILL (dots, bars, backgrounds) but fails as small TEXT. #10B981 is only
+     2.54:1 on white -- the last axe color-contrast violation in the suite,
+     from SyncStatus's "SAVED" label. Use --green for fills, --green-text for
+     text. */
+  --green: #10B981;            /* decorative fill only */
+  --green-text: #047857;       /* 5.48:1 on white, 4.79:1 on --bg-app */
 
   /* Application Colors */
   --bg-app: #F0F0F0;
@@ -290,6 +297,9 @@
   /* Olive AS text needs the light end of the hue here; --bbf-olive-fill stays
      dark because the text painted on it is a constant white in both themes. */
   --bbf-olive-text: #C5CE5A;   /* 10.11:1 on --bg-surface, 9.22:1 on --bg-subtle */
+  /* On dark the bright green is the readable one (7.45:1); the darkened
+     light-mode value would only be 3.45:1 here, so it flips. */
+  --green-text: #10B981;       /* 7.45:1 on --bg-surface */
   --amber: #EAB308;            /* 8.97:1 on --bg-surface — the light-mode value is too dark here */
 
   /* Two-tone accent — see file banner. Olive stays decorative-only (no AA
