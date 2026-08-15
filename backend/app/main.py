@@ -86,19 +86,70 @@ async def _run_notification_drainer(interval: int):
     Mirrors _run_integration_drainer. A single while-loop awaits each drain
     to finish before sleeping and starting the next one, so runs never
     overlap by construction — no lock needed.
+
+    Nothing watched this loop's health before (ops-hardening): a drain that
+    started silently failing would just stop sending email forever with no
+    signal anywhere. Every attempt now reports through app.monitoring.metrics
+    (last-drain timestamp, success/failure, consecutive-failure count, last
+    drained count) which /api/v1/health/detailed surfaces — and a failure is
+    logged loudly (exc_info, escalating to CRITICAL after repeated misses)
+    without ever raising out of the loop, so the scheduler itself never dies.
     """
     from app.db.session import get_session_maker
+    from app.monitoring.metrics import metrics
     from app.services.email_service import process_notification_queue
 
     while True:
         try:
             async with (await get_session_maker())() as db:
                 drained = await process_notification_queue(db)
+            metrics.record_notification_drain(success=True, drained=drained)
             if drained:
                 logger.info("Notification queue drained: %d sent", drained)
         except Exception as e:
-            logger.error("Notification queue drain failed: %s", e)
+            metrics.record_notification_drain(success=False)
+            consecutive = int(metrics.notification_queue_consecutive_failures.get())
+            logger.error(
+                "Notification queue drain failed (consecutive failures=%d): %s",
+                consecutive,
+                e,
+                exc_info=True,
+            )
+            if consecutive >= 3:
+                logger.critical(
+                    "Notification queue has failed to drain %d times in a row — "
+                    "notifications are silently backing up",
+                    consecutive,
+                )
         await asyncio.sleep(interval)
+
+
+async def _cancel_scheduler_tasks():
+    """Cancel AND await every background scheduler task on shutdown.
+
+    Before this, teardown only called .cancel() on each task and moved
+    straight on to engine.dispose() — the tasks were never awaited, so a
+    task could still be mid-flight (e.g. against the DB engine about to be
+    disposed) and the event loop would warn "Task was destroyed but it is
+    pending" on interpreter exit. Awaiting the gather (with
+    return_exceptions=True, since a cancelled task raises CancelledError)
+    guarantees every task has actually finished before shutdown proceeds.
+    """
+    global _backup_task, _integration_drain_task, _zoho_poll_task, _notification_drain_task
+    tasks = [
+        t
+        for t in (
+            _backup_task,
+            _integration_drain_task,
+            _zoho_poll_task,
+            _notification_drain_task,
+        )
+        if t is not None
+    ]
+    for t in tasks:
+        t.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _run_backup_scheduler():
@@ -228,14 +279,7 @@ async def lifespan(app: FastAPI):
     from app.core.job_queue import stop_queue_worker
 
     await stop_queue_worker()
-    if _backup_task:
-        _backup_task.cancel()
-    if _integration_drain_task:
-        _integration_drain_task.cancel()
-    if _zoho_poll_task:
-        _zoho_poll_task.cancel()
-    if _notification_drain_task:
-        _notification_drain_task.cancel()
+    await _cancel_scheduler_tasks()
     try:
         from app.db.session import get_engine
 

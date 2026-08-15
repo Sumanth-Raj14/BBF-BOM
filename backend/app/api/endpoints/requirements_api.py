@@ -66,25 +66,32 @@ async def list_requirements(
 
 @router.get("/coverage")
 async def coverage(
+    page: PageParams = Depends(get_page_params),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_parts_read),
 ):
     """Requirements with zero linked parts — the question a quality/
-    regulatory user actually asks: what's uncovered?"""
-    linked_ids = select(RequirementPartLink.requirement_id).distinct()
-    stmt = select(Requirement).where(Requirement.id.not_in(linked_ids)).order_by(Requirement.id)
-    result = await db.execute(stmt)
-    uncovered = result.scalars().all()
+    regulatory user actually asks: what's uncovered?
 
-    # ponytail: was `len((await db.execute(select(Requirement))).scalars().all())`
-    # — loaded every column of every row just to count them. COUNT(*) instead.
-    total = (await db.execute(select(func.count()).select_from(Requirement))).scalar_one()
+    Paginated: the item list is bounded per page, but `total`/`has_next`
+    always reflect the TRUE uncovered count (a plain COUNT(*), never just
+    len(this page)) so the UI can say "showing 20 of 137 uncovered" and can
+    never mistake a partial page for the whole list."""
+    linked_ids = select(RequirementPartLink.requirement_id).distinct()
+    uncovered_stmt = (
+        select(Requirement).where(Requirement.id.not_in(linked_ids)).order_by(Requirement.id)
+    )
+    result = await paginate(db, uncovered_stmt, page)
+
+    total_requirements = (
+        await db.execute(select(func.count()).select_from(Requirement))
+    ).scalar_one()
 
     return {
-        "total": total,
-        "uncovered_count": len(uncovered),
-        "covered_count": total - len(uncovered),
-        "uncovered": uncovered,
+        **result,
+        "uncovered": result["items"],
+        "total_requirements": total_requirements,
+        "covered_count": total_requirements - result["total"],
     }
 
 

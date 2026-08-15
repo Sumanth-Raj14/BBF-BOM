@@ -48,6 +48,13 @@ export const ROLES = {
   },
 };
 window.ROLES = ROLES;
+// Session storage keys used to carry the provider + signed CSRF state across
+// the redirect to the OAuth provider and back to /auth/callback. sessionStorage
+// (not localStorage) so a stale entry from an abandoned flow in another tab
+// doesn't leak into a fresh one.
+const SSO_PENDING_PROVIDER_KEY = "sso_pending_provider";
+const SSO_PENDING_STATE_KEY = "sso_pending_state";
+
 // ============ AUTH SCREEN ============
 function AuthScreen({ onSignIn }) {
   const [mode, setMode] = React.useState("signin"); // signin | signup | forgot
@@ -55,6 +62,50 @@ function AuthScreen({ onSignIn }) {
   const [password, setPassword] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState(null);
+  // Real provider list from the backend (GET /sso/providers) — a button is
+  // enabled ONLY when the backend reports that provider actually has a
+  // client_id configured. Never fabricate availability client-side.
+  const [ssoProviders, setSsoProviders] = React.useState({});
+  const [ssoBusy, setSsoBusy] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    api.sso
+      .providers()
+      .then((res) => {
+        if (cancelled) return;
+        const byId = {};
+        (res?.providers || []).forEach((p) => {
+          byId[p.id] = p.enabled;
+        });
+        setSsoProviders(byId);
+      })
+      .catch(() => {
+        // Backend unreachable / SSO not wired up server-side — buttons stay
+        // disabled, which is the honest default (ssoProviders starts {}).
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const startSSO = (provider) => {
+    if (!ssoProviders[provider] || ssoBusy) return;
+    setSsoBusy(provider);
+    setErr(null);
+    api.sso
+      .authorize(provider)
+      .then((res) => {
+        if (!res?.authorization_url) {
+          throw new Error("Provider did not return an authorization URL");
+        }
+        sessionStorage.setItem(SSO_PENDING_PROVIDER_KEY, provider);
+        sessionStorage.setItem(SSO_PENDING_STATE_KEY, res.state || "");
+        window.location.href = res.authorization_url;
+      })
+      .catch((e) => {
+        setSsoBusy(null);
+        setErr(e.message || __t("auth.loginFailed"));
+      });
+  };
   const submit = (e) => {
     e?.preventDefault();
     setErr(null);
@@ -102,12 +153,12 @@ function AuthScreen({ onSignIn }) {
   };
   // Finding: the SSO buttons used to call onSignIn with a hardcoded
   // admin@blackbox.com + empty password, fabricating an identity instead of
-  // performing SSO. The backend exposes GET /sso/authorize/{provider} to
-  // start a real OAuth flow, but no frontend route consumes the ?code&state
-  // redirect it comes back with, so there is no way to complete a real
-  // sign-in here yet. Rather than send users into a dead-end redirect (or
-  // keep fabricating a fake identity), the buttons are disabled with an
-  // honest "not configured" state below.
+  // performing SSO. The backend's GET /sso/authorize/{provider} +
+  // POST /sso/callback/{provider} now have a frontend route to land on
+  // (see SSOCallbackScreen / /auth/callback in App.jsx), so a configured
+  // provider performs a real OAuth redirect + code exchange. A provider
+  // with no client_id configured server-side (per GET /sso/providers)
+  // stays honestly disabled — never fabricated as available.
   return (
     <div className="auth-screen">
       <div className="auth-side">
@@ -184,8 +235,14 @@ function AuthScreen({ onSignIn }) {
                   variant="secondary"
                   size="lg"
                   block
-                  disabled
-                  title={__t("auth.ssoNotConfigured") || "SSO not configured"}
+                  disabled={!ssoProviders.google || !!ssoBusy}
+                  loading={ssoBusy === "google"}
+                  onClick={() => startSSO("google")}
+                  title={
+                    ssoProviders.google
+                      ? undefined
+                      : __t("auth.ssoNotConfigured") || "SSO not configured"
+                  }
                 >
                   <span
                     className="font-mono fw-700 fs-13"
@@ -200,8 +257,14 @@ function AuthScreen({ onSignIn }) {
                   variant="secondary"
                   size="lg"
                   block
-                  disabled
-                  title={__t("auth.ssoNotConfigured") || "SSO not configured"}
+                  disabled={!ssoProviders.microsoft || !!ssoBusy}
+                  loading={ssoBusy === "microsoft"}
+                  onClick={() => startSSO("microsoft")}
+                  title={
+                    ssoProviders.microsoft
+                      ? undefined
+                      : __t("auth.ssoNotConfigured") || "SSO not configured"
+                  }
                 >
                   <span className="font-mono fw-700 fs-13" aria-hidden="true">
                     ⊞
@@ -365,6 +428,143 @@ function AuthScreen({ onSignIn }) {
 AuthScreen.propTypes = {
   onSignIn: PropTypes.func,
 };
+
+// ============ SSO CALLBACK ============
+// Receives the OAuth provider's redirect (?code&state, or ?error on a denied
+// consent), completes the code exchange against POST /sso/callback/{provider},
+// and reports the resulting session back via onComplete — same
+// {access_token, user, is_new_user} shape AuthScreen's login path produces,
+// so the caller lands the user in the app exactly like a password login.
+// Never fabricates a session: any missing/mismatched state or a failed
+// exchange surfaces a real error instead of retrying into a redirect loop.
+function SSOCallbackScreen({ onComplete }) {
+  const [status, setStatus] = React.useState("working"); // working | error
+  const [message, setMessage] = React.useState("");
+
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const provider = sessionStorage.getItem(SSO_PENDING_PROVIDER_KEY);
+    const storedState = sessionStorage.getItem(SSO_PENDING_STATE_KEY);
+    // Single-use: clear immediately so a page refresh or a second redirect
+    // can't replay a half-finished flow.
+    sessionStorage.removeItem(SSO_PENDING_PROVIDER_KEY);
+    sessionStorage.removeItem(SSO_PENDING_STATE_KEY);
+
+    const oauthError = params.get("error");
+    if (oauthError) {
+      setStatus("error");
+      setMessage(
+        params.get("error_description") ||
+          __t("auth.ssoDenied") ||
+          `Sign-in was cancelled (${oauthError}).`,
+      );
+      return;
+    }
+
+    const code = params.get("code");
+    const returnedState = params.get("state");
+    if (!code || !provider || !storedState) {
+      setStatus("error");
+      setMessage(
+        __t("auth.ssoSessionLost") ||
+          "Sign-in session was lost. Please try again.",
+      );
+      return;
+    }
+    // storedState is "<raw>.<signature>" from GET /sso/authorize; the
+    // provider only ever echoes back the raw part it was handed in the
+    // authorize URL. A mismatch means a stale or foreign flow — refuse
+    // before ever calling the backend.
+    const rawStoredState = storedState.split(".")[0];
+    if (returnedState && returnedState !== rawStoredState) {
+      setStatus("error");
+      setMessage(
+        __t("auth.ssoStateMismatch") ||
+          "Sign-in could not be verified. Please try again.",
+      );
+      return;
+    }
+
+    api.sso
+      .callback(provider, code, storedState)
+      .then((result) => onComplete(result))
+      .catch((e) => {
+        setStatus("error");
+        setMessage(e.message || __t("auth.loginFailed"));
+      });
+    // Intentionally runs once: this consumes a single-use provider code.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (status === "error") {
+    return (
+      <div className="auth-screen">
+        <div className="auth-main" style={{ margin: "auto" }}>
+          <div className="auth-card">
+            <h2 className="fs-22" style={{ margin: "0 0 4px" }}>
+              {__t("auth.ssoFailedTitle") || "Sign-in failed"}
+            </h2>
+            <div
+              className="rounded-r2 fg-danger fs-12 font-mono mb-14"
+              role="alert"
+              style={{
+                padding: 8,
+                background:
+                  "color-mix(in oklch, var(--danger) 10%, var(--bg))",
+                border: "1px solid var(--danger)",
+              }}
+            >
+              {message}
+            </div>
+            <Button
+              variant="primary"
+              size="lg"
+              block
+              onClick={() => {
+                window.location.href = "/";
+              }}
+            >
+              {__t("auth.backToSignIn")}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100vh",
+        background: "var(--bg)",
+      }}
+    >
+      <div style={{ textAlign: "center" }}>
+        <div
+          style={{
+            width: 32,
+            height: 32,
+            border: "3px solid var(--line)",
+            borderTopColor: "var(--accent)",
+            borderRadius: "50%",
+            animation: "spin 0.8s linear infinite",
+            margin: "0 auto 16px",
+          }}
+        />
+        <div style={{ fontWeight: 600, fontSize: 14, color: "var(--fg)" }}>
+          {__t("auth.completingSignIn") || "Completing sign-in..."}
+        </div>
+      </div>
+    </div>
+  );
+}
+SSOCallbackScreen.propTypes = {
+  onComplete: PropTypes.func,
+};
+
 // ============ ONBOARDING WIZARD ============
 function OnboardingWizard({ user, onComplete }) {
   const [step, setStep] = React.useState(0);
@@ -863,8 +1063,13 @@ function MobileScanView({ onClose }) {
 MobileScanView.propTypes = {
   onClose: PropTypes.func,
 };
-export { AuthScreen, OnboardingWizard, MobileScanView };
-Object.assign(window, { AuthScreen, OnboardingWizard, MobileScanView });
+export { AuthScreen, SSOCallbackScreen, OnboardingWizard, MobileScanView };
+Object.assign(window, {
+  AuthScreen,
+  SSOCallbackScreen,
+  OnboardingWizard,
+  MobileScanView,
+});
 // ============ TENANT CONTEXT & SETTINGS ============
 export const TenantContext = React.createContext({
   tenant: {

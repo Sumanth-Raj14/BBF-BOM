@@ -25,6 +25,38 @@ async def test_detailed_health_ok_with_auth(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_detailed_health_reports_notification_queue_depth(
+    client, auth_headers, db_session, test_user
+):
+    """ops-hardening: process_notification_queue runs unattended on a
+    scheduler with nothing watching it. /health/detailed must surface both
+    the drain loop's own health (metrics, exercised in
+    test_notification_scheduler.py) and the actual pending queue depth, so a
+    stuck drainer shows up here instead of notifications silently piling up."""
+    from app.models.notification_queue import NotificationQueue
+
+    nq = NotificationQueue(
+        user_id=test_user.id,
+        notification_type="info",
+        subject="pending one",
+        body="body",
+        channel="email",
+        is_sent=False,
+        tenantId=test_user.tenantId,
+    )
+    db_session.add(nq)
+    await db_session.commit()
+
+    resp = await client.get("/api/v1/health/detailed", headers=auth_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    nq_status = data["notificationQueue"]
+    assert nq_status["pendingEmailCount"] >= 1
+    assert "consecutiveFailures" in nq_status
+    assert "lastDrainSuccess" in nq_status
+
+
+@pytest.mark.asyncio
 async def test_plain_health_stays_unauth(client):
     # liveness probe must stay open (no auth) - only /detailed is locked down
     resp = await client.get("/api/v1/health")

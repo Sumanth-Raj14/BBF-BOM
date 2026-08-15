@@ -500,3 +500,143 @@ async def test_update_mbom_item_rejects_cross_tenant_part(client, db_session, te
         f"/api/v1/mbom/headers/{mbom_id}/items", headers=headers_a
     )
     assert unchanged.json()[0]["part_id"] == part_a_id
+
+
+# ============ 7. Sub-assembly hierarchy survives derivation (057_mbom_hierarchy) ============
+
+
+@pytest.mark.asyncio
+async def test_derive_mbom_preserves_parent_child_structure(db_session, test_tenant):
+    """A nested sub-assembly on the EBOM side (parent_item_id chain) must
+    reproduce the same parent/child shape + quantities on the MBOM side —
+    the actual value of a manufacturing BOM: it has to be able to express
+    sub-assemblies, not just a flat parts list."""
+    tid = test_tenant.id
+    bom = BOM(bom_number="EBOM-NESTED-1", name="Nested EBOM", tenantId=tid, bom_type="EBOM")
+    db_session.add(bom)
+    await db_session.commit()
+    await db_session.refresh(bom)
+
+    assy_part = await _make_part(db_session, tid, "ASSY-1")
+    sub_part = await _make_part(db_session, tid, "SUB-1")
+    leaf_part = await _make_part(db_session, tid, "LEAF-1")
+
+    top = BOMItem(bom_id=bom.id, part_id=assy_part.id, quantity=1, unit="EA", tenantId=tid)
+    db_session.add(top)
+    await db_session.flush()
+
+    sub = BOMItem(
+        bom_id=bom.id,
+        part_id=sub_part.id,
+        quantity=2,
+        unit="EA",
+        parent_item_id=top.id,
+        tenantId=tid,
+    )
+    db_session.add(sub)
+    await db_session.flush()
+
+    leaf = BOMItem(
+        bom_id=bom.id,
+        part_id=leaf_part.id,
+        quantity=5,
+        unit="EA",
+        parent_item_id=sub.id,
+        tenantId=tid,
+    )
+    db_session.add(leaf)
+    await db_session.commit()
+
+    before_items = (
+        (await db_session.execute(select(BOMItem).where(BOMItem.bom_id == bom.id)))
+        .scalars()
+        .all()
+    )
+    before_shape = {i.id: (i.part_id, float(i.quantity), i.parent_item_id) for i in before_items}
+
+    header = await bom_service.derive_mbom_from_ebom(db_session, bom.id, tenant_id=tid)
+
+    mbom_items = (
+        (await db_session.execute(select(MbomItem).where(MbomItem.mbom_id == header.id)))
+        .scalars()
+        .all()
+    )
+    assert len(mbom_items) == 3
+    by_part = {i.part_id: i for i in mbom_items}
+    new_top, new_sub, new_leaf = by_part[assy_part.id], by_part[sub_part.id], by_part[leaf_part.id]
+
+    # Same shape: top has no parent, sub's parent is the new top, leaf's parent is the new sub.
+    assert new_top.parent_item_id is None
+    assert new_sub.parent_item_id == new_top.id
+    assert new_leaf.parent_item_id == new_sub.id
+
+    # Same quantities, not silently coerced.
+    assert float(new_top.quantity) == 1
+    assert float(new_sub.quantity) == 2
+    assert float(new_leaf.quantity) == 5
+
+    # Source EBOM (header + every line's id/part/qty/parent) is untouched.
+    after_bom = await bom_service.get_bom_or_404(db_session, bom.id)
+    assert after_bom.name == bom.name
+    after_items = (
+        (await db_session.execute(select(BOMItem).where(BOMItem.bom_id == bom.id)))
+        .scalars()
+        .all()
+    )
+    after_shape = {i.id: (i.part_id, float(i.quantity), i.parent_item_id) for i in after_items}
+    assert after_shape == before_shape
+
+
+@pytest.mark.asyncio
+async def test_derive_mbom_hierarchy_tenant_isolation(db_session, test_tenant):
+    """Nested derivation, proven tenant-isolated: switching the ambient tenant
+    context to tenant B must hide every row of tenant A's derived MBOM (ORM
+    select() auto-filter, app/core/tenant_events.py), not just 404 a direct
+    lookup by id."""
+    tenant_a_id = test_tenant.id
+    tenant_b = Tenant(id=tenant_a_id + 5000, tenant_name="Tenant B2", tenant_code="XBOM-TENB2")
+    db_session.add(tenant_b)
+    await db_session.commit()
+    tenant_b_id = tenant_b.id
+
+    token = TenantContext.set(tenant_id=tenant_a_id)
+    try:
+        bom = BOM(
+            bom_number="EBOM-NESTED-ISO",
+            name="Nested ISO",
+            tenantId=tenant_a_id,
+            bom_type="EBOM",
+        )
+        db_session.add(bom)
+        await db_session.commit()
+        await db_session.refresh(bom)
+        p1 = await _make_part(db_session, tenant_a_id, "ISO-ASSY")
+        p2 = await _make_part(db_session, tenant_a_id, "ISO-SUB")
+        top = BOMItem(bom_id=bom.id, part_id=p1.id, quantity=1, tenantId=tenant_a_id)
+        db_session.add(top)
+        await db_session.flush()
+        sub = BOMItem(
+            bom_id=bom.id,
+            part_id=p2.id,
+            quantity=1,
+            parent_item_id=top.id,
+            tenantId=tenant_a_id,
+        )
+        db_session.add(sub)
+        await db_session.commit()
+
+        header = await bom_service.derive_mbom_from_ebom(db_session, bom.id, tenant_id=tenant_a_id)
+        header_id = header.id
+    finally:
+        TenantContext.reset(token)
+
+    token = TenantContext.set(tenant_id=tenant_b_id)
+    try:
+        visible = (
+            (await db_session.execute(select(MbomItem).where(MbomItem.mbom_id == header_id)))
+            .scalars()
+            .all()
+        )
+        assert visible == []
+    finally:
+        TenantContext.reset(token)

@@ -91,7 +91,7 @@ def test_migration_chain_single_linear_head():
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
     script = ScriptDirectory.from_config(cfg)
 
-    assert script.get_heads() == ["056_cad_connections"]
+    assert script.get_heads() == ["057_mbom_hierarchy"]
     links = {
         "044_compliance_evaluations": "043_part_composition_declarations",
         "043_part_composition_declarations": "042_substance_reference_data",

@@ -120,12 +120,15 @@ describe("RequirementsScreen", () => {
     expect(screen.queryByText("REQ-0042")).not.toBeInTheDocument();
   });
 
-  it("shows the coverage view with real uncovered requirements", async () => {
+  it("shows the coverage view with real uncovered requirements, paginated with a true total", async () => {
     requirementList.mockResolvedValue({ items: [REQUIREMENT], has_next: false });
     requirementCoverage.mockResolvedValue({
-      total: 3,
+      total_requirements: 3,
       covered_count: 2,
-      uncovered_count: 1,
+      total: 1,
+      page: 1,
+      per_page: 50,
+      has_next: false,
       uncovered: [{ id: 9, key: "REQ-0099", title: "Uncovered one" }],
     });
 
@@ -134,7 +137,47 @@ describe("RequirementsScreen", () => {
 
     screen.getByText("Coverage").click();
 
+    expect(requirementCoverage).toHaveBeenCalledWith({ page: 1, per_page: 50 });
     expect(await screen.findByText("REQ-0099")).toBeInTheDocument();
     expect(screen.getByText(/Uncovered one/)).toBeInTheDocument();
+    expect(screen.getByText("Showing 1 of 1 uncovered")).toBeInTheDocument();
+  });
+
+  it("pages through uncovered requirements without implying the page is exhaustive", async () => {
+    requirementList.mockResolvedValue({ items: [REQUIREMENT], has_next: false });
+    requirementCoverage.mockResolvedValueOnce({
+      total_requirements: 200,
+      covered_count: 63,
+      total: 137,
+      page: 1,
+      per_page: 50,
+      has_next: true,
+      uncovered: [{ id: 9, key: "REQ-0099", title: "Uncovered one" }],
+    });
+
+    render(<RequirementsScreen />);
+    await screen.findByText("REQ-0042");
+
+    screen.getByText("Coverage").click();
+
+    expect(await screen.findByText("Showing 1 of 137 uncovered")).toBeInTheDocument();
+
+    requirementCoverage.mockResolvedValueOnce({
+      total_requirements: 200,
+      covered_count: 63,
+      total: 137,
+      page: 2,
+      per_page: 50,
+      has_next: true,
+      uncovered: [{ id: 10, key: "REQ-0100", title: "Uncovered two" }],
+    });
+
+    screen.getByText("Load more").click();
+
+    expect(requirementCoverage).toHaveBeenCalledWith({ page: 2, per_page: 50 });
+    expect(await screen.findByText("REQ-0100")).toBeInTheDocument();
+    expect(await screen.findByText("Showing 2 of 137 uncovered")).toBeInTheDocument();
+    // The original page's item is still there — pages accumulate, not replace.
+    expect(screen.getByText("REQ-0099")).toBeInTheDocument();
   });
 });

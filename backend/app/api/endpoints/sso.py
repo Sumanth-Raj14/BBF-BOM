@@ -5,11 +5,10 @@ import hashlib
 import hmac
 import logging
 import secrets
-from datetime import timedelta
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,12 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 
 logger = logging.getLogger(__name__)
+from app.core.auth_cookie import set_auth_cookies
 from app.core.config import settings
 from app.core.deps import get_current_user
 from app.core.rate_limit import limiter
-from app.core.security import create_access_token, get_password_hash
+from app.core.security import get_password_hash
 from app.models.tenant import Tenant
 from app.models.user import User
+from app.services import auth_service
 
 router = APIRouter()
 
@@ -140,6 +141,7 @@ async def sso_callback(
     provider: str,
     req: SSOCallbackRequest,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     if provider not in SSO_PROVIDERS:
@@ -256,11 +258,17 @@ async def sso_callback(
             user.ssoProviders = list(providers)
             await db.commit()
 
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    jwt_token = create_access_token(data={"sub": str(user.id)}, expires_delta=access_token_expires)
+    # Use the same token/claims minting as password login (tenantId +
+    # isSuperuser claims, matched refresh token) and set the same httpOnly
+    # session cookies /auth/login sets. The frontend is entirely cookie-based
+    # (apiRequest sends credentials:'include', never an Authorization header
+    # for user sessions) — without this, an SSO sign-in would return a token
+    # nothing on the client ever reads, leaving the user un-authenticated.
+    tokens = auth_service.make_tokens(user)
+    set_auth_cookies(response, tokens["access_token"], tokens["refresh_token"])
 
     return SSOLoginResponse(
-        access_token=jwt_token,
+        access_token=tokens["access_token"],
         token_type="bearer",
         user={
             "id": user.id,

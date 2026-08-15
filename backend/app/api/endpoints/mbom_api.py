@@ -55,6 +55,7 @@ def _item_dict(i: MbomItem) -> dict:
         "work_center": i.work_center,
         "scrap_factor": i.scrap_factor,
         "notes": i.notes,
+        "parent_item_id": i.parent_item_id,
     }
 
 
@@ -93,6 +94,30 @@ async def _require_part(db: AsyncSession, part_id: int, tid: Optional[int]) -> N
         raise HTTPException(status_code=404, detail="Part not found")
 
 
+async def _require_parent(
+    db: AsyncSession,
+    mbom_id: int,
+    parent_item_id: Optional[int],
+    tid: Optional[int],
+    self_id: Optional[int] = None,
+) -> None:
+    """Mirrors bom_service._validate_parent for MbomItem: the parent must be a
+    line within the SAME mbom_id and tenant, or a crafted parent_item_id could
+    graft another MBOM's (or tenant's) subtree into this one's tree."""
+    if parent_item_id is None:
+        return
+    if self_id is not None and parent_item_id == self_id:
+        raise HTTPException(status_code=400, detail="An MBOM line cannot be its own parent")
+    stmt = select(MbomItem).where(MbomItem.id == parent_item_id, MbomItem.mbom_id == mbom_id)
+    if tid is not None:
+        stmt = stmt.where(MbomItem.tenantId == tid)
+    if not (await db.execute(stmt)).scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail="parent_item_id must reference a line within the same MBOM",
+        )
+
+
 class MbomHeaderCreateRequest(BaseModel):
     ebom_id: Optional[int] = None
     name: str
@@ -118,6 +143,7 @@ class MbomItemCreateRequest(BaseModel):
     work_center: Optional[str] = None
     scrap_factor: Optional[float] = None
     notes: Optional[str] = None
+    parent_item_id: Optional[int] = None
 
 
 class MbomItemUpdateRequest(BaseModel):
@@ -128,6 +154,7 @@ class MbomItemUpdateRequest(BaseModel):
     work_center: Optional[str] = None
     scrap_factor: Optional[float] = None
     notes: Optional[str] = None
+    parent_item_id: Optional[int] = None
 
 
 class MbomOperationCreateRequest(BaseModel):
@@ -266,6 +293,7 @@ async def create_mbom_item(
 ):
     await _get_header_or_404(db, mbom_id)
     await _require_part(db, request.part_id, current_user.tenantId)
+    await _require_parent(db, mbom_id, request.parent_item_id, current_user.tenantId)
     item = MbomItem(mbom_id=mbom_id, tenantId=current_user.tenantId, **request.model_dump())
     db.add(item)
     await db.commit()
@@ -292,6 +320,8 @@ async def update_mbom_item(
     payload = request.model_dump(exclude_unset=True)
     if "part_id" in payload:
         await _require_part(db, payload["part_id"], tid)
+    if "parent_item_id" in payload:
+        await _require_parent(db, mbom_id, payload["parent_item_id"], tid, self_id=item.id)
     for field, value in payload.items():
         setattr(item, field, value)
     await db.commit()
