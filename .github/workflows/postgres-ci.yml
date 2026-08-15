@@ -284,7 +284,15 @@ jobs:
         env:
           POSTGRES_USER: bom_user
           POSTGRES_PASSWORD: ci_postgres_pw_9f3a7c1e
-          POSTGRES_DB: bom_db
+          # Named with an "e2e" marker on purpose: scripts/seed_e2e_fixture is
+          # guarded by scripts/_db_guard.require_non_production_db(), which
+          # refuses to seed a database whose name looks live (e.g. plain
+          # "bom_db"). This job seeds an ephemeral container DB, so it should
+          # pass that guard ON MERIT rather than by setting
+          # ALLOW_SEED_ON_LIVE_DB — an override in CI would erode the very
+          # protection that exists because fixtures were once written into a
+          # real database.
+          POSTGRES_DB: bom_e2e_db
         ports:
           - 5432:5432
         options: >-
@@ -297,8 +305,8 @@ jobs:
       POSTGRES_PORT: 5432
       POSTGRES_USER: bom_user
       POSTGRES_PASSWORD: ci_postgres_pw_9f3a7c1e
-      POSTGRES_DB: bom_db
-      DATABASE_URL: postgresql+asyncpg://bom_user:ci_postgres_pw_9f3a7c1e@127.0.0.1:5432/bom_db
+      POSTGRES_DB: bom_e2e_db
+      DATABASE_URL: postgresql+asyncpg://bom_user:ci_postgres_pw_9f3a7c1e@127.0.0.1:5432/bom_e2e_db
       # NB: must avoid _WEAK_SECRET_VALUES substrings ("test", "secret", ...)
       # or Settings rejects the key and the app refuses to boot.
       SECRET_KEY: ci-e2e-suite-signkey-donotuse-9f3a7c1e4b2d5a8b6d4f2a0c8e7b
