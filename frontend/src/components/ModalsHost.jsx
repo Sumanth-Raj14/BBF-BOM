@@ -74,6 +74,10 @@ export default function ModalsHost() {
         open={modal === "upload"}
         onClose={() => setModal(null)}
         files={modalContext?.files}
+        // Opened from a part's Files tab, this carries that part so the upload
+        // attaches to it. Without it the file uploaded successfully and then
+        // never appeared in the tab — it went to the global document pool.
+        partId={modalContext?.partId}
       />
       <window.CADImportModal
         open={modal === "upload-cad"}
@@ -276,9 +280,18 @@ export default function ModalsHost() {
           try {
             // Fix (fabricated release): wire to the real snapshot endpoint
             // instead of only mutating local state and toasting success.
+            //
+            // The payload must match BomSnapshotRequest exactly — bom_id,
+            // snapshot_name and snapshot_type are all REQUIRED. This used to
+            // post {version, rev}, which satisfied none of them, so every
+            // release 422'd and fell into the catch below as
+            // "Failed to release BOM". The release button never once worked.
             await api.bomEnterprise.snapshots.create(project.id, {
-              version: newVer,
-              rev: newRev,
+              bom_id: project.id,
+              snapshot_name: newRev + " · " + newVer,
+              snapshot_type: "release",
+              change_description:
+                "Release " + newVer + " (revision " + newRev + ")",
             });
           } catch (err) {
             toast(err?.message || "Failed to release BOM", { kind: "error" });

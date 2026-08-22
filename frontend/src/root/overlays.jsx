@@ -781,7 +781,7 @@ NewVendorModal.propTypes = {
   open: PropTypes.bool,
   onClose: PropTypes.func,
 };
-function UploadModal({ open, onClose, title, files: externalFiles }) {
+function UploadModal({ open, onClose, title, files: externalFiles, partId }) {
   const [active, setActive] = React.useState(false);
   const [files, setFiles] = React.useState([]);
   const [fileObjects, setFileObjects] = React.useState([]);
@@ -852,7 +852,13 @@ function UploadModal({ open, onClose, title, files: externalFiles }) {
     setUploading(true);
     try {
       for (const file of fileObjects) {
-        await api.documents.upload(file, { category });
+        // partId is what ATTACHES the document to the part. The wrapper has
+        // always supported it; this caller simply never sent it, so uploads
+        // from a part's Files tab landed unattached and the tab stayed empty.
+        await api.documents.upload(file, {
+          category,
+          ...(partId != null ? { partId } : {}),
+        });
       }
       toast(
         `${fileObjects.length} ${__t("overlays.upload.fileCount") || "file(s) uploaded"}`,
@@ -997,6 +1003,8 @@ UploadModal.propTypes = {
   onClose: PropTypes.func,
   title: PropTypes.string,
   files: PropTypes.any,
+  // Set when opened from a part's Files tab; attaches the upload to that part.
+  partId: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
 };
 function NewPartModal({ open, onClose }) {
   const [form, setForm] = React.useState({});

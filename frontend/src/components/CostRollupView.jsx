@@ -31,14 +31,36 @@ function CostRollupView({ data }) {
       </div>
     );
 
-  const subs = top.children.map((s) => ({
-    ...s,
-    ext: (s.children || []).reduce(
-      (acc, c) => acc + (c.cost || 0) * (c.qty || 0),
-      0,
-    ),
-  }));
-  const total = subs.reduce((s, x) => s + x.ext, 0);
+  // Extended cost of an entire subtree, with quantities multiplied through
+  // every ancestor — the same "effective quantity" the server uses in
+  // _compute_levels_and_effective_qty.
+  //
+  // This used to be `(s.children || []).reduce((a, c) => a + c.cost * c.qty)`:
+  // exactly ONE level deep, and it never multiplied by the sub-assembly's own
+  // qty. So a 3-level BOM under-counted, and a sub-assembly used twice counted
+  // once. The per-row bars then disagreed with the authoritative total printed
+  // directly above them.
+  const extOf = (node, mult = 1) => {
+    const qty = Number(node.qty) || 0;
+    const effective = mult * qty;
+    if (node.children && node.children.length) {
+      return node.children.reduce((acc, c) => acc + extOf(c, effective), 0);
+    }
+    return (Number(node.cost) || 0) * effective;
+  };
+
+  const subs = top.children.map((s) => ({ ...s, ext: extOf(s) }));
+  const clientTotal = subs.reduce((s, x) => s + x.ext, 0);
+
+  // The server is authoritative: only it can convert mixed units (a part costed
+  // per M on a line counted in CM) and it drops exclude_from_bom subtrees. Use
+  // the client sum only as a fallback when the call has not landed or failed.
+  const total = apiRollup?.total_cost ?? clientTotal;
+
+  // Percentages must share the base with the headline number, or the bars sum
+  // to something other than 100% of the total shown above them.
+  const pctBase = total || 1;
+  const uomWarnings = apiRollup?.uom_warnings || [];
   const max = Math.max(...subs.map((s) => s.ext), 1);
 
   const leaves = [];
@@ -98,7 +120,7 @@ function CostRollupView({ data }) {
       align: "num",
       render: (r) => {
         const ext = r.cost * r.qty;
-        const p = (ext / total) * 100;
+        const p = (ext / pctBase) * 100;
         return (
           <div className="inline-flex items-center gap-8 justify-end w-100p">
             <span
@@ -132,13 +154,39 @@ function CostRollupView({ data }) {
           )}
         </h2>
         <div className="hint">
-          {__t("bomShell.total")} {INR(apiRollup?.total_cost || total, 2)}
+          {__t("bomShell.total")} {INR(total, 2)}
         </div>
       </div>
 
+      {/* The server reports a warning per line whose unit it could not
+          reconcile with the part's cost unit (e.g. costed per M, consumed in
+          CM). Those lines fall back to an unconverted quantity, so the total
+          is approximate for them. Silently dropping these warnings, as this
+          view used to, presents an approximate number as an exact one. */}
+      {uomWarnings.length > 0 && (
+        <div className="rollup-warn" role="status">
+          <strong>
+            {__t("bomShell.uomWarning") ||
+              "Some lines could not be unit-converted"}
+          </strong>
+          <ul>
+            {uomWarnings.slice(0, 5).map((w, i) => (
+              <li key={w.part_number || i}>
+                <span className="font-mono">{w.part_number}</span> — {w.message}
+              </li>
+            ))}
+          </ul>
+          {uomWarnings.length > 5 && (
+            <div className="fs-10 fg-3">
+              +{uomWarnings.length - 5} more
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="rollup-list">
         {subs.map((s) => {
-          const pct = (s.ext / total) * 100;
+          const pct = (s.ext / pctBase) * 100;
           const width = (s.ext / max) * 100;
           return (
             <div key={s.id} className="rollup-row">
