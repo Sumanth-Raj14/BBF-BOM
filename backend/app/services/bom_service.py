@@ -28,7 +28,7 @@ from app.models.document import Document
 from app.models.enterprise_extensions import CustomAttributeDefinition
 from app.models.mbom import MbomHeader, MbomItem
 from app.models.part import Part
-from app.services import import_service, uom_service, webhook_service
+from app.services import currency_service, import_service, uom_service, webhook_service
 
 # Upload location comes from settings (env-configurable via UPLOAD_DIR), same as
 # documents.py, so a packaged / read-only install can point it at a writable
@@ -253,7 +253,7 @@ async def _invalidate_bom_caches(bom_id: int) -> None:
     await cache_invalidate(f"bom:{bom_id}")
     await cache_invalidate(f"bom:explosion:{bom_id}:*")
     await cache_invalidate(f"bom:explosion_closure:{bom_id}:*")
-    await cache_invalidate(f"bom:cost_rollup:{bom_id}")
+    await cache_invalidate(f"bom:cost_rollup:{bom_id}:*")
     await cache_invalidate(f"bom:mass_rollup:{bom_id}")
 
 
@@ -975,7 +975,9 @@ async def get_bom_explosion(db: AsyncSession, bom_id: int, level: int = 10) -> l
 # and they MUST return results identical to those two.
 
 
-async def get_bom_explosion_via_closure(db: AsyncSession, bom_id: int, level: int = 10) -> list[dict]:
+async def get_bom_explosion_via_closure(
+    db: AsyncSession, bom_id: int, level: int = 10
+) -> list[dict]:
     bom = await get_bom_or_404(db, bom_id)
     tid = bom.tenantId
     cache_key = f"bom:explosion_closure:{bom_id}:{level}"
@@ -1230,9 +1232,7 @@ def _drop_excluded_subtrees(items: list[BOMItem]) -> list[BOMItem]:
 # aggregated/ordered.
 
 
-def _drop_children_of_purchased(
-    items: list[BOMItem], parts_map: dict[int, Part]
-) -> list[BOMItem]:
+def _drop_children_of_purchased(items: list[BOMItem], parts_map: dict[int, Part]) -> list[BOMItem]:
     """Drop every line that has a part_kind == 'PURCHASED' part ANYWHERE in
     its ancestor chain (the purchased line itself is always kept — only its
     descendants are removed)."""
@@ -1314,7 +1314,7 @@ async def get_required_quantities(
             agg[item.part_id] = entry
         entry["required_qty"] += effective_qty[item.id]
 
-    return sorted(agg.values(), key=lambda r: (r["part_number"] or ""))
+    return sorted(agg.values(), key=lambda r: r["part_number"] or "")
 
 
 async def get_quantity_rollup(db: AsyncSession, bom_id: int) -> dict:
@@ -1412,8 +1412,21 @@ async def get_quantity_rollup(db: AsyncSession, bom_id: int) -> dict:
 # ============ Cost Rollup ============
 
 
-async def get_cost_rollup(db: AsyncSession, bom_id: int) -> dict:
-    cache_key = f"bom:cost_rollup:{bom_id}"
+async def get_cost_rollup(
+    db: AsyncSession, bom_id: int, reporting_currency: Optional[str] = None
+) -> dict:
+    """Roll a BOM's cost up, optionally converting every line into
+    `reporting_currency` (a part is priced in its own Part.currency).
+
+    A line whose currency cannot be converted is NOT folded in at 1:1 — that
+    would invent money. It is left out of the totals and reported in
+    currency_warnings, exactly as get_quantity_rollup drops and reports a line
+    whose unit it cannot reconcile.
+    """
+    rc = currency_service.norm(reporting_currency) if reporting_currency else None
+    # Currency is part of the cache identity: a EUR request must never be
+    # served the cached USD roll-up. _invalidate_bom_caches globs this prefix.
+    cache_key = f"bom:cost_rollup:{bom_id}:{rc or '-'}"
     cached = await cache_get(cache_key)
     if cached is not None:
         return cached
@@ -1440,6 +1453,9 @@ async def get_cost_rollup(db: AsyncSession, bom_id: int) -> dict:
     cost_by_level: dict[int, float] = {}
     cost_by_category: dict[str, float] = {}
     uom_warnings: list[dict] = []
+    currency_warnings: list[dict] = []
+    # One rate lookup per distinct source currency, not per line.
+    rate_cache: dict[str, Optional[Decimal]] = {}
 
     levels, effective_qty = _compute_levels_and_effective_qty(items)
 
@@ -1472,6 +1488,32 @@ async def get_cost_rollup(db: AsyncSession, bom_id: int) -> dict:
                         "message": warning,
                     }
                 )
+            if rc is not None:
+                # The snapshot cost is a number recorded for this line, but no
+                # per-line currency column exists — it is denominated in the
+                # part's currency either way.
+                line_ccy = currency_service.norm(part.currency)
+                if line_ccy not in rate_cache:
+                    rate_cache[line_ccy] = await currency_service.get_rate(db, line_ccy, rc, tid)
+                rate = rate_cache[line_ccy]
+                if rate is None:
+                    currency_warnings.append(
+                        {
+                            "part_number": part.pn,
+                            "from_currency": line_ccy,
+                            "to_currency": rc,
+                            "unconverted_amount": round(extended, 4),
+                            "message": (
+                                f"No active exchange rate for {line_ccy} -> {rc}; "
+                                f"line excluded from the total (left unconverted "
+                                f"at {round(extended, 4)} {line_ccy})."
+                            ),
+                        }
+                    )
+                    continue
+                # No rounding here — totals are rounded once, at the end.
+                extended = extended * float(rate)
+
             total_cost += extended
             level = levels[item.id]
             cost_by_level[level] = cost_by_level.get(level, 0) + extended
@@ -1484,6 +1526,8 @@ async def get_cost_rollup(db: AsyncSession, bom_id: int) -> dict:
         "cost_by_level": {k: round(v, 2) for k, v in cost_by_level.items()},
         "cost_by_category": {k: round(v, 2) for k, v in cost_by_category.items()},
         "uom_warnings": uom_warnings,
+        "reporting_currency": rc,
+        "currency_warnings": currency_warnings,
     }
     await cache_set(cache_key, result, ttl=300)
     return result
@@ -1896,18 +1940,25 @@ def _aggregate_part_entries(rows) -> dict[int, dict[str, Any]]:
     dict with the same field names.
     """
     agg: dict[int, dict[str, Any]] = {}
+    def _field(row, key):
+        # Bound as a plain function taking the row, NOT a lambda closing over
+        # the loop variable: a late-binding closure here would read whatever
+        # `r` happened to be at call time (ruff B023). Harmless while it is
+        # only called in-iteration, but it is a trap waiting for the first
+        # caller that defers it.
+        return row.get(key) if isinstance(row, dict) else getattr(row, key, None)
+
     for r in rows:
-        get = (lambda k: r.get(k)) if isinstance(r, dict) else (lambda k: getattr(r, k, None))
-        pid = get("part_id")
+        pid = _field(r, "part_id")
         if not pid:
             continue
         entry = agg.setdefault(
-            pid, {"quantity": 0, "refdes": set(), "part_number": get("part_number")}
+            pid, {"quantity": 0, "refdes": set(), "part_number": _field(r, "part_number")}
         )
-        q = get("quantity")
+        q = _field(r, "quantity")
         if q is not None:
             entry["quantity"] += q
-        rd = get("reference_designator")
+        rd = _field(r, "reference_designator")
         if rd:
             entry["refdes"].add(rd)
     return agg
@@ -1944,9 +1995,7 @@ def _diff_part_entries(
             unchanged.append({"part_number": pn, "quantity": entry["quantity"]})
     for pid, entry in before.items():
         if pid not in after:
-            removed.append(
-                {"part_number": pn_of(pid, entry), "quantity": entry["quantity"]}
-            )
+            removed.append({"part_number": pn_of(pid, entry), "quantity": entry["quantity"]})
     return {
         "added": added,
         "removed": removed,
@@ -2044,9 +2093,7 @@ async def compare_bom_to_snapshot(
     }
 
 
-async def compare_snapshots(
-    db: AsyncSession, snapshot_id_1: int, snapshot_id_2: int
-) -> dict:
+async def compare_snapshots(db: AsyncSession, snapshot_id_1: int, snapshot_id_2: int) -> dict:
     """Diff two saved snapshots of the same BOM against each other."""
     tid = get_tenant_id()
     snaps = {}
@@ -2059,9 +2106,7 @@ async def compare_snapshots(
             raise HTTPException(status_code=404, detail=f"Snapshot {sid} not found")
         snaps[sid] = snap
     if snaps[snapshot_id_1].bom_id != snaps[snapshot_id_2].bom_id:
-        raise HTTPException(
-            status_code=400, detail="Those snapshots belong to different BOMs"
-        )
+        raise HTTPException(status_code=400, detail="Those snapshots belong to different BOMs")
 
     before = _aggregate_part_entries(snaps[snapshot_id_1].snapshot_data or [])
     after = _aggregate_part_entries(snaps[snapshot_id_2].snapshot_data or [])
@@ -2137,9 +2182,7 @@ async def compare_boms(db: AsyncSession, bom_id_1: int, bom_id_2: int) -> dict:
         pn = parts[pid].pn if pid in parts else f"ID:{pid}"
         if pid not in items1:
             added.append({"part_number": pn, "quantity": entry["quantity"]})
-        elif items1[pid]["quantity"] != entry["quantity"] or _refdes(
-            items1[pid]
-        ) != _refdes(entry):
+        elif items1[pid]["quantity"] != entry["quantity"] or _refdes(items1[pid]) != _refdes(entry):
             modified.append(
                 {
                     "part_number": pn,
@@ -2751,9 +2794,7 @@ async def import_bom(
         # by hand because a Core delete() bypasses the ORM tenant listener.
         await db.rollback()
         await db.execute(
-            delete(BOM).where(
-                BOM.id == bom.id, *([BOM.tenantId == tid] if tid is not None else [])
-            )
+            delete(BOM).where(BOM.id == bom.id, *([BOM.tenantId == tid] if tid is not None else []))
         )
         await db.commit()
         raise
@@ -2845,7 +2886,9 @@ async def apply_template(
     # auto-generates a tenant-scoped one. Discovered while fixing the
     # bom-integrity closure finding below: the old bare BOM(...) here had no
     # bom_number at all and would fail its INSERT on any real database.
-    bom = await create_bom(db, {"name": f"{tmpl.name} (from template)", "project_id": project_id}, tenant_id=tid)
+    bom = await create_bom(
+        db, {"name": f"{tmpl.name} (from template)", "project_id": project_id}, tenant_id=tid
+    )
 
     template_items = await db.execute(
         select(TemplateBomItem).where(TemplateBomItem.bomTemplateId == template_id)

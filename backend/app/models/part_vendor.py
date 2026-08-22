@@ -37,6 +37,9 @@ class PartVendor(Base, TenantAwareMixin):
     # Part-specific vendor data
     vendorPn = Column(String)  # Vendor's part number (may differ from our PN)
     vendorCost = Column(Numeric(18, 4))  # Vendor-specific price
+    # Currency vendorCost is quoted in — an overseas source quotes in its own
+    # money. Mirrors part_vendor_prices.currency (String(3), default USD).
+    vendorCurrency = Column(String(3), server_default="USD")
     vendorLead = Column(Integer)  # Vendor-specific lead time
     vendorMoq = Column(Integer)  # Vendor-specific MOQ
 

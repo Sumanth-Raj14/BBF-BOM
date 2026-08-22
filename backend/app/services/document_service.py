@@ -123,25 +123,93 @@ async def get_document(db: AsyncSession, document_id: int) -> Document:
     return doc
 
 
-async def get_document_versions(db: AsyncSession, document_id: int) -> list[Document]:
+def _scoped(stmt):
+    """Tenant-scope a Document select. The ORM auto-filter covers this too, but
+    these queries are also called from services with an explicit tenant."""
     tid = get_tenant_id()
-    doc_stmt = select(Document).where(Document.id == document_id)
-    if tid is not None:
-        doc_stmt = doc_stmt.where(Document.tenantId == tid)
-    result = await db.execute(doc_stmt)
-    doc = result.scalar_one_or_none()
-    if not doc:
-        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+    return stmt if tid is None else stmt.where(Document.tenantId == tid)
 
-    query = (
+
+async def find_superseded(
+    db: AsyncSession,
+    *,
+    replaces_id: Optional[int],
+    original_name: str,
+    part_id: Optional[int],
+    project_id: Optional[int],
+) -> Optional[Document]:
+    """The document a new upload supersedes, or None for a first version.
+
+    An explicit replaces_id wins. Otherwise re-uploading the same filename
+    against the same part/project is treated as a revision — that is exactly
+    the case that used to produce two rows both claiming version 1.
+    """
+    if replaces_id is not None:
+        stmt = _scoped(select(Document).where(Document.id == replaces_id))
+        prev = (await db.execute(stmt)).scalar_one_or_none()
+        if prev is None:
+            raise HTTPException(
+                status_code=404, detail=f"Document {replaces_id} not found"
+            )
+        if not prev.isLatest:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Document {replaces_id} is already superseded",
+            )
+        return prev
+
+    stmt = _scoped(
         select(Document)
-        .where(Document.originalName == doc.originalName)
-        .order_by(Document.version.desc())
+        .where(Document.originalName == original_name)
+        .where(Document.partId == part_id)
+        .where(Document.projectId == project_id)
+        .where(Document.isLatest)
+        .order_by(Document.version.desc(), Document.id.desc())
     )
-    if tid is not None:
-        query = query.where(Document.tenantId == tid)
-    result = await db.execute(query)
-    return result.scalars().all()
+    return (await db.execute(stmt)).scalars().first()
+
+
+async def get_document_versions(db: AsyncSession, document_id: int) -> list[Document]:
+    """Full version chain for a document, newest first.
+
+    Walks replacesDocumentId in both directions rather than grouping by
+    originalName — a revision may be uploaded under a different filename, and
+    two unrelated files may share one.
+
+    ponytail: one query per hop. Revision chains are short; swap for a
+    recursive CTE if a document ever grows hundreds of versions.
+    """
+    doc = await get_document(db, document_id)
+
+    chain = [doc]
+    seen = {doc.id}
+
+    cur = doc
+    while cur.replacesDocumentId and cur.replacesDocumentId not in seen:
+        stmt = _scoped(select(Document).where(Document.id == cur.replacesDocumentId))
+        prev = (await db.execute(stmt)).scalar_one_or_none()
+        if prev is None:
+            break
+        chain.append(prev)
+        seen.add(prev.id)
+        cur = prev
+
+    cur = doc
+    while True:
+        stmt = _scoped(
+            select(Document)
+            .where(Document.replacesDocumentId == cur.id)
+            .order_by(Document.id)
+        )
+        nxt = (await db.execute(stmt)).scalars().first()
+        if nxt is None or nxt.id in seen:
+            break
+        chain.append(nxt)
+        seen.add(nxt.id)
+        cur = nxt
+
+    chain.sort(key=lambda d: ((d.version or 1), d.id), reverse=True)
+    return chain
 
 
 async def update_document(db: AsyncSession, document_id: int, data: dict) -> Document:
@@ -173,8 +241,48 @@ async def delete_document(db: AsyncSession, document_id: int) -> None:
     if not db_doc:
         raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
 
-    if db_doc.filePath and os.path.exists(db_doc.filePath):
-        os.remove(db_doc.filePath)
+    # History is not deletable. replacesDocumentId is ON DELETE CASCADE, so
+    # removing a superseded row would also take every later revision that
+    # points back at it with it.
+    if db_doc.isLatest is False:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Document {document_id} is a superseded version and cannot be "
+                "deleted; delete the current version instead"
+            ),
+        )
+
+    # Deleting the current version hands the flag back to its predecessor,
+    # otherwise the document disappears from listings entirely.
+    predecessor = None
+    if db_doc.replacesDocumentId:
+        predecessor = (
+            await db.execute(
+                _scoped(select(Document).where(Document.id == db_doc.replacesDocumentId))
+            )
+        ).scalar_one_or_none()
+
+    # Storage is content-addressed, so two rows with identical bytes share one
+    # file. Only unlink it when nothing else still points at it.
+    path = db_doc.filePath
+    others = 0
+    if path:
+        others = (
+            await db.execute(
+                _scoped(
+                    select(sqlfunc.count(Document.id))
+                    .where(Document.filePath == path)
+                    .where(Document.id != db_doc.id)
+                )
+            )
+        ).scalar() or 0
+
+    if predecessor is not None:
+        predecessor.isLatest = True
 
     await db.delete(db_doc)
     await db.commit()
+
+    if path and others == 0 and os.path.exists(path):
+        os.remove(path)

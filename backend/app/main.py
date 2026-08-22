@@ -421,6 +421,11 @@ app.add_middleware(
         "X-API-Key",
         "X-CSRF-Token",
         "X-Request-ID",
+        # Public BOM share links send the link password in this header rather
+        # than the query string (app/api/endpoints/bom_shares.py). Without it
+        # here the browser preflight is refused and password-protected links
+        # cannot be opened at all.
+        "X-Share-Password",
         "Accept",
         "Origin",
         "Referer",

@@ -26,6 +26,7 @@ class PartVendorBase(BaseModel):
     avlRank: Optional[int] = None
     vendorPn: Optional[str] = None
     vendorCost: Optional[float] = None
+    vendorCurrency: Optional[str] = None
     vendorLead: Optional[int] = None
     vendorMoq: Optional[int] = None
     qualityScore: Optional[float] = 5.0
@@ -43,6 +44,7 @@ class PartVendorUpdate(BaseModel):
     avlRank: Optional[int] = None
     vendorPn: Optional[str] = None
     vendorCost: Optional[float] = None
+    vendorCurrency: Optional[str] = None
     vendorLead: Optional[int] = None
     vendorMoq: Optional[int] = None
     qualityScore: Optional[float] = None
@@ -100,6 +102,7 @@ async def get_part_vendors(
                 "avlRank": pv.avlRank,
                 "vendorPn": pv.vendorPn,
                 "vendorCost": pv.vendorCost,
+                "vendorCurrency": pv.vendorCurrency,
                 "vendorLead": pv.vendorLead,
                 "vendorMoq": pv.vendorMoq,
                 "qualityScore": pv.qualityScore,
@@ -174,6 +177,7 @@ async def create_part_vendor(
         "avlRank": db_part_vendor.avlRank,
         "vendorPn": db_part_vendor.vendorPn,
         "vendorCost": db_part_vendor.vendorCost,
+        "vendorCurrency": db_part_vendor.vendorCurrency,
         "vendorLead": db_part_vendor.vendorLead,
         "vendorMoq": db_part_vendor.vendorMoq,
         "qualityScore": db_part_vendor.qualityScore,
@@ -237,6 +241,7 @@ async def update_part_vendor(
         "avlRank": db_link.avlRank,
         "vendorPn": db_link.vendorPn,
         "vendorCost": db_link.vendorCost,
+        "vendorCurrency": db_link.vendorCurrency,
         "vendorLead": db_link.vendorLead,
         "vendorMoq": db_link.vendorMoq,
         "qualityScore": db_link.qualityScore,

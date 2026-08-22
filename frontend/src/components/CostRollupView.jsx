@@ -2,27 +2,56 @@ import PropTypes from "prop-types";
 
 import { __t } from "../i18n";
 import { INR, api, useAppStore } from "../globals";
-import { DataTable, EmptyState } from "./ui";
+import { DataTable, EmptyState, Select } from "./ui";
+
+// Responses arrive as {items:[...]}, {data:[...]} or a bare array.
+const unwrap = (r) =>
+  Array.isArray(r) ? r : Array.isArray(r?.items) ? r.items : Array.isArray(r?.data) ? r.data : [];
+
+const ccyCode = (c) => (typeof c === "string" ? c : c && (c.code || c.currency_code)) || "";
 
 function CostRollupView({ data }) {
   const ctx = useAppStore();
   const rows = ctx?.rows || data.rows;
   const [apiRollup, setApiRollup] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  // "" = no reporting currency requested -> the legacy as-costed roll-up.
+  const [currency, setCurrency] = React.useState("");
+  const [currencies, setCurrencies] = React.useState([]);
   const top = rows[0];
+
+  // Active currencies for the selector (GET /enterprise/currencies). A failure
+  // here only costs us the dropdown options, not the roll-up itself.
+  React.useEffect(() => {
+    if (!api || !api.enterprise) return;
+    api.enterprise
+      .currencies()
+      .then((r) => setCurrencies(unwrap(r)))
+      .catch(() => setCurrencies([]));
+  }, []);
 
   React.useEffect(() => {
     if (api && api.bomEnterprise && top) {
       setLoading(true);
+      setError(null);
       api.bomEnterprise
-        .costRollup(top.project_id || top.bomId || 1)
-        .then((r) => setApiRollup(r))
-        .catch(() => {
-          console.warn("Cost rollup API call failed");
+        .costRollup(top.project_id || top.bomId || 1, currency || undefined)
+        .then((r) => {
+          setApiRollup(r);
+          // Default the selector to whatever the server says it reported in,
+          // so the control reflects reality instead of guessing.
+          if (!currency && r && r.reporting_currency) {
+            setCurrency(r.reporting_currency);
+          }
+        })
+        .catch((e) => {
+          setApiRollup(null);
+          setError(e?.message || String(e));
         })
         .finally(() => setLoading(false));
     }
-  }, [top?.id]);
+  }, [top?.id, currency]);
 
   if (!top || !top.children)
     return (
@@ -61,6 +90,28 @@ function CostRollupView({ data }) {
   // to something other than 100% of the total shown above them.
   const pctBase = total || 1;
   const uomWarnings = apiRollup?.uom_warnings || [];
+  const currencyWarnings = apiRollup?.currency_warnings || [];
+
+  // The server converted the total into rc; INR() would multiply it by the
+  // local display rate on top of that, which would be a second, invented
+  // conversion. So server figures in a reporting currency get formatted as-is.
+  const rc = apiRollup?.reporting_currency || null;
+  const money = (n) => {
+    if (!rc) return INR(n, 2);
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: rc,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(Number(n) || 0);
+    } catch {
+      return `${(Number(n) || 0).toFixed(2)} ${rc}`;
+    }
+  };
+
+  const options = currencies.map(ccyCode).filter(Boolean);
+  if (currency && !options.includes(currency)) options.unshift(currency);
   const max = Math.max(...subs.map((s) => s.ext), 1);
 
   const leaves = [];
@@ -153,10 +204,40 @@ function CostRollupView({ data }) {
             </span>
           )}
         </h2>
-        <div className="hint">
-          {__t("bomShell.total")} {INR(total, 2)}
+        <div className="flex items-center gap-8">
+          <label className="hint" htmlFor="rollup-ccy">
+            {__t("bomShell.reportingCurrency") || "Reporting currency"}
+          </label>
+          <Select
+            id="rollup-ccy"
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value)}
+            disabled={loading}
+          >
+            <option value="">
+              {__t("bomShell.asCosted") || "As costed (no conversion)"}
+            </option>
+            {options.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </Select>
+          <div className="hint">
+            {__t("bomShell.total")} {money(total)}
+            {rc ? ` ${rc}` : ""}
+          </div>
         </div>
       </div>
+
+      {error && (
+        <div className="rollup-warn" role="alert">
+          <strong>
+            {__t("bomShell.rollupError") || "Cost roll-up could not be loaded"}
+          </strong>
+          <div className="fs-10 fg-3">{error}</div>
+        </div>
+      )}
 
       {/* The server reports a warning per line whose unit it could not
           reconcile with the part's cost unit (e.g. costed per M, consumed in
@@ -179,6 +260,31 @@ function CostRollupView({ data }) {
           {uomWarnings.length > 5 && (
             <div className="fs-10 fg-3">
               +{uomWarnings.length - 5} more
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* A line whose source currency has no active exchange rate into the
+          reporting currency is NOT folded into the total at 1:1 — the server
+          leaves it out and reports it here. The headline number is therefore
+          incomplete for those lines, and saying so is the whole point. */}
+      {currencyWarnings.length > 0 && (
+        <div className="rollup-warn" role="status">
+          <strong>
+            {__t("bomShell.currencyWarning") ||
+              "Some lines have no exchange rate and are excluded from the total"}
+          </strong>
+          <ul>
+            {currencyWarnings.slice(0, 5).map((w, i) => (
+              <li key={(w.part_number || "") + i}>
+                <span className="font-mono">{w.part_number}</span> — {w.message}
+              </li>
+            ))}
+          </ul>
+          {currencyWarnings.length > 5 && (
+            <div className="fs-10 fg-3">
+              +{currencyWarnings.length - 5} more
             </div>
           )}
         </div>

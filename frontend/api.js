@@ -1173,7 +1173,16 @@ export const bomEnterpriseAPI = {
   list: () => apiRequest('/bom/'),
   explosion: (bomId, level = 10) => apiRequest(`/bom/${bomId}/explosion?level=${level}`),
   quantityRollup: (bomId) => apiRequest(`/bom/${bomId}/quantity-rollup`),
-  costRollup: (bomId) => apiRequest(`/bom/${bomId}/cost-rollup`),
+  // reportingCurrency (ISO 4217) converts every line into that currency
+  // server-side; omit it for the legacy as-costed roll-up. Lines with no
+  // exchange rate come back in `currency_warnings`, NOT converted at 1:1.
+  costRollup: (bomId, reportingCurrency) =>
+    apiRequest(
+      `/bom/${bomId}/cost-rollup` +
+        (reportingCurrency
+          ? `?reporting_currency=${encodeURIComponent(reportingCurrency)}`
+          : ''),
+    ),
   whereUsed: (partId) => apiRequest(`/bom/where-used/${partId}`),
   whereUsedTree: (partId) => apiRequest(`/bom/where-used/${partId}/tree`),
   compare: (bomId1, bomId2) => apiRequest('/bom/compare', { method: 'POST', body: JSON.stringify({ bom_id_1: bomId1, bom_id_2: bomId2 }) }),
@@ -2029,3 +2038,41 @@ const duplicatesAPI = {
 api.duplicates = duplicatesAPI;
 window.duplicatesAPI = duplicatesAPI;
 window.derivativesAPI = derivativesAPI;
+
+// Multi-currency reference data (GET /enterprise/currencies -> active
+// currency rows, bare array). Backs the reporting-currency selector on the
+// cost roll-up. See backend/app/api/endpoints/enterprise_ext_api.py.
+export const enterpriseAPI = {
+  currencies: () => apiRequest('/enterprise/currencies'),
+};
+api.enterprise = enterpriseAPI;
+window.enterpriseAPI = enterpriseAPI;
+
+// Object-level permission grants on a BOM (backend/app/api/endpoints/
+// bom_enterprise.py, migration 063). SEMANTIC WARNING, mirrored in the UI copy:
+// a BOM with ZERO grants is UNRESTRICTED — the role check alone governs, as it
+// always has. The FIRST grant flips it to restricted; from then on only the
+// grantees (plus the BOM's creator and superusers) get in. Grants NARROW, they
+// never widen. Every route also needs `manage` on the BOM, so a 403 here means
+// "you may not manage access for this BOM", not "request failed".
+export const bomGrantsAPI = {
+  list: (bomId) => apiRequest(`/bom/${bomId}/grants`),
+
+  // grantee_type: "user" | "team"; level: "view" | "edit" | "manage".
+  // Re-granting an existing grantee changes its level (server-side upsert).
+  grant: (bomId, { grantee_type, grantee_id, level }) =>
+    apiRequest(`/bom/${bomId}/grants`, {
+      method: 'POST',
+      body: JSON.stringify({ grantee_type, grantee_id, level }),
+    }),
+
+  revoke: (bomId, grantId) =>
+    apiRequest(`/bom/${bomId}/grants/${grantId}`, { method: 'DELETE' }),
+};
+api.bomGrants = bomGrantsAPI;
+
+// GET /teams/ — needed to grant BOM access to a team.
+export const teamsAPI = {
+  list: () => apiRequest('/teams/'),
+};
+api.teams = teamsAPI;

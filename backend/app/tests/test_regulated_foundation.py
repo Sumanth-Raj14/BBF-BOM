@@ -91,7 +91,7 @@ def test_migration_chain_single_linear_head():
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
     script = ScriptDirectory.from_config(cfg)
 
-    assert script.get_heads() == ["060_part_vendor_avl_rank"]
+    assert script.get_heads() == ["063_resource_grants"]
     links = {
         "044_compliance_evaluations": "043_part_composition_declarations",
         "043_part_composition_declarations": "042_substance_reference_data",

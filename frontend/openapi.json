@@ -1301,6 +1301,17 @@
         "title": "Body_import_altium_file_api_v1_cad_connectors_altium_import_file_post",
         "type": "object"
       },
+      "Body_import_bom_api_v1_bom_import_post": {
+        "properties": {
+          "file": {
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "title": "Body_import_bom_api_v1_bom_import_post",
+        "type": "object"
+      },
       "Body_upload_document_api_v1_documents_upload_post": {
         "properties": {
           "accessLevel": {
@@ -1352,6 +1363,17 @@
               }
             ],
             "title": "Projectid"
+          },
+          "replacesDocumentId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacesdocumentid"
           },
           "tags": {
             "anyOf": [
@@ -1521,6 +1543,38 @@
           "rows_data"
         ],
         "title": "BomDraftUpdate",
+        "type": "object"
+      },
+      "BomGrantRequest": {
+        "properties": {
+          "grantee_id": {
+            "title": "Grantee Id",
+            "type": "integer"
+          },
+          "grantee_type": {
+            "enum": [
+              "user",
+              "team"
+            ],
+            "title": "Grantee Type",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "view",
+              "edit",
+              "manage"
+            ],
+            "title": "Level",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grantee_type",
+          "grantee_id",
+          "level"
+        ],
+        "title": "BomGrantRequest",
         "type": "object"
       },
       "BomItemBulkCreate": {
@@ -6504,6 +6558,17 @@
             ],
             "title": "Projectid"
           },
+          "replacesDocumentId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacesdocumentid"
+          },
           "tags": {
             "anyOf": [
               {
@@ -10255,6 +10320,17 @@
             ],
             "title": "Operation Number"
           },
+          "parent_item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Item Id"
+          },
           "part_id": {
             "title": "Part Id",
             "type": "integer"
@@ -10328,6 +10404,17 @@
               }
             ],
             "title": "Operation Number"
+          },
+          "parent_item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Item Id"
           },
           "part_id": {
             "anyOf": [
@@ -11451,6 +11538,20 @@
             ],
             "title": "Countryhistory"
           },
+          "currency": {
+            "anyOf": [
+              {
+                "maxLength": 3,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "example": "EUR",
+            "title": "Currency"
+          },
           "customFields": {
             "anyOf": [
               {
@@ -11929,6 +12030,20 @@
             "title": "Createdat",
             "type": "string"
           },
+          "currency": {
+            "anyOf": [
+              {
+                "maxLength": 3,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "example": "EUR",
+            "title": "Currency"
+          },
           "customFields": {
             "anyOf": [
               {
@@ -12284,6 +12399,19 @@
             ],
             "title": "Countryhistory"
           },
+          "currency": {
+            "anyOf": [
+              {
+                "maxLength": 3,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
           "customFields": {
             "anyOf": [
               {
@@ -12537,6 +12665,17 @@
       },
       "PartVendorCreate": {
         "properties": {
+          "avlRank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avlrank"
+          },
           "isAlternate": {
             "anyOf": [
               {
@@ -12611,6 +12750,17 @@
             ],
             "title": "Vendorcost"
           },
+          "vendorCurrency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendorcurrency"
+          },
           "vendorId": {
             "title": "Vendorid",
             "type": "integer"
@@ -12658,6 +12808,17 @@
       },
       "PartVendorResponse": {
         "properties": {
+          "avlRank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avlrank"
+          },
           "createdAt": {
             "format": "date-time",
             "title": "Createdat",
@@ -12764,6 +12925,17 @@
             ],
             "title": "Vendorcountry"
           },
+          "vendorCurrency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendorcurrency"
+          },
           "vendorId": {
             "title": "Vendorid",
             "type": "integer"
@@ -12824,6 +12996,17 @@
       },
       "PartVendorUpdate": {
         "properties": {
+          "avlRank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avlrank"
+          },
           "isAlternate": {
             "anyOf": [
               {
@@ -12889,6 +13072,17 @@
               }
             ],
             "title": "Vendorcost"
+          },
+          "vendorCurrency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendorcurrency"
           },
           "vendorLead": {
             "anyOf": [
@@ -16450,6 +16644,116 @@
           "target_name"
         ],
         "title": "ServiceBomMergeRequest",
+        "type": "object"
+      },
+      "ShareCreate": {
+        "properties": {
+          "bom_id": {
+            "title": "Bom Id",
+            "type": "integer"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          }
+        },
+        "required": [
+          "bom_id"
+        ],
+        "title": "ShareCreate",
+        "type": "object"
+      },
+      "ShareResponse": {
+        "properties": {
+          "access_count": {
+            "title": "Access Count",
+            "type": "integer"
+          },
+          "bom_id": {
+            "title": "Bom Id",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "has_password": {
+            "title": "Has Password",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "last_accessed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Accessed At"
+          },
+          "revoked": {
+            "title": "Revoked",
+            "type": "boolean"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "token",
+          "bom_id",
+          "has_password",
+          "revoked",
+          "access_count"
+        ],
+        "title": "ShareResponse",
         "type": "object"
       },
       "ShipmentUpdateCreate": {
@@ -23431,6 +23735,212 @@
         ]
       }
     },
+    "/api/v1/bom-shares/": {
+      "get": {
+        "operationId": "list_shares_api_v1_bom_shares__get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "bom_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bom Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ShareResponse"
+                  },
+                  "title": "Response List Shares Api V1 Bom Shares  Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Shares",
+        "tags": [
+          "bom-shares"
+        ]
+      },
+      "post": {
+        "operationId": "create_share_api_v1_bom_shares__post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create Share",
+        "tags": [
+          "bom-shares"
+        ]
+      }
+    },
+    "/api/v1/bom-shares/public/{token}": {
+      "get": {
+        "description": "Resolve a share token to exactly one read-only BOM. No authentication.\n\nThe password travels in a header, not the query string, so it does not land\nin access logs / browser history the way ?password= would.",
+        "operationId": "resolve_public_share_api_v1_bom_shares_public__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-share-password",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Share-Password"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Public Share",
+        "tags": [
+          "bom-shares"
+        ]
+      }
+    },
+    "/api/v1/bom-shares/{share_id}/revoke": {
+      "post": {
+        "operationId": "revoke_share_api_v1_bom_shares__share_id__revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "share_id",
+            "required": true,
+            "schema": {
+              "title": "Share Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Revoke Share",
+        "tags": [
+          "bom-shares"
+        ]
+      }
+    },
     "/api/v1/bom-templates/": {
       "get": {
         "operationId": "get_bom_templates_api_v1_bom_templates__get",
@@ -23997,38 +24507,67 @@
     },
     "/api/v1/bom/import": {
       "post": {
+        "description": "Import a multi-level BOM from an uploaded CSV/XLSX spreadsheet.\n\n`file_url` is still accepted so the old query-param callers get a clear\n400 instead of a bare 422 \u2014 server-side fetching was never implemented\n(it only ever produced an empty draft BOM), the file is uploaded instead.",
         "operationId": "import_bom_api_v1_bom_import_post",
         "parameters": [
           {
             "in": "query",
-            "name": "file_url",
-            "required": true,
-            "schema": {
-              "title": "File Url",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
             "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "format",
             "required": false,
             "schema": {
-              "default": "csv",
-              "pattern": "^(csv|excel|json)$",
-              "title": "Format",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "file_url",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "File Url"
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_bom_api_v1_bom_import_post"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -24560,6 +25099,26 @@
               "title": "Bom Id",
               "type": "integer"
             }
+          },
+          {
+            "description": "ISO code to report every line in (e.g. EUR). Lines with no usable exchange rate are excluded from the totals and listed in currency_warnings rather than converted at 1:1.",
+            "in": "query",
+            "name": "reporting_currency",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 3,
+                  "minLength": 3,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ISO code to report every line in (e.g. EUR). Lines with no usable exchange rate are excluded from the totals and listed in currency_warnings rather than converted at 1:1.",
+              "title": "Reporting Currency"
+            }
           }
         ],
         "responses": {
@@ -24703,6 +25262,156 @@
           }
         ],
         "summary": "Export Bom",
+        "tags": [
+          "bom-enterprise",
+          "bom-enterprise"
+        ]
+      }
+    },
+    "/api/v1/bom/{bom_id}/grants": {
+      "get": {
+        "operationId": "list_bom_grants_api_v1_bom__bom_id__grants_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bom_id",
+            "required": true,
+            "schema": {
+              "title": "Bom Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Bom Grants",
+        "tags": [
+          "bom-enterprise",
+          "bom-enterprise"
+        ]
+      },
+      "post": {
+        "operationId": "grant_bom_access_api_v1_bom__bom_id__grants_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bom_id",
+            "required": true,
+            "schema": {
+              "title": "Bom Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BomGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Grant Bom Access",
+        "tags": [
+          "bom-enterprise",
+          "bom-enterprise"
+        ]
+      }
+    },
+    "/api/v1/bom/{bom_id}/grants/{grant_id}": {
+      "delete": {
+        "operationId": "revoke_bom_access_api_v1_bom__bom_id__grants__grant_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bom_id",
+            "required": true,
+            "schema": {
+              "title": "Bom Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "grant_id",
+            "required": true,
+            "schema": {
+              "title": "Grant Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Revoke Bom Access",
         "tags": [
           "bom-enterprise",
           "bom-enterprise"
@@ -34233,6 +34942,7 @@
     },
     "/api/v1/import/{job_id}/process": {
       "post": {
+        "description": "One-call alternative to /mapping + /commit, for callers that skip the\nseparate preview step.\n\nThis used to only rewrite BulkImportRow.rowData/status and report\n\"completed\" with a processedRows count while creating ZERO Part rows \u2014\nfabricated success. It now calls the exact same write path as /commit\n(import_service.commit_rows), so a \"processed\" count here means real\nPart rows were actually created/updated. mappingConfig uses the same\n{file_column: entity_field} shape as /mapping's `mapping` field.",
         "operationId": "process_import_api_v1_import__job_id__process_post",
         "parameters": [
           {
@@ -42973,8 +43683,68 @@
     },
     "/api/v1/requirements/coverage": {
       "get": {
-        "description": "Requirements with zero linked parts \u2014 the question a quality/\nregulatory user actually asks: what's uncovered?",
+        "description": "Requirements with zero linked parts \u2014 the question a quality/\nregulatory user actually asks: what's uncovered?\n\nPaginated: the item list is bounded per page, but `total`/`has_next`\nalways reflect the TRUE uncovered count (a plain COUNT(*), never just\nlen(this page)) so the UI can say \"showing 20 of 137 uncovered\" and can\nnever mistake a partial page for the whole list.",
         "operationId": "coverage_api_v1_requirements_coverage_get",
+        "parameters": [
+          {
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Items per page",
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Items per page",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Column to sort by",
+            "in": "query",
+            "name": "sort_by",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Column to sort by",
+              "title": "Sort By"
+            }
+          },
+          {
+            "description": "Sort direction",
+            "in": "query",
+            "name": "sort_dir",
+            "required": false,
+            "schema": {
+              "default": "asc",
+              "description": "Sort direction",
+              "pattern": "^(asc|desc)$",
+              "title": "Sort Dir",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -42983,6 +43753,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
