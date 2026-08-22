@@ -29,13 +29,15 @@ export default function TopBar() {
     route,
     project,
     activeProjectKey,
+    apiProjects,
     switchProject,
+    rows,
     unreadCount,
     bellRef,
     bellOpen,
     setBellOpen,
     notifications,
-    setNotifications,
+    markNotificationsRead,
     setShowAI,
     setSearch,
     t,
@@ -45,6 +47,88 @@ export default function TopBar() {
     mobileNavOpen,
     setMobileNavOpen,
   } = ctx;
+
+  // fixfe: this dropdown used to hardcode four fixture projects — ATLAS,
+  // HORIZON, ATLAS-LITE, NEBULA — each wired to switchProject(), which pasted
+  // the invented BOM from frontend/projects.js over the user's real data. The
+  // list is now the workspace's real projects (GET /api/v1/projects, held on
+  // ctx.apiProjects). No projects means an empty, non-clickable state; there is
+  // nothing to fall back to and nothing worth inventing.
+  const projectItems = React.useMemo(() => {
+    const list = Array.isArray(apiProjects) ? apiProjects : [];
+    if (list.length === 0) {
+      return [
+        {
+          header: apiLoading
+            ? __t("common.loading")
+            : __t("app.crumbNoProjects") || "No projects in this workspace",
+        },
+      ];
+    }
+    return list.map((p) => {
+      const key = p.code || String(p.id);
+      return {
+        icon: <Icon.Bom size={12} />,
+        label: key + (p.name ? " · " + p.name : ""),
+        checked: activeProjectKey === key,
+        onClick: () => switchProject(key),
+      };
+    });
+  }, [apiProjects, apiLoading, activeProjectKey, switchProject]);
+
+  // fixfe: the "jump to sub-assembly" menu listed five invented sub-assemblies
+  // from the ATLAS fixture ("Chassis Subassembly", "Power Subsystem", …) no
+  // matter what BOM was open, and the first entry only toasted "Loading…"
+  // forever. These are now the real assemblies present in ctx.rows.
+  const subassemblyItems = React.useMemo(() => {
+    const found = [];
+    const seen = new Set();
+    const visit = (row) => {
+      if (!row) return;
+      const kids = Array.isArray(row.children) ? row.children : [];
+      const label = row.name || row.pn;
+      if ((row.assembly || kids.length > 0) && label && !seen.has(label)) {
+        seen.add(label);
+        found.push(label);
+      }
+      kids.forEach(visit);
+    };
+    (Array.isArray(rows) ? rows : []).forEach(visit);
+    if (found.length === 0) {
+      return [
+        {
+          header:
+            __t("app.crumbNoSubassemblies") || "No sub-assemblies in this BOM",
+        },
+      ];
+    }
+    return found.slice(0, 8).map((label) => ({
+      icon: <Icon.Parts size={12} />,
+      label,
+      onClick: () => {
+        setRoute("bom");
+        setSearch(label);
+      },
+    }));
+  }, [rows, setRoute, setSearch]);
+
+  const markRead = React.useCallback(
+    async (ids) => {
+      try {
+        await markNotificationsRead(ids);
+        return true;
+      } catch (e) {
+        toast(
+          __t("common.failedWithMessage", {
+            message: (e && e.message) || String(e),
+          }),
+          { kind: "error" },
+        );
+        return false;
+      }
+    },
+    [markNotificationsRead],
+  );
 
   return (
     <>
@@ -102,35 +186,26 @@ export default function TopBar() {
             }
             items={[
               { header: __t("app.crumbSwitchProject") },
-              {
-                icon: <Icon.Bom size={12} />,
-                label: "ATLAS \u00B7 Mainframe",
-                checked: activeProjectKey === "ATLAS",
-                onClick: () => switchProject("ATLAS"),
-              },
-              {
-                icon: <Icon.Bom size={12} />,
-                label: "HORIZON \u00B7 Sensor Pod",
-                checked: activeProjectKey === "HORIZON",
-                onClick: () => switchProject("HORIZON"),
-              },
-              {
-                icon: <Icon.Bom size={12} />,
-                label: "ATLAS-LITE \u00B7 Eval Board",
-                checked: activeProjectKey === "ATLAS-LITE",
-                onClick: () => switchProject("ATLAS-LITE"),
-              },
-              {
-                icon: <Icon.Bom size={12} />,
-                label: "NEBULA \u00B7 IO Module",
-                checked: activeProjectKey === "NEBULA",
-                onClick: () => switchProject("NEBULA"),
-              },
+              ...projectItems,
               "divider",
               {
                 icon: <Icon.Plus size={12} />,
-                label: __t("app.crumbNewProject"),
-                onClick: () => toast(__t("common.loading")),
+                // fixfe: this used to toast "Loading\u2026" and do nothing at all,
+                // so it read as a create that was in progress. POST
+                // /api/v1/projects exists, but there is no project-creation
+                // form in this build to collect a code + name, so the control
+                // says so plainly instead of pretending.
+                label:
+                  __t("app.crumbNewProject") +
+                  " \u2014 " +
+                  (__t("common.notAvailableInBuild") ||
+                    "not available in this build"),
+                onClick: () =>
+                  toast(
+                    __t("app.crumbNewProjectUnavailable") ||
+                      "Creating a project isn't available in this build yet. Nothing was created.",
+                    { kind: "warn" },
+                  ),
               },
               {
                 icon: <Icon.Settings size={12} />,
@@ -150,46 +225,7 @@ export default function TopBar() {
             }
             items={[
               { header: __t("app.crumbJumpToSubassembly") },
-              {
-                icon: <Icon.Bom size={12} />,
-                label: "Mainframe Assembly (root)",
-                onClick: () => {
-                  setRoute("bom");
-                  toast(__t("common.loading"));
-                },
-              },
-              {
-                icon: <Icon.Parts size={12} />,
-                label: "Chassis Subassembly",
-                onClick: () => {
-                  setRoute("bom");
-                  setSearch("Chassis");
-                },
-              },
-              {
-                icon: <Icon.Parts size={12} />,
-                label: "Power Subsystem",
-                onClick: () => {
-                  setRoute("bom");
-                  setSearch("Power");
-                },
-              },
-              {
-                icon: <Icon.Parts size={12} />,
-                label: "Control Subsystem",
-                onClick: () => {
-                  setRoute("bom");
-                  setSearch("Control");
-                },
-              },
-              {
-                icon: <Icon.Parts size={12} />,
-                label: "I/O Module",
-                onClick: () => {
-                  setRoute("bom");
-                  setSearch("I/O");
-                },
-              },
+              ...subassemblyItems,
               "divider",
               {
                 icon: <Icon.Diff size={12} />,
@@ -315,11 +351,18 @@ export default function TopBar() {
           {unreadCount > 0 && (
             <button
               className="act"
-              onClick={() => {
-                setNotifications((prev) =>
-                  prev.map((n) => ({ ...n, read: true })),
-                );
-                toast(__t("app.notifMarkAllRead"));
+              // fixfe: this flipped `read` in local state and toasted
+              // immediately, so it claimed a persisted change that never left
+              // the browser — the badge came straight back on reload. Now it
+              // awaits PUT /api/v1/notifications/{id} for each unread item and
+              // only confirms once the server accepted them.
+              onClick={async () => {
+                const ids = notifications
+                  .filter((n) => !n.read)
+                  .map((n) => n.id);
+                if (await markRead(ids)) {
+                  toast(__t("app.notifMarkAllRead"), { kind: "success" });
+                }
               }}
             >
               {__t("app.notifMarkAllRead")}
@@ -330,12 +373,13 @@ export default function TopBar() {
           {notifications.map((n) => (
             <div
               key={n.id}
+              // fixfe: same local-only read flip as "Mark all read" above.
+              // Persisted through markNotificationsRead now; if the server
+              // rejects it the item honestly stays unread.
               onClick={() => {
-                setNotifications((prev) =>
-                  prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)),
-                );
                 setBellOpen(false);
                 if (n.route) setRoute(n.route);
+                if (!n.read) markRead([n.id]);
               }}
               className={"notif-item cursor-pointer " + (n.read ? "read" : "")}
             >

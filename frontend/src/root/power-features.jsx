@@ -1,6 +1,8 @@
 import PropTypes from "prop-types";
-import { getInrRate } from "../utils/currency.js";
+import { api } from "../../api.js";
 import { navigateTo } from "../services/navigation.js";
+import { downloadBlob } from "../utils/download.js";
+import { useCollab, PresenceAvatar } from "./collaboration.jsx";
 import { storage } from "../utils/storage.js";
 import { screenData } from "../services/screenDataBridge.js";
 import { __t } from "../i18n";
@@ -420,12 +422,19 @@ function WorkOrdersScreen() {
                 setOrders(next);
                 // Fix: was local-state-only (never hit the server) while
                 // toasting success; now saves via the real workOrders.update
-                // wrapper (screenDataBridge already toasts on save failure).
-                screenData.workOrders.update(o.id, updated).catch(() => {});
-                toast(
-                  __t("power.workOrders.buildReported") ||
-                    "Build reported \u00B7 1 good unit",
-                );
+                // wrapper. The success toast waits for that save to resolve \u2014
+                // screenDataBridge toasts its own error on failure, so firing
+                // "Build reported" up-front claimed a save that had not
+                // happened (and could contradict the error toast next to it).
+                screenData.workOrders
+                  .update(o.id, updated)
+                  .then(() =>
+                    toast(
+                      __t("power.workOrders.buildReported") ||
+                        "Build reported \u00B7 1 good unit",
+                    ),
+                  )
+                  .catch(() => {});
               },
             },
             {
@@ -436,13 +445,20 @@ function WorkOrdersScreen() {
                 const next = orders.map((x) => (x.id === o.id ? updated : x));
                 setOrders(next);
                 // Fix: same local-state-only issue as "Report build" above \u2014
-                // now saves via the real workOrders.update wrapper.
-                screenData.workOrders.update(o.id, updated).catch(() => {});
-                toast(
-                  __t("power.workOrders.defectReported") ||
-                    "Defect reported \u00B7 NCR drafted",
-                  { kind: "warn" },
-                );
+                // now saves via the real workOrders.update wrapper, and the
+                // toast waits for that save instead of firing regardless.
+                screenData.workOrders
+                  .update(o.id, updated)
+                  .then(() =>
+                    toast(
+                      // "\u00B7 NCR drafted" removed from this message: nothing
+                      // here creates an NCR \u2014 the count is all that changes.
+                      __t("power.workOrders.defectReported") ||
+                        "Defect reported \u00B7 1 defective unit",
+                      { kind: "warn" },
+                    ),
+                  )
+                  .catch(() => {});
               },
             },
             {
@@ -495,15 +511,39 @@ function WorkOrdersScreen() {
         }
         actions={
           <div className="flex gap-8">
+            {/* Fix: this button exported nothing — it only toasted "Work
+                order schedule exported". Now it actually writes the CSV via
+                the existing downloadBlob helper (same thing the NCR export
+                below does) before claiming success. */}
             <Button
               variant="secondary"
-              onClick={() =>
+              onClick={() => {
+                const esc = (v) =>
+                  `"${String(v ?? "").replace(/"/g, '""')}"`;
+                const csv = [
+                  "id,bom,qty,scheduled,status,built,good,defect",
+                  ...orders.map((o) =>
+                    [
+                      o.id,
+                      o.bom,
+                      o.qty,
+                      o.scheduled,
+                      o.status,
+                      o.built,
+                      o.good,
+                      o.defect,
+                    ]
+                      .map(esc)
+                      .join(","),
+                  ),
+                ].join("\n");
+                downloadBlob(csv, "work_orders.csv", "text/csv");
                 toast(
                   __t("power.workOrders.scheduleExported") ||
                     "Work order schedule exported",
                   { kind: "success" },
-                )
-              }
+                );
+              }}
             >
               <Icon.Export size={12} />{" "}
               {__t("power.workOrders.exportSchedule") || "Export schedule"}
@@ -548,14 +588,21 @@ function WorkOrdersScreen() {
                     defect: 0,
                   };
                   setOrders([entry, ...orders]);
-                  // Fix: "Create Work Order" was local-state-only; now saves
-                  // via the real workOrders.create wrapper.
-                  screenData.workOrders.create(entry).catch(() => {});
                   setShowForm(false);
-                  toast(
-                    id + " " + (__t("power.workOrders.created") || "created"),
-                    { kind: "success" },
-                  );
+                  // Fix: "Create Work Order" was local-state-only; now saves
+                  // via the real workOrders.create wrapper, and only claims
+                  // "created" once that save resolves.
+                  screenData.workOrders
+                    .create(entry)
+                    .then(() =>
+                      toast(
+                        id +
+                          " " +
+                          (__t("power.workOrders.created") || "created"),
+                        { kind: "success" },
+                      ),
+                    )
+                    .catch(() => {});
                 }}
               >
                 {__t("power.workOrders.create") || "Create"}
@@ -705,18 +752,23 @@ function NCRScreen() {
     setNcrs([entry, ...ncrs]);
     // Fix: createNcr() only called setNcrs() (local React state) while
     // toasting success — never reached the server. Now saves via the real
-    // screenData.quality.ncr.create wrapper (it already toasts on failure).
-    screenData.quality.ncr.create(entry).catch(() => {});
+    // screenData.quality.ncr.create wrapper (it already toasts on failure),
+    // and the success toast waits for that save instead of firing regardless.
+    screenData.quality.ncr
+      .create(entry)
+      .then(() =>
+        toast(
+          id +
+            " " +
+            (__t("power.ncr.createdFor") || "created for") +
+            " " +
+            entry.pn,
+          { kind: "success" },
+        ),
+      )
+      .catch(() => {});
     setNewNcr({ pn: "", defect: "", severity: "Minor", action: "Rework" });
     setShowForm(false);
-    toast(
-      id +
-        " " +
-        (__t("power.ncr.createdFor") || "created for") +
-        " " +
-        entry.pn,
-      { kind: "success" },
-    );
     if (ctx?.setNotifications) {
       ctx.setNotifications([
         {
@@ -951,6 +1003,9 @@ function LandedCostModal({ open, onClose, part }) {
   const [origin, setOrigin] = React.useState(part?.origin || "TW");
   const [customFreight, setCustomFreight] = React.useState(part?.freight || 0);
   const [customTax, setCustomTax] = React.useState(part?.tax || 0);
+  const [saving, setSaving] = React.useState(false);
+  // Parts are keyed as partId in the parts screen and id straight off the API.
+  const partId = part?.partId ?? part?.id;
   const subtotal = unit * qty;
   const duty = route === "sea" ? subtotal * 0.075 : subtotal * 0.085;
   const freight =
@@ -987,17 +1042,43 @@ function LandedCostModal({ open, onClose, part }) {
           <Button variant="secondary" onClick={onClose}>
             {__t("common.close") || "Close"}
           </Button>
+          {/* Fix: "Apply to part" saved nothing — it closed the modal and
+              toasted "Landed cost saved" while the whole calculation was
+              discarded. Now PUTs landedCost/freight/tax onto the part via
+              api.parts.update and only claims success after that resolves;
+              with no part in context there is nothing to apply to, so the
+              button is disabled instead of pretending. */}
           <Button
             variant="primary"
-            onClick={() => {
-              onClose();
-              toast(
-                (__t("power.landedCost.saved") || "Landed cost saved") +
-                  ": " +
-                  INR(per_unit, 2) +
-                  "/unit",
-                { kind: "success" },
-              );
+            disabled={!partId}
+            loading={saving}
+            onClick={async () => {
+              setSaving(true);
+              try {
+                await api.parts.update(partId, {
+                  landedCost: per_unit,
+                  freight,
+                  tax: gst,
+                });
+                onClose();
+                toast(
+                  (__t("power.landedCost.saved") || "Landed cost saved") +
+                    ": " +
+                    INR(per_unit, 2) +
+                    "/unit",
+                  { kind: "success" },
+                );
+              } catch (e) {
+                toast(
+                  (__t("power.landedCost.saveFailed") ||
+                    "Couldn't save landed cost") +
+                    ": " +
+                    (e?.message || e),
+                  { kind: "error" },
+                );
+              } finally {
+                setSaving(false);
+              }
             }}
           >
             {__t("power.landedCost.applyToPart") || "Apply to part"}
@@ -1086,6 +1167,15 @@ function LandedCostModal({ open, onClose, part }) {
               </div>
             </div>
           )}
+          {!partId && (
+            <div
+              className="mt-12 bg-sunk border-line rounded-r2 font-mono fs-11 fg-3"
+              style={{ padding: 10 }}
+            >
+              {__t("power.landedCost.noPart") ||
+                "Calculator only \u2014 no part is open, so there is nothing to save to. Open this from a part to apply the result."}
+            </div>
+          )}
           <div className="field-row mt-12">
             <Field
               label={
@@ -1170,11 +1260,11 @@ function LandedCostModal({ open, onClose, part }) {
               "Markup over base unit cost"}
             :{" "}
             <strong>
-              {(
-                (per_unit / (unit * getInrRate()) - 1) *
-                100
-              ).toFixed(1)}
-              %
+              {/* Fix: was per_unit / (unit * getInrRate()) — per_unit is in
+                  USD (subtotal = unit * qty), so dividing by the INR-converted
+                  unit cost scaled the ratio by the exchange rate and printed a
+                  constant ~-98% markup. Both sides are USD. */}
+              {unit > 0 ? ((per_unit / unit - 1) * 100).toFixed(1) : "—"}%
             </strong>
           </div>
         </div>
@@ -1290,11 +1380,17 @@ MarginModal.propTypes = {
 };
 function ShareLinkModal({ open, onClose }) {
   if (!open) return null;
+  // Fix: this modal handed the user a fabricated URL —
+  // "https://bbox.dev/share/" + Math.random().toString(36).slice(2,12) — on a
+  // domain the product does not serve, recomputed on every render, and "Copy
+  // link" copied that dead string and toasted success. The permission /
+  // expiry / password controls fed nothing: there is no share or public-link
+  // route anywhere in the backend (checked against the live route list).
+  // Nothing here can be made real without a backend, so the link is gone and
+  // the controls are disabled with the reason stated in the notice below.
   const [permission, setPermission] = React.useState("view");
   const [expires, setExpires] = React.useState("7d");
   const [password, setPassword] = React.useState(false);
-  const link =
-    "https://bbox.dev/share/" + Math.random().toString(36).slice(2, 12);
   return (
     <Modal
       open={open}
@@ -1308,26 +1404,22 @@ function ShareLinkModal({ open, onClose }) {
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
-            {__t("common.cancel") || "Cancel"}
+            {__t("common.close") || "Close"}
           </Button>
-          <Button
-            variant="primary"
-            onClick={() => {
-              navigator.clipboard?.writeText(link);
-              onClose();
-              toast(
-                __t("power.shareLink.copied") ||
-                  "Share link copied to clipboard",
-                { kind: "success" },
-              );
-            }}
-          >
+          <Button variant="primary" disabled>
             <Icon.Link size={12} />{" "}
             {__t("power.shareLink.copyLink") || "Copy link"}
           </Button>
         </>
       }
     >
+      <div
+        className="bg-sunk border-line rounded-r2 font-mono fs-11 fg-3 mb-12"
+        style={{ padding: 10 }}
+      >
+        {__t("power.shareLink.noBackend") ||
+          "Public share links are not available in this build. There is no backend to issue a link or to enforce expiry and password protection, so no link can be created. The settings below are shown for reference only and are not saved."}
+      </div>
       <Field
         label={
           __t("power.shareLink.anyoneWithLink") || "Anyone with the link can"
@@ -1335,6 +1427,7 @@ function ShareLinkModal({ open, onClose }) {
       >
         <Select
           name="sharePermission"
+          disabled
           value={permission}
           onChange={(e) => setPermission(e.target.value)}
         >
@@ -1354,6 +1447,7 @@ function ShareLinkModal({ open, onClose }) {
         <Field label={__t("power.shareLink.linkExpires") || "Link expires"}>
           <Select
             name="shareExpires"
+            disabled
             value={expires}
             onChange={(e) => setExpires(e.target.value)}
           >
@@ -1374,6 +1468,7 @@ function ShareLinkModal({ open, onClose }) {
         <div className="field flex flex-col justify-center gap-6">
           <Checkbox
             name="sharePasswordEnabled"
+            disabled
             checked={password}
             onChange={(e) => setPassword(e.target.checked)}
             label={
@@ -1384,6 +1479,7 @@ function ShareLinkModal({ open, onClose }) {
             <Input
               name="sharePassword"
               mono
+              disabled
               className="mt-4"
               aria-label={
                 __t("power.shareLink.passwordPlaceholder") || "Password"
@@ -1395,19 +1491,6 @@ function ShareLinkModal({ open, onClose }) {
           )}
         </div>
       </div>
-      <div
-        className="bg-sunk border-line rounded-r2 font-mono fs-11 flex justify-between items-center"
-        style={{ padding: 10 }}
-      >
-        <span className="fg-accent">{link}</span>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => navigator.clipboard?.writeText(link)}
-        >
-          {__t("power.shareLink.copy") || "Copy"}
-        </Button>
-      </div>
     </Modal>
   );
 }
@@ -1417,29 +1500,46 @@ ShareLinkModal.propTypes = {
 };
 function WebhooksModal({ open, onClose }) {
   if (!open) return null;
-  const [hooks, setHooks] = React.useState([
-    {
-      id: 1,
-      event: "PO.created",
-      url: "https://hooks.slack.com/services/T../B../X..",
-      active: true,
-      last_fire: "2h ago",
-    },
-    {
-      id: 2,
-      event: "BOM.released",
-      url: "https://api.acme.com/erp/sync",
-      active: true,
-      last_fire: "yesterday",
-    },
-    {
-      id: 3,
-      event: "Vendor.risk_high",
-      url: "https://zapier.com/hooks/catch/...",
-      active: false,
-      last_fire: "\u2014",
-    },
-  ]);
+  // Fix: this list was seeded with three INVENTED subscriptions (a fake Slack
+  // hook, a fake ERP URL, a zapier one) with fake "last_fire" times, and every
+  // button was local-state-only: "New webhook" toasted "Webhook created"
+  // without saving, Delete only filtered React state, and Test toasted "Fired
+  // test event" without calling anything. A real backend exists, so all four
+  // are now wired to it (GET/POST/PUT/DELETE /webhooks, POST
+  // /webhooks/{id}/test) and every toast reports the awaited result.
+  // The subscription record has no "last fired" field, so that column now
+  // shows the real createdAt instead of an invented relative time.
+  const [hooks, setHooks] = React.useState([]);
+  const [busy, setBusy] = React.useState(false);
+  React.useEffect(() => {
+    api.webhooks
+      .list()
+      .then((data) => setHooks(Array.isArray(data) ? data : data?.items || []))
+      .catch((e) => {
+        setHooks([]);
+        toast(
+          (__t("power.webhooks.loadFailed") || "Couldn't load webhooks") +
+            ": " +
+            (e?.message || e),
+          { kind: "error" },
+        );
+      });
+  }, []);
+  const saveHook = async (h, patch) => {
+    try {
+      const updated = await api.webhooks.update(h.id, patch);
+      setHooks((prev) =>
+        prev.map((x) => (x.id === h.id ? { ...x, ...(updated || patch) } : x)),
+      );
+    } catch (e) {
+      toast(
+        (__t("power.webhooks.saveFailed") || "Couldn't save webhook") +
+          ": " +
+          (e?.message || e),
+        { kind: "error" },
+      );
+    }
+  };
   const events = [
     "PO.created",
     "PO.received",
@@ -1467,18 +1567,30 @@ function WebhooksModal({ open, onClose }) {
           </Button>
           <Button
             variant="primary"
-            onClick={() => {
-              setHooks([
-                {
-                  id: Date.now(),
-                  event: events[0],
+            loading={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                const created = await api.webhooks.create({
                   url: "",
+                  events: events[0],
                   active: true,
-                  last_fire: "\u2014",
-                },
-                ...hooks,
-              ]);
-              toast(__t("power.webhooks.created") || "Webhook created");
+                });
+                setHooks((prev) => [created, ...prev]);
+                toast(__t("power.webhooks.created") || "Webhook created", {
+                  kind: "success",
+                });
+              } catch (e) {
+                toast(
+                  (__t("power.webhooks.createFailed") ||
+                    "Couldn't create webhook") +
+                    ": " +
+                    (e?.message || e),
+                  { kind: "error" },
+                );
+              } finally {
+                setBusy(false);
+              }
             }}
           >
             <Icon.Plus size={12} />{" "}
@@ -1488,17 +1600,30 @@ function WebhooksModal({ open, onClose }) {
       }
     >
       <div className="flex flex-col gap-8">
+        {hooks.length === 0 && (
+          <EmptyState
+            title={__t("power.webhooks.none") || "No webhooks configured"}
+            message={
+              __t("power.webhooks.noneMsg") ||
+              "Use “New webhook” to subscribe an endpoint to events."
+            }
+          />
+        )}
         {hooks.map((h) => (
           <div
             key={h.id}
             className="border-line rounded-r2 d-grid gap-12 items-center"
             style={{ padding: 12, gridTemplateColumns: "180px 1fr 90px 60px" }}
           >
+            {/* Fix: these two controls were uncontrolled and consumed by
+                nothing — edits went nowhere. Now they persist on change/blur
+                via PUT /webhooks/{id}. */}
             <Select
               aria-label={__t("power.webhooks.event") || "Webhook event"}
               name="webhookEvent"
               className="h-28 fs-11"
-              defaultValue={h.event}
+              value={h.events || events[0]}
+              onChange={(e) => saveHook(h, { events: e.target.value })}
             >
               {events.map((e) => (
                 <option key={e}>{e}</option>
@@ -1511,8 +1636,14 @@ function WebhooksModal({ open, onClose }) {
               className="h-28 fs-11"
               defaultValue={h.url}
               placeholder="https://..."
+              onBlur={(e) => {
+                if (e.target.value !== h.url)
+                  saveHook(h, { url: e.target.value });
+              }}
             />
-            <span className="font-mono fs-10 fg-3">{h.last_fire}</span>
+            <span className="font-mono fs-10 fg-3">
+              {(h.createdAt || "—").slice(0, 10)}
+            </span>
             <div className="flex gap-4 justify-end">
               <Button
                 variant="ghost"
@@ -1520,14 +1651,33 @@ function WebhooksModal({ open, onClose }) {
                 iconOnly
                 title={__t("power.webhooks.test") || "Test"}
                 aria-label={__t("power.webhooks.test") || "Test"}
-                onClick={() =>
-                  toast(
-                    (__t("power.webhooks.firedTest") || "Fired test event") +
-                      " \u2192 " +
-                      h.event,
-                    { kind: "success" },
-                  )
-                }
+                onClick={async () => {
+                  try {
+                    const d = await api.webhooks.test(h.id, h.events);
+                    const ok = d?.status === "delivered";
+                    toast(
+                      (ok
+                        ? __t("power.webhooks.firedTest") || "Fired test event"
+                        : __t("power.webhooks.testFailed") ||
+                          "Test event not delivered") +
+                        " \u2192 " +
+                        (h.events || "") +
+                        (d?.statusCode ? " \u00b7 HTTP " + d.statusCode : "") +
+                        (!ok && d?.responseText
+                          ? " \u00b7 " + String(d.responseText).slice(0, 120)
+                          : ""),
+                      { kind: ok ? "success" : "error" },
+                    );
+                  } catch (e) {
+                    toast(
+                      (__t("power.webhooks.testFailed") ||
+                        "Test event not delivered") +
+                        ": " +
+                        (e?.message || e),
+                      { kind: "error" },
+                    );
+                  }
+                }}
               >
                 <Icon.Sparkles size={11} />
               </Button>
@@ -1536,7 +1686,20 @@ function WebhooksModal({ open, onClose }) {
                 size="sm"
                 iconOnly
                 aria-label={__t("common.delete") || "Delete"}
-                onClick={() => setHooks(hooks.filter((x) => x.id !== h.id))}
+                onClick={async () => {
+                  try {
+                    await api.webhooks.delete(h.id);
+                    setHooks((prev) => prev.filter((x) => x.id !== h.id));
+                  } catch (e) {
+                    toast(
+                      (__t("power.webhooks.deleteFailed") ||
+                        "Couldn't delete webhook") +
+                        ": " +
+                        (e?.message || e),
+                      { kind: "error" },
+                    );
+                  }
+                }}
               >
                 <Icon.Trash size={11} />
               </Button>
@@ -1792,44 +1955,22 @@ EmailParseModal.propTypes = {
   open: PropTypes.bool,
   onClose: PropTypes.func,
 };
+// Fix: this rendered two INVENTED teammates ("Marie Park" editing
+// EL-MCU-STM32H7, "Ryo Sato" editing PCB-R3) with live green online dots,
+// permanently, in the top bar \u2014 pure fabrication. There is a real presence
+// source (CollabProvider's websocket `users` list), so it now reads that and
+// renders nothing when nobody else is connected.
 function Presence() {
-  const team = [
-    { name: "Marie Park", init: "MP", color: "user-2", at: "EL-MCU-STM32H7" },
-    { name: "Ryo Sato", init: "RS", color: "user-3", at: "PCB-R3" },
-  ];
+  const { users } = useCollab();
+  if (!users || users.length === 0) return null;
   return (
     <div className="inline-flex items-center gap-4 mr-8">
-      {team.map((t) => (
-        <div
-          key={t.name}
-          title={
-            t.name +
-            " \u00B7 " +
-            (__t("power.presence.editing") || "editing") +
-            " " +
-            t.at
-          }
-          className="relative"
-        >
-          <span
-            className={("ava " + t.color + " w-22 h-22 fs-9").trim()}
-            style={{ border: "2px solid var(--bg-elev)" }}
-          >
-            {t.init}
-          </span>
-          <span
-            className="pos-absolute bg-ok"
-            style={{
-              bottom: -1,
-              right: -1,
-              width: 7,
-              height: 7,
-              borderRadius: 99,
-              border: "2px solid var(--bg-elev)",
-            }}
-          />
-        </div>
+      {users.slice(0, 5).map((uid) => (
+        <PresenceAvatar key={uid} userId={uid} size={22} />
       ))}
+      {users.length > 5 && (
+        <span className="font-mono fs-10 fg-3">+{users.length - 5}</span>
+      )}
     </div>
   );
 }

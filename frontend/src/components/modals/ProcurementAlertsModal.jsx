@@ -2,6 +2,7 @@ import PropTypes from "prop-types";
 
 import { __t } from "../../i18n";
 import { Icon, api } from "../../globals";
+import { navigateTo } from "../../services/navigation.js";
 import { Badge, Button, EmptyState, Modal, Spinner, toast } from "../ui";
 
 const LEVEL_META = {
@@ -61,19 +62,36 @@ function ProcurementAlertsModal({ open, onClose }) {
       }
       footer={
         <>
+          {/* Was: "Mark all reviewed" ran `onClose(); toast("All alerts marked
+              as reviewed", {kind:"success"})` — it acknowledged nothing and the
+              identical alerts came back on the next open. These alerts are
+              DERIVED live from PO status in
+              procurement_service.get_procurement_alerts (GET
+              /api/v1/procurement/alerts); there is no alert record and no
+              acknowledge endpoint anywhere in the backend, so there is nothing
+              to mark. Disabled + explained rather than faked. Re-enable and
+              wire it if an ack route is ever added. */}
+          <span
+            id="proc-alerts-note"
+            className="fg-3"
+            style={{ marginRight: "auto", fontSize: "var(--fs-100, 11px)" }}
+          >
+            {__t("procurementAlerts.derivedNote") ||
+              "Alerts are derived from live purchase-order status — each one clears when its PO advances, so they cannot be marked reviewed."}
+          </span>
           <Button variant="secondary" onClick={onClose}>
             {__t("common.close") || "Close"}
           </Button>
           <Button
             variant="primary"
-            onClick={() => {
-              onClose();
-              toast(
-                __t("procurementAlerts.allReviewed") ||
-                  "All alerts marked as reviewed",
-                { kind: "success" },
-              );
-            }}
+            disabled
+            // A disabled button is not focusable and most browsers suppress its
+            // title tooltip, so the visible footer note carries the reason.
+            aria-describedby="proc-alerts-note"
+            title={
+              __t("procurementAlerts.markAllUnavailable") ||
+              "Not available in this build — alerts cannot be acknowledged server-side."
+            }
           >
             {__t("procurementAlerts.markAllReviewed") || "Mark all reviewed"}
           </Button>
@@ -129,7 +147,13 @@ function ProcurementAlertsModal({ open, onClose }) {
                   variant="secondary"
                   size="sm"
                   className="proc-alerts__action"
-                  onClick={() => toast(a.action + " — opening…")}
+                  // Was: toast(a.action + " — opening…") — it claimed to open
+                  // something and opened nothing. Now really navigates to the
+                  // procurement screen, where the PO behind the alert lives.
+                  onClick={() => {
+                    onClose();
+                    navigateTo("procurement");
+                  }}
                 >
                   {a.action}
                 </Button>

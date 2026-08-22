@@ -1000,7 +1000,14 @@ export const webhooksAPI = {
   create: (data) => apiRequest('/webhooks', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => apiRequest(`/webhooks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id) => apiRequest(`/webhooks/${id}`, { method: 'DELETE' }),
-  test: (id) => apiRequest(`/webhooks/${id}/test`, { method: 'POST' }),
+  // POST /webhooks/{id}/test takes a WebhookTestRequest body (subscriptionId +
+  // event are required) — sending no body returned 422, so the wrapper never
+  // actually fired a test. Body added; signature is unchanged for callers.
+  test: (id, event = 'test.event') =>
+    apiRequest(`/webhooks/${id}/test`, {
+      method: 'POST',
+      body: JSON.stringify({ subscriptionId: id, event }),
+    }),
   deliveries: (params = {}) => {
     const q = new URLSearchParams(params).toString();
     return apiRequest(`/webhooks/deliveries${q ? '?' + q : ''}`);
