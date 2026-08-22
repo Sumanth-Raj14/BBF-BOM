@@ -91,14 +91,14 @@ async def test_import_bom_does_not_claim_success_for_unparsed_file(db_session, t
     to the endpoint: a file_url with no uploaded file is rejected outright
     rather than quietly producing an empty draft BOM. Same intent, new shape.
     """
-    from app.services import bom_service
-
     # 1. An unparsable payload must FAIL LOUDLY, not report success. The
     #    implementation rejects it with a 400 rather than returning a
     #    non-success dict, which satisfies the original intent more strongly:
     #    a caller cannot mistake it for a completed import at all.
     import pytest as _pytest
     from fastapi import HTTPException
+
+    from app.services import bom_service
 
     with _pytest.raises(HTTPException) as exc:
         await bom_service.import_bom(

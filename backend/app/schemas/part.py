@@ -24,6 +24,12 @@ class PartBase(BaseModel):
 
     # Cost and timing
     cost: Optional[float] = Field(default=0.0, json_schema_extra={"example": 18.40})
+    # ISO 4217 code that cost/freight/tax/landedCost are denominated in.
+    # NULL means USD (see currency_service.norm) so pre-multi-currency rows
+    # keep meaning exactly what they meant before the column existed.
+    currency: Optional[str] = Field(
+        default=None, min_length=3, max_length=3, json_schema_extra={"example": "EUR"}
+    )
     lead: Optional[int] = Field(default=0, json_schema_extra={"example": 42})
     origin: Optional[str] = Field(None, json_schema_extra={"example": "FR"})
 
@@ -83,6 +89,7 @@ class PartUpdate(BaseModel):
     vendor: Optional[str] = None
     manufacturer: Optional[str] = None
     cost: Optional[float] = None
+    currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
     lead: Optional[int] = None
     origin: Optional[str] = None
     status: Optional[str] = None

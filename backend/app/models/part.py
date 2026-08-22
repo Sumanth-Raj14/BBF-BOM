@@ -82,6 +82,11 @@ class Part(Base, TenantAwareMixin):
 
     # Cost and timing
     cost = Column(Numeric(18, 4), default=0.0)
+    # Currency `cost` (and freight/tax/landedCost) is denominated in. Defaults
+    # to USD so every pre-multi-currency row keeps meaning exactly what it
+    # meant before; a cost roll-up in another currency converts via
+    # app/services/currency_service.py and refuses to guess a missing rate.
+    currency = Column(String(3), server_default="USD")
     lead = Column(Integer, default=0)  # Lead time in days
     origin = Column(String)  # Country of origin
 

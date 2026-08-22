@@ -10,11 +10,15 @@ from typing import Any, Literal, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
+from app.core.object_perms import get_object_grants, require_bom_edit, require_bom_manage
 from app.core.rbac import require_engineering, require_viewer
 from app.db.session import get_db
+from app.models.resource_grant import ResourceGrant
+from app.models.team import Team
 from app.models.user import User
 from app.schemas.bom import BOMRead
 from app.services import bom_service, export_service
@@ -143,7 +147,13 @@ async def create_bom(
     current_user: User = Depends(require_engineering),
 ):
     bom = await bom_service.create_bom(
-        db, request.model_dump(exclude_unset=True), tenant_id=current_user.tenantId
+        db,
+        # created_by was never populated on this path, which left boms.created_by
+        # NULL for every API-created BOM. Object-level grants use it as the
+        # owner bypass (app/core/object_perms.py) — without it, the first grant
+        # a user adds locks them out of the BOM they just created.
+        {**request.model_dump(exclude_unset=True), "created_by": current_user.id},
+        tenant_id=current_user.tenantId,
     )
     return {
         "id": bom.id,
@@ -172,8 +182,19 @@ async def get_quantity_rollup(
 
 
 @router.get("/{bom_id}/cost-rollup")
-async def get_cost_rollup(bom_id: int, db: AsyncSession = Depends(get_db)):
-    return await bom_service.get_cost_rollup(db, bom_id)
+async def get_cost_rollup(
+    bom_id: int,
+    reporting_currency: Optional[str] = Query(
+        None,
+        min_length=3,
+        max_length=3,
+        description="ISO code to report every line in (e.g. EUR). Lines with no "
+        "usable exchange rate are excluded from the totals and listed in "
+        "currency_warnings rather than converted at 1:1.",
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    return await bom_service.get_cost_rollup(db, bom_id, reporting_currency)
 
 
 @router.get("/{bom_id}/mass-rollup")
@@ -241,7 +262,7 @@ async def list_bom_items(bom_id: int, db: AsyncSession = Depends(get_db)):
     return await bom_service.list_bom_items(db, bom_id)
 
 
-@router.post("/{bom_id}/items", status_code=201)
+@router.post("/{bom_id}/items", status_code=201, dependencies=[Depends(require_bom_edit)])
 async def create_bom_item(
     bom_id: int,
     request: BomItemCreateRequest,
@@ -253,7 +274,7 @@ async def create_bom_item(
     )
 
 
-@router.put("/{bom_id}/items/{item_id}")
+@router.put("/{bom_id}/items/{item_id}", dependencies=[Depends(require_bom_edit)])
 async def update_bom_item(
     bom_id: int,
     item_id: int,
@@ -266,7 +287,7 @@ async def update_bom_item(
     )
 
 
-@router.patch("/{bom_id}/items/{item_id}")
+@router.patch("/{bom_id}/items/{item_id}", dependencies=[Depends(require_bom_edit)])
 async def patch_bom_item(
     bom_id: int,
     item_id: int,
@@ -279,7 +300,9 @@ async def patch_bom_item(
     )
 
 
-@router.delete("/{bom_id}/items/{item_id}", status_code=204)
+@router.delete(
+    "/{bom_id}/items/{item_id}", status_code=204, dependencies=[Depends(require_bom_edit)]
+)
 async def delete_bom_item(
     bom_id: int,
     item_id: int,
@@ -290,7 +313,7 @@ async def delete_bom_item(
     return None
 
 
-@router.post("/{bom_id}/items/reorder")
+@router.post("/{bom_id}/items/reorder", dependencies=[Depends(require_bom_edit)])
 async def reorder_bom_items(
     bom_id: int,
     request: BomItemReorderRequest,
@@ -300,7 +323,7 @@ async def reorder_bom_items(
     return await bom_service.reorder_bom_items(db, bom_id, request.item_ids)
 
 
-@router.post("/{bom_id}/items/{item_id}/image")
+@router.post("/{bom_id}/items/{item_id}/image", dependencies=[Depends(require_bom_edit)])
 async def attach_bom_item_image(
     bom_id: int,
     item_id: int,
@@ -318,7 +341,7 @@ async def attach_bom_item_image(
     )
 
 
-@router.delete("/{bom_id}/items/{item_id}/image")
+@router.delete("/{bom_id}/items/{item_id}/image", dependencies=[Depends(require_bom_edit)])
 async def clear_bom_item_image(
     bom_id: int,
     item_id: int,
@@ -337,7 +360,7 @@ async def get_bom_item_custom_attributes(
     return await bom_service.get_bom_item_custom_attributes(db, bom_id, item_id)
 
 
-@router.put("/{bom_id}/items/{item_id}/custom-attributes")
+@router.put("/{bom_id}/items/{item_id}/custom-attributes", dependencies=[Depends(require_bom_edit)])
 async def set_bom_item_custom_attribute(
     bom_id: int,
     item_id: int,
@@ -365,7 +388,7 @@ async def get_where_used_tree(part_id: int, db: AsyncSession = Depends(get_db)):
     return await bom_service.get_where_used_tree(db, part_id)
 
 
-@router.post("/{bom_id}/snapshots")
+@router.post("/{bom_id}/snapshots", dependencies=[Depends(require_bom_edit)])
 async def create_snapshot(
     bom_id: int,
     request: BomSnapshotRequest,
@@ -395,7 +418,7 @@ async def compare_boms(
     return await bom_service.compare_boms(db, request.bom_id_1, request.bom_id_2)
 
 
-@router.post("/{bom_id}/baselines")
+@router.post("/{bom_id}/baselines", dependencies=[Depends(require_bom_edit)])
 async def create_baseline(
     bom_id: int,
     baseline_name: str,
@@ -484,6 +507,146 @@ async def apply_template(
     current_user: User = Depends(get_current_user),
 ):
     return await bom_service.apply_template(db, template_id, project_id)
+
+
+# ---------------------------------------------------------------------------
+# Object-level permission grants (migration 063). A BOM with no grants is
+# unrestricted — the role check alone governs, exactly as before this existed.
+# The first grant added to a BOM restricts it to its grantees (plus the BOM's
+# creator and superusers). Managing grants needs the engineering role AND
+# `manage` on the BOM itself.
+# ---------------------------------------------------------------------------
+
+
+class BomGrantRequest(BaseModel):
+    grantee_type: Literal["user", "team"]
+    grantee_id: int
+    level: Literal["view", "edit", "manage"]
+
+
+def _grant_out(g: ResourceGrant) -> dict:
+    return {
+        "id": g.id,
+        "resource_type": g.resourceType,
+        "resource_id": g.resourceId,
+        "grantee_type": g.granteeType,
+        "grantee_id": g.granteeId,
+        "level": g.level,
+        "created_by": g.createdById,
+    }
+
+
+@router.get("/{bom_id}/grants", dependencies=[Depends(require_engineering)])
+async def list_bom_grants(
+    bom_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_bom_manage),
+):
+    return [_grant_out(g) for g in await get_object_grants(db, "bom", bom_id)]
+
+
+@router.post("/{bom_id}/grants", status_code=201, dependencies=[Depends(require_engineering)])
+async def grant_bom_access(
+    bom_id: int,
+    request: BomGrantRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_bom_manage),
+):
+    # 404 on an unknown/other-tenant BOM instead of writing an orphan grant
+    # row: a grant on a nonexistent bom_id is unlistable and unrevokable
+    # (every /grants route needs `manage`, and `manage` needs either a grant
+    # or the BOM's creator — neither of which a phantom BOM can supply).
+    bom = await bom_service.get_bom_or_404(db, bom_id)
+
+    # Grantee must exist IN THIS TENANT — both selects are ORM and therefore
+    # tenant-filtered, so a cross-tenant id reads as "not found".
+    model = User if request.grantee_type == "user" else Team
+    exists = (
+        await db.execute(select(model.id).where(model.id == request.grantee_id))
+    ).scalar_one_or_none()
+    if exists is None:
+        raise HTTPException(
+            status_code=404, detail=f"No such {request.grantee_type}: {request.grantee_id}"
+        )
+
+    # The FIRST grant flips the BOM from open to restricted, so whoever adds
+    # it must keep a way back in. The creator bypass covers that only for BOMs
+    # created after `created_by` started being populated — every older BOM has
+    # created_by NULL, and there the first grant locked the grantor out of the
+    # BOM *and* of these /grants routes, permanently (superuser only to undo).
+    # Give the grantor `manage` alongside the first grant instead.
+    prior = await get_object_grants(db, "bom", bom_id)
+    grantee_is_self = request.grantee_type == "user" and request.grantee_id == current_user.id
+    if (
+        not prior
+        and not grantee_is_self
+        and not current_user.isSuperuser
+        and bom.created_by != current_user.id
+    ):
+        db.add(
+            ResourceGrant(
+                resourceType="bom",
+                resourceId=bom_id,
+                granteeType="user",
+                granteeId=current_user.id,
+                level="manage",
+                createdById=current_user.id,
+                tenantId=current_user.tenantId,
+            )
+        )
+
+    existing = (
+        await db.execute(
+            select(ResourceGrant).where(
+                ResourceGrant.resourceType == "bom",
+                ResourceGrant.resourceId == bom_id,
+                ResourceGrant.granteeType == request.grantee_type,
+                ResourceGrant.granteeId == request.grantee_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        existing.level = request.level  # re-granting changes the level
+        grant = existing
+    else:
+        grant = ResourceGrant(
+            resourceType="bom",
+            resourceId=bom_id,
+            granteeType=request.grantee_type,
+            granteeId=request.grantee_id,
+            level=request.level,
+            createdById=current_user.id,
+            tenantId=current_user.tenantId,
+        )
+        db.add(grant)
+    await db.commit()
+    await db.refresh(grant)
+    return _grant_out(grant)
+
+
+@router.delete(
+    "/{bom_id}/grants/{grant_id}", status_code=204, dependencies=[Depends(require_engineering)]
+)
+async def revoke_bom_access(
+    bom_id: int,
+    grant_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_bom_manage),
+):
+    grant = (
+        await db.execute(
+            select(ResourceGrant).where(
+                ResourceGrant.id == grant_id,
+                ResourceGrant.resourceType == "bom",
+                ResourceGrant.resourceId == bom_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if grant is None:
+        raise HTTPException(status_code=404, detail="Grant not found")
+    await db.delete(grant)
+    await db.commit()
+    return None
 
 
 # NOTE: deliberately declared LAST. "/{bom_id}" is a single-segment catch-all

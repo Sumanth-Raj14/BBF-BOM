@@ -49,6 +49,13 @@ api_router.include_router(
     prefix="/bom-items",
     tags=["bom-items"],
 )
+# Public read-only BOM share links. The /bom-shares/public/{token} route
+# inside this router is UNAUTHENTICATED by design — see the module docstring.
+api_router.include_router(
+    endpoints.bom_shares.router,
+    prefix="/bom-shares",
+    tags=["bom-shares"],
+)
 api_router.include_router(
     endpoints.ocr.router,
     prefix="/ocr",

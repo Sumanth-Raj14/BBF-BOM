@@ -31,7 +31,7 @@ def _json_safe_columns(obj, *, exclude: set[str] | None = None) -> dict:
 
     exclude = exclude or set()
     out: dict = {}
-    for name in obj.__table__.columns.keys():
+    for name in obj.__table__.columns.keys():  # noqa: SIM118 - ColumnCollection.keys() is the API; iterating it yields Column objects, not names
         if name in exclude:
             continue
         value = getattr(obj, name, None)

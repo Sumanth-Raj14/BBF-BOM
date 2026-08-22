@@ -44,14 +44,14 @@ async def _items_by_pn(db_session, bom_id, parts):
 
 
 THREE_LEVEL_CSV = (
-    "Level,Part Number,Qty,UOM,Reference Designator\n"
-    "1,ASSY-100,1,EA,\n"
-    "1.1,SUB-200,2,EA,A1\n"
-    "1.1.1,SCREW-300,4,EA,\n"
-    "1.1.2,NUT-310,4,EA,\n"
-    "1.2,SUB-210,1,EA,A2\n"
-    "2,ASSY-400,3,EA,\n"
-).encode()
+    b"Level,Part Number,Qty,UOM,Reference Designator\n"
+    b"1,ASSY-100,1,EA,\n"
+    b"1.1,SUB-200,2,EA,A1\n"
+    b"1.1.1,SCREW-300,4,EA,\n"
+    b"1.1.2,NUT-310,4,EA,\n"
+    b"1.2,SUB-210,1,EA,A2\n"
+    b"2,ASSY-400,3,EA,\n"
+)
 
 
 @pytest.mark.asyncio
@@ -105,11 +105,11 @@ async def test_unknown_part_number_is_a_row_error(db_session, test_tenant):
     tid = test_tenant.id
     parts = await _make_parts(db_session, tid, ["ASSY-100", "SUB-200"])
     csv = (
-        "Level,Part Number,Qty\n"
-        "1,ASSY-100,1\n"
-        "1.1,NOPE-999,2\n"
-        "1.1.1,SUB-200,3\n"  # child of the failed row -> cannot be placed either
-    ).encode()
+        b"Level,Part Number,Qty\n"
+        b"1,ASSY-100,1\n"
+        b"1.1,NOPE-999,2\n"
+        b"1.1.1,SUB-200,3\n"  # child of the failed row -> cannot be placed either
+    )
 
     result = await bom_service.import_bom(
         db_session, filename="bom.csv", content=csv, tenant_id=tid

@@ -15,6 +15,7 @@ from app.models.bom import BOM
 from app.models.bom import BOMItem as BOMItemMaster
 from app.models.bom_closure import BomClosure
 from app.models.bom_item import BomItem
+from app.models.bom_share import BomShareLink
 from app.models.bom_snapshot import BomBaseline, BomSnapshot
 from app.models.bom_template import BomTemplate
 from app.models.bom_variant import BomVariant, BomVariantItem
@@ -94,6 +95,7 @@ from app.models.price_history import PriceHistory
 from app.models.project import Project
 from app.models.quality import CapaAction, InspectionPlan, InspectionRecord, NcrReport
 from app.models.requirement import Requirement, RequirementBomLink, RequirementPartLink
+from app.models.resource_grant import ResourceGrant
 from app.models.resource_scheduling import CapacityReport, ResourceSchedule, WorkCenter
 from app.models.revision import Revision, RevisionBomSnapshotItem
 from app.models.role import Role
