@@ -80,11 +80,44 @@ async def test_apply_template_writes_bom_closure_self_rows(db_session, test_tena
 
 @pytest.mark.asyncio
 async def test_import_bom_does_not_claim_success_for_unparsed_file(db_session, test_tenant):
-    result = await bom_service.import_bom(
-        db_session, file_url="https://example.com/fake.csv", project_id=None, format="csv"
+    """The original finding still holds, at the new seam.
+
+    This used to call bom_service.import_bom(file_url=...) and assert it did
+    not report "success" — because nothing was ever fetched or parsed, so a
+    success status was indistinguishable from a real import.
+
+    import_bom now takes (filename, content) and does real work, and the
+    server-side fetch was never implemented, so the equivalent guarantee moved
+    to the endpoint: a file_url with no uploaded file is rejected outright
+    rather than quietly producing an empty draft BOM. Same intent, new shape.
+    """
+    from app.services import bom_service
+
+    # 1. An unparsable payload must FAIL LOUDLY, not report success. The
+    #    implementation rejects it with a 400 rather than returning a
+    #    non-success dict, which satisfies the original intent more strongly:
+    #    a caller cannot mistake it for a completed import at all.
+    import pytest as _pytest
+    from fastapi import HTTPException
+
+    with _pytest.raises(HTTPException) as exc:
+        await bom_service.import_bom(
+            db_session,
+            filename="fake.csv",
+            content=b"PK-not-a-real-spreadsheet-body",
+            tenant_id=test_tenant.id,
+        )
+    assert exc.value.status_code == 400
+
+    # 2. A row whose part number does not exist is reported, never invented.
+    result2 = await bom_service.import_bom(
+        db_session,
+        filename="unknown.csv",
+        content=(
+            b"Level,Part Number,Qty\n"
+            b"1,NOPE-DOES-NOT-EXIST,1\n"
+        ),
+        tenant_id=test_tenant.id,
     )
-    # bom-integrity finding 2: no file was ever fetched/parsed, so this must
-    # NOT report "success" — that would be indistinguishable from a real
-    # import to any caller that only checks import_status.
-    assert result["import_status"] != "success"
-    assert result["items_imported"] == 0
+    assert result2["items_imported"] == 0
+    assert result2.get("errors"), "an unmatched part number must be reported as a row error"

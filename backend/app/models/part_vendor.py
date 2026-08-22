@@ -29,6 +29,11 @@ class PartVendor(Base, TenantAwareMixin):
     isPreferred = Column(Boolean, default=False)  # Preferred vendor for this part
     isAlternate = Column(Boolean, default=False)  # Alternate/backup vendor
 
+    # AVL ranking. 1 = first choice after the preferred source, 2 = next, etc.
+    # Nullable on purpose: rows predating this column (and vendors a buyer has
+    # not bothered to rank) sort last rather than all colliding at rank 0.
+    avlRank = Column(Integer)
+
     # Part-specific vendor data
     vendorPn = Column(String)  # Vendor's part number (may differ from our PN)
     vendorCost = Column(Numeric(18, 4))  # Vendor-specific price

@@ -2,19 +2,126 @@ import PropTypes from "prop-types";
 import { navigateTo } from "../../services/navigation.js";
 
 import { __t } from "../../i18n";
-import { BOM_DATA, Icon, useAppStore } from "../../globals";
+import { Icon } from "../../globals";
+import { api } from "../../../api.js";
 import { Modal, Input } from "../ui";
+
 // ============ GLOBAL SEARCH (⌘K) ============
+// Server-backed: GET /api/v1/search/ (PostgreSQL full-text, tenant-scoped,
+// nine entity types). It used to filter BOM_DATA in memory, which could only
+// ever find rows already loaded in the current BOM view.
+
+const MIN_LEN = 2;
+const DEBOUNCE_MS = 250;
+
+// entity_type from the backend -> route + how to label/ico the group.
+// Routes verified against App.jsx / NavRail.jsx.
+const ENTITIES = {
+  parts: { route: "parts", label: "Parts", Ico: Icon.Parts },
+  boms: { route: "bom", label: "BOMs", Ico: Icon.Bom },
+  vendors: { route: "vendors", label: "Vendors", Ico: Icon.Vendor },
+  pos: { route: "procurement", label: "Purchase orders", Ico: Icon.Cart },
+  inventory: { route: "inventory", label: "Inventory", Ico: Icon.Package },
+  eco: { route: "ecr", label: "ECOs", Ico: Icon.Diff },
+  work_orders: { route: "work-orders", label: "Work orders", Ico: Icon.Settings },
+  ncr: { route: "ncr", label: "NCRs", Ico: Icon.Alert },
+  documents: { route: "docs", label: "Documents", Ico: Icon.Doc },
+};
+const GROUP_ORDER = Object.keys(ENTITIES);
+
+// Responses may be {results:[…]}, {items:[…]}, {data:[…]} or a bare array.
+function asRows(res) {
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res?.results)) return res.results;
+  if (Array.isArray(res?.items)) return res.items;
+  if (Array.isArray(res?.data)) return res.data;
+  return [];
+}
+
+// Local navigation shortcuts. These are commands, not data — no server needed.
+function quickActions(ql) {
+  const out = [];
+  const add = (words, item) => {
+    if (words.includes(ql)) out.push({ ...item, kind: "action" });
+  };
+  add("new po new purchase order order procurement", {
+    action: "new-po",
+    title: __t("modals.globalSearch.createNewPo") || "Create new PO",
+    subtitle: __t("modals.globalSearch.quickAction") || "Quick action",
+    icon: <Icon.Plus size={13} />,
+  });
+  add("compare diff revision", {
+    route: "diff",
+    title: __t("modals.globalSearch.compareRevisions") || "Compare revisions",
+    subtitle: __t("modals.globalSearch.openDiffView") || "Open diff view",
+    icon: <Icon.Diff size={13} />,
+  });
+  add("analytics dashboard kpi", {
+    route: "analytics",
+    title:
+      __t("modals.globalSearch.analyticsDashboard") || "Analytics dashboard",
+    subtitle: __t("modals.globalSearch.openAnalytics") || "Open analytics",
+    icon: <Icon.Chart size={13} />,
+  });
+  add("approve approval ecr eco change", {
+    route: "approvals",
+    title: __t("modals.globalSearch.pendingApprovals") || "Pending approvals",
+    subtitle: __t("modals.globalSearch.reviewEcr") || "Review ECRs and ECOs",
+    icon: <Icon.Check size={13} />,
+  });
+  add("compliance rohs reach conflict", {
+    route: "compliance",
+    title:
+      __t("modals.globalSearch.complianceDashboard") || "Compliance dashboard",
+    subtitle:
+      __t("modals.globalSearch.checkCompliance") ||
+      "RoHS / REACH / Conflict minerals",
+    icon: <Icon.Shield size={13} />,
+  });
+  add("work order wo manufacturing", {
+    route: "work-orders",
+    title: __t("modals.globalSearch.workOrders") || "Work orders",
+    subtitle:
+      __t("modals.globalSearch.manageWo") || "Manage manufacturing work orders",
+    icon: <Icon.Settings size={13} />,
+  });
+  add("ncr nonconformance quality", {
+    route: "ncr",
+    title: __t("modals.globalSearch.ncrReports") || "NCR reports",
+    subtitle:
+      __t("modals.globalSearch.qualityIssues") ||
+      "Quality non-conformance reports",
+    icon: <Icon.Alert size={13} />,
+  });
+  add("calendar schedule milestone", {
+    route: "calendar",
+    title: __t("modals.globalSearch.calendar") || "Project calendar",
+    subtitle:
+      __t("modals.globalSearch.viewSchedule") || "View milestones and schedule",
+    icon: <Icon.Calendar size={13} />,
+  });
+  return out;
+}
+
 export default function GlobalSearchModal({ open, onClose }) {
-  const ctx = useAppStore();
   const [q, setQ] = React.useState("");
   const [idx, setIdx] = React.useState(0);
+  const [hits, setHits] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
   const inputRef = React.useRef(null);
+  // Monotonic request id: every keystroke bumps it, so a slow earlier response
+  // can never overwrite a newer one (out-of-order results are a real bug in
+  // debounced search, not a nicety).
+  const reqRef = React.useRef(0);
 
   React.useEffect(() => {
     if (!open) return undefined;
     setQ("");
     setIdx(0);
+    setHits(null);
+    setError(null);
+    setLoading(false);
     // Modal's own initial-focus effect runs first and lands on its close
     // button (first focusable in the header); defer so the search field
     // wins focus once the dialog has finished mounting.
@@ -22,224 +129,83 @@ export default function GlobalSearchModal({ open, onClose }) {
     return () => clearTimeout(t);
   }, [open]);
 
-  const data = BOM_DATA;
-  const results = React.useMemo(() => {
-    if (!q.trim()) return null;
-    const ql = q.toLowerCase();
-    const out = [];
-    const seen = new Set();
-    const push = (item) => {
-      const key = item.kind + ":" + (item.route || "") + ":" + item.title;
-      if (seen.has(key)) return;
-      seen.add(key);
-      out.push(item);
-    };
-    const walk = (rs) =>
-      rs.forEach((r) => {
-        if (
-          (r.pn + " " + r.name).toLowerCase().includes(ql) ||
-          (r.barcode && r.barcode.includes(ql))
-        ) {
-          push({
-            kind: "part",
-            route: "bom",
-            title: r.name,
-            subtitle:
-              r.pn + " · " + r.category + (r.barcode ? " · " + r.barcode : ""),
-            icon: <Icon.Parts size={13} />,
-          });
-        }
-        if (r.children) walk(r.children);
-      });
-    walk(ctx?.rows || data.rows);
-    // Vendors
-    (ctx?.vendors || data.vendors).forEach((v) => {
-      if (v.name.toLowerCase().includes(ql)) {
-        push({
-          kind: "vendor",
-          route: "vendors",
-          title: v.name,
-          subtitle: v.country + " · ★ " + v.rating,
-          icon: <Icon.Vendor size={13} />,
-        });
-      }
-    });
-    // Documents
-    (data.docs || []).forEach((d) => {
-      if (d.name.toLowerCase().includes(ql)) {
-        push({
-          kind: "doc",
-          route: "docs",
-          title: d.name,
-          subtitle: d.tag + " · " + d.size,
-          icon: <Icon.Doc size={13} />,
-        });
-      }
-    });
-    // Projects / BOMs
-    const proj = ctx?.project || data.project;
-    if (proj) {
-      const pStr =
-        (proj.name || "") +
-        " " +
-        (proj.version || "") +
-        " " +
-        (proj.rev || "") +
-        " " +
-        (proj.description || "");
-      if (pStr.toLowerCase().includes(ql)) {
-        push({
-          kind: "bom",
-          route: "bom",
-          title: proj.name || "BOM",
-          subtitle:
-            (proj.version || "") +
-            " · " +
-            (proj.rev || "") +
-            " · " +
-            (proj.owner || ""),
-          icon: <Icon.Bom size={13} />,
-        });
-      }
+  // Debounced server search.
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const term = q.trim();
+    const id = ++reqRef.current;
+    if (term.length < MIN_LEN) {
+      setHits(null);
+      setError(null);
+      setLoading(false);
+      return undefined;
     }
-    // POs — search procurement data
-    const proc = data.procurement;
-    if (proc && typeof proc === "object") {
-      Object.entries(proc).forEach(([status, items]) => {
-        (items || []).forEach((po) => {
-          const poStr =
-            (po.poNumber || "") +
-            " " +
-            (po.pn || "") +
-            " " +
-            (po.vendor || "") +
-            " " +
-            (po.name || "");
-          if (poStr.toLowerCase().includes(ql)) {
-            push({
-              kind: "po",
-              route: "procurement",
-              title: po.poNumber || po.pn,
-              subtitle:
-                (po.vendor || "") +
-                " · " +
-                (po.qty || 0) +
-                " units · " +
-                (po.eta || "—"),
-              icon: <Icon.Cart size={13} />,
-            });
-          }
+    setLoading(true);
+    const t = setTimeout(() => {
+      api.search
+        .query(term, { limit: 40 })
+        .then((res) => {
+          if (id !== reqRef.current) return;
+          setHits(asRows(res));
+          setError(null);
+          setLoading(false);
+        })
+        .catch((e) => {
+          if (id !== reqRef.current) return;
+          setHits(null);
+          setError(e?.message || "Search failed");
+          setLoading(false);
         });
+    }, DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [q, open]);
+
+  // Group server hits by entity type, then append local quick actions.
+  // `flat` is the render order, so the keyboard index maps 1:1 to what is seen.
+  const { groups, flat } = React.useMemo(() => {
+    const term = q.trim();
+    if (term.length < MIN_LEN) return { groups: [], flat: [] };
+
+    const byType = new Map();
+    (hits || []).forEach((h) => {
+      const type = h.entity_type || "parts";
+      if (!byType.has(type)) byType.set(type, []);
+      byType.get(type).push(h);
+    });
+
+    const gs = [];
+    const known = GROUP_ORDER.filter((t) => byType.has(t));
+    const unknown = [...byType.keys()].filter((t) => !ENTITIES[t]);
+    [...known, ...unknown].forEach((type) => {
+      const meta = ENTITIES[type];
+      const Ico = meta?.Ico || Icon.Search;
+      gs.push({
+        key: type,
+        label: meta?.label || type,
+        items: byType.get(type).map((h) => ({
+          kind: type,
+          route: meta?.route,
+          title: h.title || String(h.entity_id ?? ""),
+          subtitle: h.subtitle || "",
+          icon: <Ico size={13} />,
+        })),
+      });
+    });
+
+    const actions = quickActions(term.toLowerCase());
+    if (actions.length) {
+      gs.push({
+        key: "action",
+        label: __t("modals.globalSearch.actions") || "Actions",
+        items: actions,
       });
     }
-    // Inventory — search from ctx.rows flat parts with stock info
-    const flatParts = (ctx?.rows || data.rows || [])
-      .flatMap((s) => s.children || [])
-      .flatMap((c) => c.children || []);
-    flatParts.forEach((p) => {
-      if (
-        p.stock !== undefined &&
-        p.stock !== null &&
-        (p.pn + " " + p.name).toLowerCase().includes(ql)
-      ) {
-        push({
-          kind: "inventory",
-          route: "inventory",
-          title: p.name,
-          subtitle:
-            p.pn +
-            " · stock: " +
-            (p.stock || 0) +
-            " · loc: " +
-            (p.location || "—"),
-          icon: <Icon.Package size={13} />,
-        });
-      }
-    });
-    // Quick actions (expanded)
-    if ("new po new purchase order order procurement".includes(ql))
-      push({
-        kind: "action",
-        action: "new-po",
-        title: __t("modals.globalSearch.createNewPo") || "Create new PO",
-        subtitle: __t("modals.globalSearch.quickAction") || "Quick action",
-        icon: <Icon.Plus size={13} />,
-      });
-    if ("compare diff revision".includes(ql))
-      push({
-        kind: "action",
-        route: "diff",
-        title:
-          __t("modals.globalSearch.compareRevisions") || "Compare revisions",
-        subtitle: __t("modals.globalSearch.openDiffView") || "Open diff view",
-        icon: <Icon.Diff size={13} />,
-      });
-    if ("analytics dashboard kpi".includes(ql))
-      push({
-        kind: "action",
-        route: "analytics",
-        title:
-          __t("modals.globalSearch.analyticsDashboard") ||
-          "Analytics dashboard",
-        subtitle: __t("modals.globalSearch.openAnalytics") || "Open analytics",
-        icon: <Icon.Chart size={13} />,
-      });
-    if ("approve approval ecr eco change".includes(ql))
-      push({
-        kind: "action",
-        route: "approvals",
-        title:
-          __t("modals.globalSearch.pendingApprovals") || "Pending approvals",
-        subtitle:
-          __t("modals.globalSearch.reviewEcr") || "Review ECRs and ECOs",
-        icon: <Icon.Check size={13} />,
-      });
-    if ("compliance rohs reach conflict".includes(ql))
-      push({
-        kind: "action",
-        route: "compliance",
-        title:
-          __t("modals.globalSearch.complianceDashboard") ||
-          "Compliance dashboard",
-        subtitle:
-          __t("modals.globalSearch.checkCompliance") ||
-          "RoHS / REACH / Conflict minerals",
-        icon: <Icon.Shield size={13} />,
-      });
-    if ("work order wo manufacturing".includes(ql))
-      push({
-        kind: "action",
-        route: "work-orders",
-        title: __t("modals.globalSearch.workOrders") || "Work orders",
-        subtitle:
-          __t("modals.globalSearch.manageWo") ||
-          "Manage manufacturing work orders",
-        icon: <Icon.Settings size={13} />,
-      });
-    if ("ncr nonconformance quality".includes(ql))
-      push({
-        kind: "action",
-        route: "ncr",
-        title: __t("modals.globalSearch.ncrReports") || "NCR reports",
-        subtitle:
-          __t("modals.globalSearch.qualityIssues") ||
-          "Quality non-conformance reports",
-        icon: <Icon.Alert size={13} />,
-      });
-    if ("calendar schedule milestone".includes(ql))
-      push({
-        kind: "action",
-        route: "calendar",
-        title: __t("modals.globalSearch.calendar") || "Project calendar",
-        subtitle:
-          __t("modals.globalSearch.viewSchedule") ||
-          "View milestones and schedule",
-        icon: <Icon.Calendar size={13} />,
-      });
-    return out.slice(0, 16);
-  }, [q]);
+
+    return { groups: gs, flat: gs.flatMap((g) => g.items) };
+  }, [hits, q]);
 
   const choose = (r) => {
+    if (!r) return;
     onClose();
     if (r.action === "new-po") {
       navigateTo("procurement");
@@ -258,41 +224,37 @@ export default function GlobalSearchModal({ open, onClose }) {
   React.useEffect(() => {
     if (!open) return undefined;
     const onKey = (e) => {
-      if (!results?.length) return;
+      if (!flat.length) return;
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setIdx((i) => Math.min(results.length - 1, i + 1));
+        setIdx((i) => Math.min(flat.length - 1, i + 1));
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         setIdx((i) => Math.max(0, i - 1));
       } else if (e.key === "Enter") {
         e.preventDefault();
-        choose(results[idx]);
+        choose(flat[idx]);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, results, idx]);
+  }, [open, flat, idx]);
 
   if (!open) return null;
 
+  const term = q.trim();
   const listboxId = "global-search-listbox";
-  const activeOptionId =
-    results && results.length ? `global-search-opt-${idx}` : undefined;
+  const activeOptionId = flat.length ? `global-search-opt-${idx}` : undefined;
 
   const quickAccess = [
     {
-      title:
-        __t("modals.globalSearch.openBomEditor") || "Open BOM Editor",
-      sub:
-        __t("modals.globalSearch.atlasMainframe") ||
-        "ATLAS / Mainframe Rev C",
+      title: __t("modals.globalSearch.openBomEditor") || "Open BOM Editor",
+      sub: __t("modals.globalSearch.atlasMainframe") || "ATLAS / Mainframe Rev C",
       route: "bom",
       icon: <Icon.Bom size={13} />,
     },
     {
-      title:
-        __t("modals.globalSearch.componentLibrary") || "Component Library",
+      title: __t("modals.globalSearch.componentLibrary") || "Component Library",
       sub: __t("modals.globalSearch.browseParts") || "Browse all parts",
       route: "parts",
       icon: <Icon.Parts size={13} />,
@@ -312,6 +274,9 @@ export default function GlobalSearchModal({ open, onClose }) {
       icon: <Icon.Chart size={13} />,
     },
   ];
+
+  // Running index across groups, so highlight + aria ids line up with `flat`.
+  let cursor = -1;
 
   return (
     <Modal
@@ -345,9 +310,8 @@ export default function GlobalSearchModal({ open, onClose }) {
             {__t("modals.globalSearch.open") || "open"}
           </span>
           <span style={{ marginLeft: "auto" }}>
-            {results?.length || 0}{" "}
-            {__t("modals.globalSearch.result") || "result"}
-            {results?.length === 1 ? "" : "s"}
+            {flat.length} {__t("modals.globalSearch.result") || "result"}
+            {flat.length === 1 ? "" : "s"}
           </span>
         </div>
       }
@@ -363,7 +327,7 @@ export default function GlobalSearchModal({ open, onClose }) {
           name="globalSearch"
           type="text"
           role="combobox"
-          aria-expanded={!!q.trim()}
+          aria-expanded={term.length >= MIN_LEN}
           aria-controls={listboxId}
           aria-autocomplete="list"
           aria-activedescendant={activeOptionId}
@@ -390,6 +354,11 @@ export default function GlobalSearchModal({ open, onClose }) {
             height: 22,
           }}
         />
+        {loading ? (
+          <span className="font-mono fs-10 fg-3" role="status">
+            {__t("common.searching") || "Searching…"}
+          </span>
+        ) : null}
         <span className="kbd font-mono fs-10" aria-hidden="true">
           ESC
         </span>
@@ -399,7 +368,21 @@ export default function GlobalSearchModal({ open, onClose }) {
         className="oy-auto"
         style={{ maxHeight: 420, margin: "0 -16px", padding: "0 16px" }}
       >
-        {results === null ? (
+        {error ? (
+          <div className="text-center" role="alert" style={{ padding: 40 }}>
+            <div
+              className="font-mono fs-24 mb-6"
+              style={{ color: "var(--danger, #d33)" }}
+              aria-hidden="true"
+            >
+              !
+            </div>
+            <div className="fs-12">
+              {__t("modals.globalSearch.failed") || "Search failed"}
+            </div>
+            <div className="font-mono fs-10 fg-3 mt-6">{error}</div>
+          </div>
+        ) : term.length < MIN_LEN ? (
           <div className="fg-3">
             <div className="font-mono fs-10 uppercase letter-sp-6 mb-10">
               {__t("modals.globalSearch.quickAccess") || "QUICK ACCESS"}
@@ -428,7 +411,17 @@ export default function GlobalSearchModal({ open, onClose }) {
               </button>
             ))}
           </div>
-        ) : results.length === 0 ? (
+        ) : loading && hits === null ? (
+          <div
+            className="text-center fg-3"
+            role="status"
+            style={{ padding: 40 }}
+          >
+            <div className="fs-12">
+              {__t("common.searching") || "Searching…"}
+            </div>
+          </div>
+        ) : flat.length === 0 ? (
           <div
             className="text-center fg-3"
             role="status"
@@ -445,48 +438,60 @@ export default function GlobalSearchModal({ open, onClose }) {
           <div
             id={listboxId}
             role="listbox"
-            aria-label={
-              __t("modals.globalSearch.results") || "Search results"
-            }
+            aria-label={__t("modals.globalSearch.results") || "Search results"}
           >
-            {results.map((r, i) => (
-              <div
-                key={r.kind + ":" + r.title + ":" + i}
-                id={`global-search-opt-${i}`}
-                role="option"
-                aria-selected={i === idx}
-                tabIndex={-1}
-                className="popover-item"
-                style={{
-                  padding: "10px 14px",
-                  background: i === idx ? "var(--bg-sunk)" : undefined,
-                }}
-                onMouseEnter={() => setIdx(i)}
-                onClick={() => choose(r)}
-              >
-                <span className="ic" aria-hidden="true">
-                  {r.icon}
-                </span>
-                <div className="flex-1 text-left min-w-0">
-                  <div
-                    className="ws-nowrap overflow-h"
-                    style={{ textOverflow: "ellipsis" }}
-                  >
-                    {r.title}
-                  </div>
-                  <div
-                    className="font-mono fs-10 fg-3 ws-nowrap overflow-h"
-                    style={{ textOverflow: "ellipsis" }}
-                  >
-                    {r.subtitle}
-                  </div>
-                </div>
-                <span
-                  className="font-mono fs-9 fg-4 uppercase letter-sp-6"
-                  aria-hidden="true"
+            {groups.map((g) => (
+              <div key={g.key} role="group" aria-label={g.label}>
+                <div
+                  className="font-mono fs-10 uppercase letter-sp-6 fg-3"
+                  style={{ padding: "10px 14px 4px" }}
                 >
-                  {r.kind}
-                </span>
+                  {g.label} ({g.items.length})
+                </div>
+                {g.items.map((r) => {
+                  cursor += 1;
+                  const i = cursor;
+                  return (
+                    <div
+                      key={g.key + ":" + i}
+                      id={`global-search-opt-${i}`}
+                      role="option"
+                      aria-selected={i === idx}
+                      tabIndex={-1}
+                      className="popover-item"
+                      style={{
+                        padding: "10px 14px",
+                        background: i === idx ? "var(--bg-sunk)" : undefined,
+                      }}
+                      onMouseEnter={() => setIdx(i)}
+                      onClick={() => choose(r)}
+                    >
+                      <span className="ic" aria-hidden="true">
+                        {r.icon}
+                      </span>
+                      <div className="flex-1 text-left min-w-0">
+                        <div
+                          className="ws-nowrap overflow-h"
+                          style={{ textOverflow: "ellipsis" }}
+                        >
+                          {r.title}
+                        </div>
+                        <div
+                          className="font-mono fs-10 fg-3 ws-nowrap overflow-h"
+                          style={{ textOverflow: "ellipsis" }}
+                        >
+                          {r.subtitle}
+                        </div>
+                      </div>
+                      <span
+                        className="font-mono fs-9 fg-4 uppercase letter-sp-6"
+                        aria-hidden="true"
+                      >
+                        {r.kind}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>

@@ -63,6 +63,7 @@ export const SECTIONS = [
   {
     label: __t("navGroup.supplyChain") || "Supply Chain",
     items: [
+      { id: "planning", label: "Planning & PO Generation", icon: <Icon.Cart size={size} /> },
       { id: "order-tracking", label: "Order Tracking", icon: <Icon.Send size={size} /> },
       { id: "supplier-portal", label: "Supplier Portal", icon: <Icon.Export size={size} /> },
       { id: "contracts", label: "Contracts", icon: <Icon.Doc size={size} /> },
@@ -107,6 +108,7 @@ export const SECTIONS = [
       { id: "compliance-autonumber", label: "Compliance & Numbering", icon: <Icon.Flag size={size} /> },
       { id: "custom-attributes", label: "Custom Attributes", icon: <Icon.Sliders size={size} /> },
       { id: "api-keys", label: "API Keys", icon: <Icon.Key size={size} /> },
+      { id: "admin-ops", label: "Backups & Sessions", icon: <Icon.Shield size={size} /> },
     ],
   },
   {

@@ -15,7 +15,9 @@ import {
   Select,
   Button,
   EmptyState,
+  Textarea,
 } from "../components/ui";
+import { api } from "../../api.js";
 
 // Enterprise Screens — Service BOM, Routing, Work Centers, Labor, Currency,
 // Compliance, Custom Attrs, API Keys, Dashboards.
@@ -1210,6 +1212,71 @@ function ComplianceAutoNumberScreen() {
   const [certs, setCerts] = React.useState([]);
   const [schemes, setSchemes] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+  // Creating a numbering scheme. The backend has had POST
+  // /enterprise/auto-number-schemes (and .../generate) all along; this screen
+  // only ever GET-ed the list, so a scheme could not be created from the
+  // product at all.
+  const [newScheme, setNewScheme] = React.useState({
+    entity_type: "",
+    prefix: "",
+    separator: "-",
+    padding: 4,
+    suffix: "",
+  });
+  const [creatingScheme, setCreatingScheme] = React.useState(false);
+  const [schemeError, setSchemeError] = React.useState(null);
+
+  // Mirrors the server's own format_example calculation so the preview cannot
+  // disagree with what gets stored.
+  const schemePreview =
+    (newScheme.prefix || "") +
+    (newScheme.separator || "") +
+    "0".repeat(Math.max(0, Number(newScheme.padding) || 0)) +
+    "1" +
+    (newScheme.suffix || "");
+
+  const createScheme = async () => {
+    if (!newScheme.entity_type.trim() || !newScheme.prefix.trim()) {
+      setSchemeError(
+        __t("enterprise.numbering.required") ||
+          "Entity type and prefix are required",
+      );
+      return;
+    }
+    setCreatingScheme(true);
+    setSchemeError(null);
+    try {
+      await apiRequest("/enterprise/auto-number-schemes", {
+        method: "POST",
+        body: JSON.stringify({
+          entity_type: newScheme.entity_type.trim(),
+          prefix: newScheme.prefix.trim(),
+          separator: newScheme.separator,
+          padding: Number(newScheme.padding) || 0,
+          suffix: newScheme.suffix || null,
+        }),
+      });
+      const fresh = await apiRequest("/enterprise/auto-number-schemes").catch(
+        () => null,
+      );
+      if (Array.isArray(fresh)) setSchemes(fresh);
+      setNewScheme({
+        entity_type: "",
+        prefix: "",
+        separator: "-",
+        padding: 4,
+        suffix: "",
+      });
+      toast(__t("enterprise.numbering.created") || "Numbering scheme created", {
+        kind: "success",
+      });
+    } catch (e) {
+      setSchemeError(e?.message || String(e));
+    } finally {
+      setCreatingScheme(false);
+    }
+  };
+
   React.useEffect(() => {
     setLoading(true);
     Promise.all([
@@ -1322,7 +1389,85 @@ function ComplianceAutoNumberScreen() {
               ]}
             />
           )
-        ) : schemes.length === 0 ? (
+        ) : (
+          <>
+            <div className="numbering-new">
+              <div className="numbering-new__row">
+                <input
+                  className="input sm"
+                  placeholder={
+                    __t("enterprise.numbering.entityType") || "Entity type (e.g. part)"
+                  }
+                  value={newScheme.entity_type}
+                  disabled={creatingScheme}
+                  onChange={(e) =>
+                    setNewScheme((n) => ({ ...n, entity_type: e.target.value }))
+                  }
+                />
+                <input
+                  className="input sm"
+                  placeholder={__t("enterprise.numbering.prefix") || "Prefix"}
+                  value={newScheme.prefix}
+                  disabled={creatingScheme}
+                  onChange={(e) =>
+                    setNewScheme((n) => ({ ...n, prefix: e.target.value }))
+                  }
+                />
+                <input
+                  className="input sm"
+                  style={{ width: 70 }}
+                  placeholder={__t("enterprise.numbering.sep") || "Sep"}
+                  value={newScheme.separator}
+                  disabled={creatingScheme}
+                  onChange={(e) =>
+                    setNewScheme((n) => ({ ...n, separator: e.target.value }))
+                  }
+                />
+                <input
+                  className="input sm"
+                  type="number"
+                  min="0"
+                  max="12"
+                  style={{ width: 90 }}
+                  placeholder={__t("enterprise.numbering.padding") || "Padding"}
+                  value={newScheme.padding}
+                  disabled={creatingScheme}
+                  onChange={(e) =>
+                    setNewScheme((n) => ({ ...n, padding: e.target.value }))
+                  }
+                />
+                <input
+                  className="input sm"
+                  style={{ width: 110 }}
+                  placeholder={__t("enterprise.numbering.suffix") || "Suffix"}
+                  value={newScheme.suffix}
+                  disabled={creatingScheme}
+                  onChange={(e) =>
+                    setNewScheme((n) => ({ ...n, suffix: e.target.value }))
+                  }
+                />
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={creatingScheme}
+                  onClick={createScheme}
+                >
+                  {creatingScheme
+                    ? __t("common.saving") || "Saving..."
+                    : __t("enterprise.numbering.add") || "Add scheme"}
+                </button>
+              </div>
+              <div className="numbering-new__preview">
+                {__t("enterprise.numbering.preview") || "Preview"}:{" "}
+                <span className="font-mono">{schemePreview}</span>
+              </div>
+              {schemeError && (
+                <div className="numbering-new__err" role="alert">
+                  {schemeError}
+                </div>
+              )}
+            </div>
+            {schemes.length === 0 ? (
           <EmptyState
             icon="🔢"
             title={
@@ -1372,8 +1517,310 @@ function ComplianceAutoNumberScreen() {
               },
             ]}
           />
+            )}
+          </>
         )}
       </TabPanel>
+    </div>
+  );
+}
+
+// --- Calculated / formula custom attributes -------------------------------
+// Backed by POST /formulas/evaluate (stateless preview) and
+// POST /formulas/{id}/compute (stored is_computed definition). The server-side
+// evaluator (app/services/formula_service.py) parses with ast.parse and walks a
+// strict whitelist -- there is no eval() -- so only the constructs listed in
+// the hint below can ever produce a value; everything else comes back as a 400
+// with a real message, which is what we surface verbatim.
+const FORMULA_OPERATORS = "+  -  *  /  %  //  **  and unary -x / +x";
+const FORMULA_PART_VARS = [
+  "qty",
+  "cost",
+  "weight",
+  "freight",
+  "tax",
+  "landedCost",
+  "lead",
+  "unit_cost (alias of cost)",
+  "landed_cost (alias of landedCost)",
+];
+
+function pickList(res) {
+  if (Array.isArray(res)) return res;
+  if (res && Array.isArray(res.items)) return res.items;
+  if (res && Array.isArray(res.data)) return res.data;
+  return [];
+}
+
+// `formula` is controlled by the parent so the create form owns the value.
+// `definitionId` (optional) enables the second button: compute the SAVED
+// formula for the chosen part entirely server-side via /formulas/{id}/compute.
+function FormulaPreview({ formula, entityType, definitionId }) {
+  const [parts, setParts] = React.useState(null); // null = not loaded yet
+  const [partsError, setPartsError] = React.useState("");
+  const [partId, setPartId] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [result, setResult] = React.useState(null);
+  const [error, setError] = React.useState("");
+
+  const partScoped = entityType === "part";
+
+  React.useEffect(() => {
+    if (!partScoped) return undefined;
+    let alive = true;
+    api.parts
+      .list({ per_page: 200 })
+      .then((res) => {
+        if (!alive) return;
+        setParts(pickList(res));
+        setPartsError("");
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setParts([]);
+        setPartsError(e && e.message ? e.message : String(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [partScoped]);
+
+  const selectedPart = React.useMemo(
+    () => (parts || []).find((p) => String(p.id) === String(partId)) || null,
+    [parts, partId],
+  );
+  const context = React.useMemo(
+    () => api.formulas.partContext(selectedPart),
+    [selectedPart],
+  );
+
+  const run = async (useStored) => {
+    setBusy(true);
+    setResult(null);
+    setError("");
+    try {
+      const res = useStored
+        ? await api.formulas.compute(definitionId, {
+            entity_type: entityType || "part",
+            entity_id: selectedPart ? selectedPart.id : null,
+          })
+        : await api.formulas.evaluate(formula, context);
+      setResult(res);
+    } catch (e) {
+      setError(e && e.message ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const canPreview = !!(formula && formula.trim());
+
+  return (
+    <div className="formula-preview">
+      <div className="formula-hint">
+        <strong>
+          {__t("enterprise.customAttributes.formula.syntaxTitle") ||
+            "Allowed syntax"}
+        </strong>
+        <div className="formula-hint-row">
+          <span className="formula-hint-label">
+            {__t("enterprise.customAttributes.formula.operators") ||
+              "Operators"}
+          </span>
+          <code>{FORMULA_OPERATORS}</code>
+        </div>
+        <div className="formula-hint-row">
+          <span className="formula-hint-label">
+            {__t("enterprise.customAttributes.formula.variables") ||
+              "Variables (part)"}
+          </span>
+          <code>{FORMULA_PART_VARS.join(", ")}</code>
+        </div>
+        <p className="formula-hint-note">
+          {__t("enterprise.customAttributes.formula.note") ||
+            "Numbers and the variables above only. Function calls, comparisons, text and attribute access are rejected by the server."}
+        </p>
+        <code className="formula-hint-example">qty * unit_cost + freight</code>
+      </div>
+
+      {!partScoped ? (
+        <p className="formula-note">
+          {__t("enterprise.customAttributes.formula.partOnly") ||
+            "Previewing against a record is available for part attributes only."}
+        </p>
+      ) : (
+        <React.Fragment>
+          <Field
+            label={
+              __t("enterprise.customAttributes.formula.previewAgainst") ||
+              "Preview against part"
+            }
+          >
+            {partsError ? (
+              <p className="formula-error">{partsError}</p>
+            ) : parts === null ? (
+              <p className="formula-note">
+                {__t("common.loading") || "Loading..."}
+              </p>
+            ) : parts.length === 0 ? (
+              <p className="formula-note">
+                {__t("enterprise.customAttributes.formula.noParts") ||
+                  "No parts available to preview against."}
+              </p>
+            ) : (
+              <Select
+                value={partId}
+                onChange={(e) => {
+                  setPartId(e.target.value);
+                  setResult(null);
+                  setError("");
+                }}
+              >
+                <option value="">
+                  {__t("enterprise.customAttributes.formula.choosePart") ||
+                    "Choose a part..."}
+                </option>
+                {parts.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.pn ? `${p.pn} \u2014 ${p.name || ""}` : p.name || `#${p.id}`}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+
+          {selectedPart && (
+            <p className="formula-context">
+              <span className="formula-hint-label">
+                {__t("enterprise.customAttributes.formula.contextLabel") ||
+                  "Values passed in"}
+              </span>
+              {Object.keys(context).length === 0 ? (
+                <em>
+                  {__t("enterprise.customAttributes.formula.contextEmpty") ||
+                    "this part has no numeric values"}
+                </em>
+              ) : (
+                <code>
+                  {Object.entries(context)
+                    .map(([k, v]) => `${k}=${v}`)
+                    .join("  ")}
+                </code>
+              )}
+            </p>
+          )}
+
+          <div className="formula-actions">
+            <Button
+              variant="secondary"
+              disabled={busy || !canPreview || !selectedPart}
+              onClick={() => run(false)}
+            >
+              {busy
+                ? __t("common.loading") || "Loading..."
+                : __t("enterprise.customAttributes.formula.preview") ||
+                  "Preview"}
+            </Button>
+            {definitionId != null && (
+              <Button
+                variant="secondary"
+                disabled={busy || !selectedPart}
+                onClick={() => run(true)}
+              >
+                {__t("enterprise.customAttributes.formula.computeStored") ||
+                  "Compute saved formula"}
+              </Button>
+            )}
+          </div>
+        </React.Fragment>
+      )}
+
+      {error && (
+        <p className="formula-error" role="alert">
+          {error}
+        </p>
+      )}
+      {result && !error && (
+        <p className="formula-result">
+          <span className="formula-hint-label">
+            {__t("enterprise.customAttributes.formula.result") || "Result"}
+          </span>
+          <code>{String(result.value)}</code>
+          {result.formula ? <em>{result.formula}</em> : null}
+        </p>
+      )}
+
+      <style>{`
+        .formula-preview {
+          display: flex;
+          flex-direction: column;
+          gap: var(--sp-2);
+          margin-top: var(--sp-2);
+        }
+        .formula-preview code {
+          word-break: break-word;
+        }
+        .formula-hint {
+          border: 1px solid var(--border-subtle);
+          border-radius: var(--radius-sm);
+          background: var(--bg-subtle);
+          padding: var(--sp-2);
+          font-size: var(--fs-100);
+          color: var(--text-secondary);
+          display: flex;
+          flex-direction: column;
+          gap: var(--sp-1);
+        }
+        .formula-hint-row {
+          display: flex;
+          gap: var(--sp-1);
+          flex-wrap: wrap;
+        }
+        .formula-hint-label {
+          color: var(--text-muted);
+          min-width: 9em;
+        }
+        .formula-hint-note,
+        .formula-hint-example {
+          margin: 0;
+          color: var(--text-muted);
+        }
+        .formula-note,
+        .formula-context {
+          margin: 0;
+          font-size: var(--fs-100);
+          color: var(--text-muted);
+          display: flex;
+          gap: var(--sp-1);
+          flex-wrap: wrap;
+        }
+        .formula-actions {
+          display: flex;
+          gap: var(--sp-2);
+          flex-wrap: wrap;
+        }
+        .formula-error {
+          margin: 0;
+          font-size: var(--fs-100);
+          color: var(--status-danger-text);
+          word-break: break-word;
+        }
+        .formula-result {
+          margin: 0;
+          display: flex;
+          gap: var(--sp-1);
+          align-items: baseline;
+          flex-wrap: wrap;
+          font-size: var(--fs-100);
+        }
+        .formula-result code {
+          font-size: var(--fs-300);
+          color: var(--text-primary);
+        }
+        .formula-result em {
+          color: var(--text-muted);
+        }
+      `}</style>
     </div>
   );
 }
@@ -1382,17 +1829,21 @@ function CustomAttributesScreen() {
   const [attrs, setAttrs] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [showCreate, setShowCreate] = React.useState(false);
+  // testAttr = a saved calculated attribute the user is exercising via
+  // POST /formulas/{id}/compute.
+  const [testAttr, setTestAttr] = React.useState(null);
   const [form, setForm] = React.useState({
     name: "",
     entity_type: "part",
     data_type: "string",
     description: "",
+    formula: "",
   });
   const load = () => {
     setLoading(true);
     apiRequest("/enterprise/custom-attributes")
       .then((d) => {
-        setAttrs(d);
+        setAttrs(pickList(d));
         setLoading(false);
       })
       .catch(() => {
@@ -1404,9 +1855,16 @@ function CustomAttributesScreen() {
   React.useEffect(load, []);
   const create = async () => {
     try {
+      // ponytail: POST /enterprise/custom-attributes (CustomAttrCreate) does
+      // not yet accept formula/is_computed, so a formula typed here previews
+      // correctly but is dropped on save. Sent anyway so it persists the moment
+      // the two columns are added to that schema + INSERT.
       await apiRequest("/enterprise/custom-attributes", {
         method: "POST",
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          is_computed: !!(form.formula && form.formula.trim()),
+        }),
       });
       toast(
         __t("enterprise.customAttributes.created") ||
@@ -1419,6 +1877,7 @@ function CustomAttributesScreen() {
         entity_type: "part",
         data_type: "string",
         description: "",
+        formula: "",
       });
       load();
     } catch (e) {
@@ -1546,6 +2005,57 @@ function CustomAttributesScreen() {
             }
           />
         </Field>
+        <Field
+          label={
+            __t("enterprise.customAttributes.create.formula") ||
+            "Formula (leave blank for a plain attribute)"
+          }
+        >
+          <Textarea
+            rows={2}
+            placeholder="qty * unit_cost + freight"
+            value={form.formula}
+            onChange={(e) => setForm({ ...form, formula: e.target.value })}
+          />
+        </Field>
+        <FormulaPreview
+          formula={form.formula}
+          entityType={form.entity_type}
+        />
+      </Modal>
+      <Modal
+        open={!!testAttr}
+        onClose={() => setTestAttr(null)}
+        title={
+          `${__t("enterprise.customAttributes.formula.testTitle") || "Test formula"}${
+            testAttr
+              ? ` \u2014 ${testAttr.name || testAttr.display_name || ""}`
+              : ""
+          }`
+        }
+        footer={
+          <Button variant="secondary" onClick={() => setTestAttr(null)}>
+            {__t("common.close") || "Close"}
+          </Button>
+        }
+      >
+        {testAttr && (
+          <React.Fragment>
+            <Field
+              label={
+                __t("enterprise.customAttributes.table.formula") || "Formula"
+              }
+            >
+              <Input readOnly mono value={testAttr.formula || ""} />
+            </Field>
+            <FormulaPreview
+              key={testAttr.id}
+              formula={testAttr.formula || ""}
+              entityType={testAttr.entity_type}
+              definitionId={testAttr.id}
+            />
+          </React.Fragment>
+        )}
       </Modal>
       {loading ? (
         <SkeletonTable />
@@ -1597,9 +2107,56 @@ function CustomAttributesScreen() {
                 "Description",
               render: (a) => a.description || "-",
             },
+            {
+              key: "formula",
+              header:
+                __t("enterprise.customAttributes.table.formula") || "Formula",
+              render: (a) =>
+                a.formula ? (
+                  <span className="attr-formula">
+                    <Badge tone="success">
+                      {__t("enterprise.customAttributes.calculated") ||
+                        "Calculated"}
+                    </Badge>
+                    <code>{a.formula}</code>
+                  </span>
+                ) : (
+                  <span className="attr-plain">
+                    {__t("enterprise.customAttributes.plain") || "Plain"}
+                  </span>
+                ),
+            },
+            {
+              key: "actions",
+              header: __t("common.actions") || "Actions",
+              render: (a) =>
+                a.formula ? (
+                  <Button variant="secondary" onClick={() => setTestAttr(a)}>
+                    {__t("enterprise.customAttributes.formula.test") || "Test"}
+                  </Button>
+                ) : (
+                  "-"
+                ),
+            },
           ]}
         />
       )}
+      <style>{`
+        .attr-formula {
+          display: inline-flex;
+          gap: var(--sp-1);
+          align-items: center;
+          flex-wrap: wrap;
+        }
+        .attr-formula code {
+          font-size: var(--fs-100);
+          color: var(--text-secondary);
+          word-break: break-word;
+        }
+        .attr-plain {
+          color: var(--text-muted);
+        }
+      `}</style>
     </div>
   );
 }

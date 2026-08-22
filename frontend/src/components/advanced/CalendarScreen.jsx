@@ -2,7 +2,7 @@ import { storage } from "../../utils/storage.js";
 
 import { toast } from "../../utils/toast";
 import { Icon, poOrdersAPI, orderTrackingAPI } from "../../globals";
-import { ecoAPI } from "../../../api.js";
+import { api, ecoAPI } from "../../../api.js";
 import {
   Button,
   Card,
@@ -44,9 +44,14 @@ function CalendarScreen() {
   // Real data pulled from the backend (PO deliveries + ECO dates) — never
   // fabricated, rebuilt fresh on every load().
   const [apiEvents, setApiEvents] = React.useState([]);
-  // Manually-added events have no dedicated calendar backend endpoint, so
-  // they remain local to this browser (persisted via localStorage), same as
-  // before. Merged with apiEvents for display.
+  // Manually-added events DO have a backend: full CRUD at
+  // /api/v1/calendar/calendar-events (api.calendarEvents). The old comment here
+  // claimed otherwise and that belief is why these lived only in localStorage —
+  // invisible to colleagues and lost when the browser profile changed.
+  //
+  // localStorage is kept strictly as an offline cache: it seeds the first paint
+  // and holds events created while the server is unreachable, and the server is
+  // authoritative the moment it answers.
   const [manualEvents, setManualEvents] = React.useState(() => {
     try {
       const saved = storage.calendarEvents.get();
@@ -56,6 +61,38 @@ function CalendarScreen() {
     }
     return [];
   });
+  const [manualOffline, setManualOffline] = React.useState(false);
+
+  // Server row -> the flat shape this screen renders.
+  const fromApi = (e) => ({
+    id: e.id,
+    date: (e.start_time || e.startTime || "").slice(0, 10),
+    type: e.event_type || e.eventType || "milestone",
+    label: e.title || "",
+    value: null,
+    persisted: true,
+  });
+
+  const loadManual = React.useCallback(async () => {
+    if (!api?.calendarEvents?.list) return;
+    try {
+      const res = await api.calendarEvents.list({ per_page: 200 });
+      const rows = res?.items || res?.data || (Array.isArray(res) ? res : []);
+      const mapped = rows.map(fromApi);
+      setManualEvents(mapped);
+      setManualOffline(false);
+      // Refresh the offline cache from the authoritative copy.
+      try {
+        storage.calendarEvents.set(mapped);
+      } catch {
+        /* cache is best-effort */
+      }
+    } catch {
+      // Keep whatever the cache seeded and SAY it is local-only, rather than
+      // presenting stale browser state as the workspace's calendar.
+      setManualOffline(true);
+    }
+  }, []);
   const [newEvent, setNewEvent] = React.useState({
     date: "",
     type: "milestone",
@@ -143,7 +180,8 @@ function CalendarScreen() {
 
   React.useEffect(() => {
     load();
-  }, [load]);
+    loadManual();
+  }, [load, loadManual]);
 
   const events = React.useMemo(
     () => [...apiEvents, ...manualEvents],
@@ -159,7 +197,7 @@ function CalendarScreen() {
     return d;
   });
 
-  const addEvent = () => {
+  const addEvent = async () => {
     if (!newEvent.date || !newEvent.label) {
       toast("Date and description required", { kind: "warn" });
       return;
@@ -170,12 +208,41 @@ function CalendarScreen() {
       label: newEvent.label,
       value: newEvent.value ? Number(newEvent.value) : null,
     };
+
+    // Persist to the server so the event exists for everyone, not just this
+    // browser. The numeric `value` has no column on CalendarEvent, so it rides
+    // in description rather than being silently dropped.
+    if (api?.calendarEvents?.create) {
+      try {
+        await api.calendarEvents.create({
+          title: entry.label,
+          event_type: entry.type,
+          start_time: new Date(entry.date + "T00:00:00").toISOString(),
+          all_day: true,
+          description:
+            entry.value != null ? "Value: " + entry.value : undefined,
+        });
+        await loadManual();
+        setNewEvent({ date: "", type: "milestone", label: "", value: "" });
+        setShowForm(false);
+        toast("Event added", { kind: "success" });
+        return;
+      } catch (err) {
+        // Fall through to the local path, but do NOT claim it was saved.
+        toast(
+          "Saved on this device only — the server rejected it: " +
+            (err?.message || "unknown error"),
+          { kind: "warn" },
+        );
+      }
+    }
+
     const next = [...manualEvents, entry];
     setManualEvents(next);
+    setManualOffline(true);
     storage.calendarEvents.set(next);
     setNewEvent({ date: "", type: "milestone", label: "", value: "" });
     setShowForm(false);
-    toast("Event added", { kind: "success" });
   };
 
   return (
@@ -185,7 +252,11 @@ function CalendarScreen() {
         description={
           loading
             ? "Loading PO deliveries and ECO dates…"
-            : `${events.length} upcoming events · Next 8 weeks${loadError ? " · " + loadError : ""}`
+            : `${events.length} upcoming events · Next 8 weeks${loadError ? " · " + loadError : ""}${
+                manualOffline
+                  ? " · Your added events are on this device only (server unreachable)"
+                  : ""
+              }`
         }
         actions={
           <div className="flex gap-8 items-center">

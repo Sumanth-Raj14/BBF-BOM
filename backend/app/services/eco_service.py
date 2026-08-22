@@ -2,11 +2,13 @@
 
 import logging
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect as sa_inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.cache import cache_get, cache_set
 from app.core.idempotency import check_idempotency
@@ -14,8 +16,10 @@ from app.core.rbac import ECO_APPROVER_ROLES, user_has_any_role
 from app.core.tenant_context import get_tenant_id
 from app.integrations.events import emit_integration_event
 from app.models.audit_log import AuditLog
+from app.models.bom import BOMItem
 from app.models.eco import EcoApproval, EcoHeader, EcoItem, EcoItemAttributeChange, EcoNotification
 from app.models.notification_queue import NotificationQueue
+from app.models.part import Part
 from app.models.role import Role
 from app.models.user import User
 from app.services import webhook_service
@@ -221,7 +225,16 @@ async def get_eco_detail(db: AsyncSession, eco_id: int) -> dict:
     eco = result.scalar_one_or_none()
     if not eco:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ECO not found")
-    items_stmt = select(EcoItem).where(EcoItem.eco_id == eco_id)
+    # Eager-load attribute_changes: the response builds it in a comprehension
+    # (`for c in i.attribute_changes`), and a lazy load there raises
+    # MissingGreenlet under async SQLAlchemy. It only appeared once something
+    # expired the identity map — e.g. a GET right after a rolled-back
+    # implement — which is exactly when this endpoint is most needed.
+    items_stmt = (
+        select(EcoItem)
+        .where(EcoItem.eco_id == eco_id)
+        .options(selectinload(EcoItem.attribute_changes))
+    )
     if tid is not None:
         items_stmt = items_stmt.where(EcoItem.tenantId == tid)
     items = await db.execute(items_stmt)
@@ -300,6 +313,186 @@ async def get_eco_detail(db: AsyncSession, eco_id: int) -> dict:
     return result
 
 
+# --------------------------------------------------------------------------
+# Applying an ECO: turning the paperwork into the actual change.
+# --------------------------------------------------------------------------
+
+# Columns an eco_item may NEVER rewrite on its target. EcoItemAttributeChange.
+# field_name is user-supplied (add_eco_item derives it from the caller's
+# old_value JSON keys), so this is a trust boundary: without the tenantId
+# entry an approved ECO could relocate a Part into another tenant, and the
+# ORM tenant filter cannot undo that after the fact. Structural columns are
+# blocked too — retargeting a row's id/bom_id is a different row, not a change
+# to this one. Everything else that is a real mapped column on the target is
+# business data an engineering change is entitled to alter.
+_ECO_PROTECTED_FIELDS = frozenset(
+    {"id", "tenantId", "bom_id", "eco_id", "created_at", "createdAt", "updated_at", "updatedAt"}
+)
+
+
+def _tenant_scoped(stmt, model, tid: Optional[int]):
+    """Mirror the explicit tenant predicate the rest of this module applies.
+
+    tenant_events already auto-filters select(), but every other lookup here
+    states it outright; a belt-and-braces predicate on the rows an ECO is
+    about to *mutate* is the cheapest place to keep that habit.
+    """
+    return stmt if tid is None else stmt.where(model.tenantId == tid)
+
+
+def _apply_field(target, field_name: str, raw: Optional[str]) -> None:
+    """Set one recorded attribute change onto a Part / BOMItem.
+
+    EcoItemAttributeChange stores values as Text, so the string has to be
+    coerced back to the column's Python type — writing "5" into a Numeric
+    quantity would otherwise land a string in the DB (SQLite accepts it) and
+    blow up later arithmetic. Anything unrecognised raises: the caller turns
+    that into a full rollback, which is the whole point of this being strict.
+    """
+    column = sa_inspect(type(target)).columns.get(field_name)
+    if column is None or field_name in _ECO_PROTECTED_FIELDS:
+        raise ValueError(
+            f"'{field_name}' is not a field an ECO can change on {type(target).__name__}"
+        )
+    if raw is None:
+        setattr(target, field_name, None)
+        return
+    try:
+        py_type = column.type.python_type
+    except NotImplementedError:  # JSON and friends have no single Python type
+        raise ValueError(f"Field '{field_name}' has a type an ECO cannot set from text")
+    if py_type is bool:
+        value = str(raw).strip().lower() in ("true", "1", "yes", "y")
+    elif py_type in (int, float, Decimal):
+        value = py_type(raw)  # ValueError/InvalidOperation on junk -> rollback
+    elif py_type is str:
+        value = raw
+    else:
+        raise ValueError(f"Field '{field_name}' has a type an ECO cannot set from text")
+    setattr(target, field_name, value)
+
+
+def _apply_changes(target, changes: list[EcoItemAttributeChange], required: bool = True) -> dict:
+    if required and not changes:
+        raise ValueError("no attribute changes recorded — there is nothing to apply")
+    applied = {}
+    for change in changes:
+        _apply_field(target, change.field_name, change.new_value)
+        applied[change.field_name] = change.new_value
+    return applied
+
+
+async def _apply_eco_items(db: AsyncSession, eco: EcoHeader, tid: Optional[int], now) -> list[dict]:
+    """Apply every eco_item's change_type to its real target, for real.
+
+    Runs INSIDE perform_eco_action's transaction and BEFORE its commit, so a
+    failure on item N leaves items 1..N-1 *and* the status flip uncommitted —
+    a half-applied ECO is impossible. Returns a per-item summary for the audit
+    log. Raises ValueError on anything it cannot apply.
+
+    Which row an item targets: bom_id set -> that BOM's line for this part;
+    bom_id null -> the part master itself.
+    """
+    items = (
+        await db.execute(
+            _tenant_scoped(select(EcoItem).where(EcoItem.eco_id == eco.id), EcoItem, tid).order_by(
+                EcoItem.id
+            )
+        )
+    ).scalars().all()
+
+    applied: list[dict] = []
+    for item in items:
+        # Second line of defence behind the status guard in perform_eco_action:
+        # an item already marked implemented is never applied twice.
+        if item.status == "implemented":
+            continue
+        # Explicit query, not item.attribute_changes: the relationship is lazy
+        # and would raise MissingGreenlet on the async session.
+        changes = (
+            await db.execute(
+                select(EcoItemAttributeChange).where(
+                    EcoItemAttributeChange.eco_item_id == item.id
+                )
+            )
+        ).scalars().all()
+        ct = item.change_type
+
+        if item.bom_id is None:
+            part = (
+                await db.execute(_tenant_scoped(select(Part).where(Part.id == item.part_id), Part, tid))
+            ).scalar_one_or_none()
+            if part is None:
+                raise ValueError(f"eco_item {item.id}: part {item.part_id} not found")
+            if ct == "delete":
+                # An ECO never hard-deletes a part master. BOM lines, POs and
+                # inventory all FK to parts with ondelete=CASCADE, so a DELETE
+                # here would silently take live records with it. Obsoleting is
+                # what "remove this part" means under change control.
+                detail = {"status": "Obsolete"}
+                part.status = "Obsolete"
+            else:
+                # add / modify / replace on the part master are all "write the
+                # recorded new values". `add` is allowed to have none: the part
+                # row already exists (eco_items.part_id is a NOT NULL FK), so an
+                # add with nothing recorded is legitimately a no-op.
+                detail = _apply_changes(part, changes, required=ct != "add")
+            target_desc = {"part_id": part.id}
+        else:
+            line = (
+                await db.execute(
+                    _tenant_scoped(
+                        select(BOMItem).where(
+                            BOMItem.bom_id == item.bom_id, BOMItem.part_id == item.part_id
+                        ),
+                        BOMItem,
+                        tid,
+                    )
+                )
+            ).scalars().first()
+            if ct == "add":
+                if line is not None:
+                    raise ValueError(
+                        f"eco_item {item.id}: BOM {item.bom_id} already contains part "
+                        f"{item.part_id} — cannot add it again"
+                    )
+                # tenantId passed EXPLICITLY: ambient context alone has produced
+                # NOT NULL tenantId failures on the HTTP path before.
+                line = BOMItem(
+                    bom_id=item.bom_id,
+                    part_id=item.part_id,
+                    quantity=item.affected_quantity or 1,
+                    tenantId=item.tenantId or tid,
+                )
+                db.add(line)
+                detail = {"created": True, **_apply_changes(line, changes, required=False)}
+            elif line is None:
+                raise ValueError(
+                    f"eco_item {item.id}: BOM {item.bom_id} has no line for part {item.part_id}"
+                )
+            elif ct == "delete":
+                # ORM delete (not a Core bulk delete) so the tenant flush guard
+                # still sees it.
+                await db.delete(line)
+                detail = {"deleted": True}
+            else:
+                # modify / replace. A "replace" records part_id among its
+                # attribute changes — swapping the line's part IS the replace,
+                # so it needs no separate branch. A bad new part_id trips the FK
+                # on flush below and rolls the whole ECO back.
+                detail = _apply_changes(line, changes)
+            target_desc = {"bom_id": item.bom_id, "part_id": item.part_id}
+
+        item.status = "implemented"
+        item.implemented_at = now
+        applied.append({"eco_item_id": item.id, "change_type": ct, **target_desc, "fields": detail})
+
+    # Surface FK / NOT NULL / type failures HERE, inside the caller's try, and
+    # not at the far-away commit where they would escape as a raw 500.
+    await db.flush()
+    return applied
+
+
 async def perform_eco_action(
     db: AsyncSession,
     current_user: User,
@@ -336,6 +529,7 @@ async def perform_eco_action(
             ),
         )
     now = datetime.now(UTC)
+    applied: list[dict] = []  # what "implement" actually changed, for the audit row
     if action == "submit":
         eco.status = "review"
         # R8: create the actual approval chain here — a pending eco_approvals
@@ -445,6 +639,34 @@ async def perform_eco_action(
             meaning=signature_meaning or comments or f"Implementation of ECO {eco.eco_number}",
             content={"eco_id": eco.id, "eco_number": eco.eco_number, "status": eco.status},
         )
+        # THE change. Everything above this line is paperwork; this is where an
+        # approved revision actually reaches the parts and BOM lines.
+        #
+        # Idempotency: the ECO_ALLOWED_TRANSITIONS guard above already rejects
+        # implement unless status == "approved", so a second implement 409s
+        # before reaching here and nothing can be double-applied.
+        #
+        # Atomicity: _apply_eco_items shares this function's transaction and
+        # nothing is committed until below, so any failure rolls back BOTH the
+        # partially-applied items and the status flip. A half-applied ECO is
+        # worse than a failed one.
+        # Read anything we need for logging BEFORE the rollback: rollback()
+        # expires every instance in the session, so touching eco.id afterwards
+        # triggers an implicit refresh and raises MissingGreenlet — masking the
+        # real error with a confusing async-plumbing one.
+        _eco_id_for_log = eco.id
+        try:
+            applied = await _apply_eco_items(db, eco, tid, now)
+        except Exception as exc:
+            detail = str(exc)
+            await db.rollback()
+            logger.exception(
+                "ECO %s: implementation failed and was rolled back", _eco_id_for_log
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"ECO not implemented — no changes were applied: {detail}",
+            )
         eco.status = "implemented"
         eco.implemented_by = current_user.id
         eco.implemented_at = now
@@ -457,7 +679,13 @@ async def perform_eco_action(
         {"ref": eco.eco_number, "status": eco.status},
     )
     await db.commit()
-    await _log_audit(db, current_user, f"ECO_{action.upper()}", eco_id, {"status": eco.status})
+    # entityType stays "eco" (already in AuditLog.ALLOWED_ENTITY_TYPES) — this
+    # audit write happens AFTER the business change is committed, so an
+    # unlisted type would 500 the request while the change stayed applied.
+    audit_details: dict = {"status": eco.status}
+    if applied:
+        audit_details["applied"] = applied
+    await _log_audit(db, current_user, f"ECO_{action.upper()}", eco_id, audit_details)
     await db.commit()
     if action in ("approve", "implement"):
         # eco.status is exactly "approved"/"implemented" here -> eco.approved / eco.implemented

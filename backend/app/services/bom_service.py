@@ -2,11 +2,13 @@
 
 import hashlib
 import os
+import re
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any, Optional
 
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import cache_get, cache_invalidate, cache_set
@@ -26,7 +28,7 @@ from app.models.document import Document
 from app.models.enterprise_extensions import CustomAttributeDefinition
 from app.models.mbom import MbomHeader, MbomItem
 from app.models.part import Part
-from app.services import uom_service, webhook_service
+from app.services import import_service, uom_service, webhook_service
 
 # Upload location comes from settings (env-configurable via UPLOAD_DIR), same as
 # documents.py, so a packaged / read-only install can point it at a writable
@@ -1799,9 +1801,14 @@ async def create_snapshot(
                 "part_id": item.part_id,
                 "part_number": part.pn if part else "",
                 "part_name": part.name if part else "",
-                "quantity": item.quantity,
+                # Decimal is NOT json-serialisable and snapshot_data is a JSON
+                # column. The cost fields below were coerced; quantity was
+                # not, so every snapshot insert raised "Object of type
+                # Decimal is not JSON serializable".
+                "quantity": float(item.quantity) if item.quantity is not None else None,
                 "unit": item.unit,
                 "reference_designator": item.reference_designator,
+                "find_number": item.find_number,
                 "parent_item_id": item.parent_item_id,
                 "unit_cost_snapshot": float(item.unit_cost_snapshot)
                 if item.unit_cost_snapshot
@@ -1866,6 +1873,211 @@ async def list_snapshots(db: AsyncSession, bom_id: int) -> list[dict]:
 
 
 # ============ BOM Comparison ============
+
+
+async def _bom_items(db: AsyncSession, bom_id: int, tid: Optional[int] = None):
+    """Every BOMItem on a BOM, tenant-scoped. Shared by the comparison paths so
+    they cannot drift in which rows they consider."""
+    stmt = select(BOMItem).where(BOMItem.bom_id == bom_id)
+    if tid is not None:
+        stmt = stmt.where(BOMItem.tenantId == tid)
+    return list((await db.execute(stmt)).scalars().all())
+
+
+def _aggregate_part_entries(rows) -> dict[int, dict[str, Any]]:
+    """Collapse lines to one entry per part: total quantity + union of refdes.
+
+    A part legitimately appears on several lines of one BOM (the same resistor
+    on four designators). Keying by part_id alone would keep only the last line
+    and silently drop the rest — the bug compare_boms already had. Both the
+    BOM-to-BOM and BOM-to-snapshot comparisons go through this, so they agree.
+
+    Accepts ORM BOMItem rows OR snapshot dicts, since a snapshot row is a plain
+    dict with the same field names.
+    """
+    agg: dict[int, dict[str, Any]] = {}
+    for r in rows:
+        get = (lambda k: r.get(k)) if isinstance(r, dict) else (lambda k: getattr(r, k, None))
+        pid = get("part_id")
+        if not pid:
+            continue
+        entry = agg.setdefault(
+            pid, {"quantity": 0, "refdes": set(), "part_number": get("part_number")}
+        )
+        q = get("quantity")
+        if q is not None:
+            entry["quantity"] += q
+        rd = get("reference_designator")
+        if rd:
+            entry["refdes"].add(rd)
+    return agg
+
+
+def _refdes_str(entry: dict[str, Any]) -> Optional[str]:
+    return ", ".join(sorted(entry["refdes"])) if entry.get("refdes") else None
+
+
+def _diff_part_entries(
+    before: dict[int, dict[str, Any]],
+    after: dict[int, dict[str, Any]],
+    pn_of,
+) -> dict:
+    """added / removed / modified / unchanged, in compare_boms' exact shape."""
+    added, removed, modified, unchanged = [], [], [], []
+    for pid, entry in after.items():
+        pn = pn_of(pid, entry)
+        if pid not in before:
+            added.append({"part_number": pn, "quantity": entry["quantity"]})
+        elif before[pid]["quantity"] != entry["quantity"] or _refdes_str(
+            before[pid]
+        ) != _refdes_str(entry):
+            modified.append(
+                {
+                    "part_number": pn,
+                    "old_quantity": before[pid]["quantity"],
+                    "new_quantity": entry["quantity"],
+                    "old_refdes": _refdes_str(before[pid]),
+                    "new_refdes": _refdes_str(entry),
+                }
+            )
+        else:
+            unchanged.append({"part_number": pn, "quantity": entry["quantity"]})
+    for pid, entry in before.items():
+        if pid not in after:
+            removed.append(
+                {"part_number": pn_of(pid, entry), "quantity": entry["quantity"]}
+            )
+    return {
+        "added": added,
+        "removed": removed,
+        "modified": modified,
+        "unchanged": len(unchanged),
+    }
+
+
+async def compare_bom_to_snapshot(
+    db: AsyncSession,
+    bom_id: int,
+    snapshot_id: int,
+    other_snapshot_id: Optional[int] = None,
+) -> dict:
+    """Diff a BOM as it is NOW against one of its OWN saved snapshots.
+
+    This is the canonical PLM question — "what changed between Rev B and Rev
+    C of this assembly" — which was previously unanswerable: snapshots stored
+    only metadata and an item_count, so there was nothing to diff against.
+
+    Output matches compare_boms exactly so the existing DiffScreen renders it
+    without change.
+    """
+    bom = await get_bom_or_404(db, bom_id)
+    tid = get_tenant_id()
+
+    snap_stmt = select(BomSnapshot).where(BomSnapshot.id == snapshot_id)
+    if tid is not None:
+        snap_stmt = snap_stmt.where(BomSnapshot.tenantId == tid)
+    snapshot = (await db.execute(snap_stmt)).scalar_one_or_none()
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    # A snapshot of a DIFFERENT BOM is not a baseline for this one; comparing
+    # them would silently produce a meaningless all-added/all-removed diff.
+    if snapshot.bom_id != bom_id:
+        # 404, not 400: from this BOM's perspective that snapshot does not
+        # exist. Returning 400 would leak that the id is real but owned
+        # elsewhere, and the caller cannot act on the distinction anyway.
+        raise HTTPException(
+            status_code=404,
+            detail="That snapshot does not belong to this BOM",
+        )
+
+    before = _aggregate_part_entries(snapshot.snapshot_data or [])
+    if other_snapshot_id is not None:
+        o_stmt = select(BomSnapshot).where(BomSnapshot.id == other_snapshot_id)
+        if tid is not None:
+            o_stmt = o_stmt.where(BomSnapshot.tenantId == tid)
+        other = (await db.execute(o_stmt)).scalar_one_or_none()
+        if other is None or other.bom_id != bom_id:
+            raise HTTPException(
+                status_code=404,
+                detail="That snapshot does not belong to this BOM",
+            )
+        after = _aggregate_part_entries(other.snapshot_data or [])
+    else:
+        after = _aggregate_part_entries(await _bom_items(db, bom_id, tid))
+
+    # Part numbers. A live BOMItem has no part_number of its own, so EVERY id
+    # on the live side needs a lookup — not just the added ones. Getting this
+    # wrong made modified rows render as "ID:2" instead of their part number.
+    # The snapshot keeps the number it captured, which is also what should win
+    # for a removed part (the Part row may since have been renamed or deleted).
+    live_ids = list(after.keys())
+    pn_map: dict[int, str] = {}
+    if live_ids:
+        pstmt = select(Part).where(Part.id.in_(live_ids))
+        if tid is not None:
+            pstmt = pstmt.where(Part.tenantId == tid)
+        for prt in (await db.execute(pstmt)).scalars().all():
+            pn_map[prt.id] = prt.pn
+
+    def pn_of(pid, entry):
+        return (
+            entry.get("part_number")
+            or (before.get(pid) or {}).get("part_number")
+            or pn_map.get(pid)
+            or f"ID:{pid}"
+        )
+
+    # Same key shape as compare_boms so the existing DiffScreen renders this
+    # with no change. Both "sides" are the same BOM — the snapshot is side 1
+    # (the baseline) and the live BOM is side 2.
+    return {
+        "bom_id_1": bom_id,
+        "bom_id_2": bom_id,
+        # version_* mirrors compare_boms: the BOM's own version string. The
+        # snapshot's label is reported separately as snapshot_name so callers
+        # can show "Rev B -> current" without overloading version_1.
+        "version_1": bom.version,
+        "version_2": bom.version,
+        "snapshot_id": snapshot_id,
+        "snapshot_name": snapshot.snapshot_name,
+        **_diff_part_entries(before, after, pn_of),
+    }
+
+
+async def compare_snapshots(
+    db: AsyncSession, snapshot_id_1: int, snapshot_id_2: int
+) -> dict:
+    """Diff two saved snapshots of the same BOM against each other."""
+    tid = get_tenant_id()
+    snaps = {}
+    for sid in (snapshot_id_1, snapshot_id_2):
+        stmt = select(BomSnapshot).where(BomSnapshot.id == sid)
+        if tid is not None:
+            stmt = stmt.where(BomSnapshot.tenantId == tid)
+        snap = (await db.execute(stmt)).scalar_one_or_none()
+        if snap is None:
+            raise HTTPException(status_code=404, detail=f"Snapshot {sid} not found")
+        snaps[sid] = snap
+    if snaps[snapshot_id_1].bom_id != snaps[snapshot_id_2].bom_id:
+        raise HTTPException(
+            status_code=400, detail="Those snapshots belong to different BOMs"
+        )
+
+    before = _aggregate_part_entries(snaps[snapshot_id_1].snapshot_data or [])
+    after = _aggregate_part_entries(snaps[snapshot_id_2].snapshot_data or [])
+
+    def pn_of(pid, entry):
+        return entry.get("part_number") or f"ID:{pid}"
+
+    return {
+        "bom_id_1": snaps[snapshot_id_1].bom_id,
+        "bom_id_2": snaps[snapshot_id_2].bom_id,
+        "version_1": snaps[snapshot_id_1].snapshot_name,
+        "version_2": snaps[snapshot_id_2].snapshot_name,
+        "snapshot_id_1": snapshot_id_1,
+        "snapshot_id_2": snapshot_id_2,
+        **_diff_part_entries(before, after, pn_of),
+    }
 
 
 async def compare_boms(db: AsyncSession, bom_id_1: int, bom_id_2: int) -> dict:
@@ -2183,38 +2395,380 @@ async def add_variant_item(
 # "export a BOM". import_bom() below IS live; the endpoint calls it directly.
 
 
+# ---- Spreadsheet import (multi-level) ----
+#
+# Parsing is import_service.parse_file (the ONE CSV/XLSX parser in the
+# codebase — see app/services/import_service.py); everything below is the
+# BOM-specific part it does not do: header recognition, LEVEL -> parent/child
+# reconstruction, and matching each row to an existing Part.
+
+# Header aliases, compared after normalisation (lowercase, non-alphanumerics
+# stripped) so "Part Number", "part_number" and "PART-NO" all land on the same
+# field. Only part_number is mandatory.
+_BOM_IMPORT_ALIASES: dict[str, tuple[str, ...]] = {
+    "part_number": (
+        "partnumber",
+        "partno",
+        "partnum",
+        "part",
+        "pn",
+        "itemnumber",
+        "itemno",
+        "sku",
+        "componentpartnumber",
+        "component",
+        "childpartnumber",
+    ),
+    "level": ("level", "lvl", "bomlevel", "indent", "indentlevel", "itemlevel", "depth"),
+    "quantity": ("quantity", "qty", "qtyper", "quantityper", "qtyperassembly", "qtyperparent"),
+    "unit": ("uom", "unit", "units", "unitofmeasure"),
+    "reference_designator": (
+        "referencedesignator",
+        "referencedesignators",
+        "refdes",
+        "refdesignator",
+        "designator",
+        "reference",
+        "references",
+    ),
+    "find_number": ("findnumber", "findno", "findnum", "findnbr"),
+    "notes": ("notes", "note", "comment", "comments", "remarks", "description"),
+}
+
+
+def _norm_header(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value).lower())
+
+
+def _resolve_import_columns(headers) -> dict[str, str]:
+    """Map {our field: source column name} for the columns we recognise.
+
+    First matching column wins, so a sheet with both "Description" and "Notes"
+    keeps whichever comes first rather than silently overwriting one with the
+    other.
+    """
+    resolved: dict[str, str] = {}
+    for header in headers:
+        norm = _norm_header(header)
+        for field, aliases in _BOM_IMPORT_ALIASES.items():
+            if field not in resolved and norm in aliases:
+                resolved[field] = header
+                break
+    return resolved
+
+
+def _level_segments(raw: Any) -> list[str]:
+    """Split a level cell into its outline segments. Raises ValueError."""
+    if isinstance(raw, float) and raw.is_integer():
+        raw = int(raw)
+    text = str(raw).strip() if raw is not None else ""
+    if not text:
+        raise ValueError("level is blank")
+    segments = text.split(".")
+    if not all(seg.isdigit() for seg in segments):
+        raise ValueError(f"'{raw}' is not a level (expected 2, or 1.1.2)")
+    return segments
+
+
+def _parse_bom_level(raw: Any, dotted: bool = False) -> int:
+    """Depth of one row. Raises ValueError on a malformed cell.
+
+    Two conventions exist in real exports and they CONFLICT on a bare integer:
+
+      * outline numbering  1, 1.1, 1.1.1, 1.2, 2   -> depth = segment count,
+        so the trailing "2" is a SECOND ROOT, not a child.
+      * plain indent level 1, 2, 3, 2, 1           -> depth = the integer.
+
+    Read per-row, "2" is ambiguous, and guessing it as indent-2 silently
+    re-parents a second top-level assembly under the first — which is exactly
+    the bug this argument exists to prevent. So the caller decides the
+    convention ONCE for the whole file (`dotted` = any row contains a dot) and
+    applies it uniformly.
+
+    xlsx hands us numbers rather than strings, so 2.0 must read as integer 2
+    while the string "1.1" must read as two outline segments.
+    """
+    segments = _level_segments(raw)
+    if dotted:
+        return len(segments)
+    if len(segments) == 1:
+        return int(segments[0])
+    return len(segments)
+
+
+async def _match_parts_by_number(db: AsyncSession, tid, part_numbers: set[str]) -> dict[str, Part]:
+    """Load every Part whose pn appears in the file, in chunks.
+
+    Chunked because a 20k-row sheet would otherwise blow past SQLite's bound-
+    parameter ceiling in a single IN (...). Tenant-scoped explicitly: an import
+    must never resolve a part number to another tenant's part.
+    """
+    by_pn: dict[str, Part] = {}
+    numbers = sorted(part_numbers)
+    for start in range(0, len(numbers), 500):
+        stmt = select(Part).where(Part.pn.in_(numbers[start : start + 500]))
+        if tid is not None:
+            stmt = stmt.where(Part.tenantId == tid)
+        for part in (await db.execute(stmt)).scalars().all():
+            by_pn[part.pn] = part
+    return by_pn
+
+
 async def import_bom(
     db: AsyncSession,
-    file_url: str,
-    project_id: int,
-    format: str = "csv",
+    filename: str,
+    content: bytes,
+    project_id: Optional[int] = None,
+    tenant_id: Optional[int] = None,
+    name: Optional[str] = None,
 ) -> dict:
-    if not file_url:
-        raise HTTPException(status_code=400, detail="file_url is required")
-    tid = get_tenant_id()
-    # Reuse create_bom (see apply_template above) instead of a bare BOM(...)
-    # insert — it auto-generates the required, otherwise-omitted bom_number.
+    """Import a multi-level BOM from a CSV/XLSX spreadsheet.
+
+    Rows are matched to EXISTING parts by part number — an import never invents
+    a Part; an unmatched row is reported as a row error. A LEVEL column
+    ("1 / 1.1 / 1.1.2", or a plain indent integer) rebuilds the parent/child
+    tree; with no level column every line sits at the top.
+
+    Returns real counts (imported / skipped / failed) plus per-row errors keyed
+    by spreadsheet row number, and NEVER counts a row that did not make it into
+    the BOM as imported.
+    """
+    tid = tenant_id if tenant_id is not None else get_tenant_id()
+
+    # ---- 1. parse (structural failures are a 400, nothing is written) ----
+    try:
+        rows = import_service.parse_file(filename, content)
+    except import_service.ImportValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # openpyxl/csv choke on a corrupt or non-spreadsheet file
+        raise HTTPException(
+            status_code=400, detail=f"Could not read '{filename}' as a spreadsheet: {exc}"
+        ) from exc
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="File contains no data rows")
+
+    columns = _resolve_import_columns(rows[0].keys())
+    if "part_number" not in columns:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No part number column found. Expected a column named one of: "
+                "Part Number, PN, Item Number, SKU."
+            ),
+        )
+
+    level_col = columns.get("level")
+
+    # ---- 2. validate every row BEFORE writing anything ----
+    # The full validation pass runs first so the write phase is one short
+    # transaction, and so a file where nothing is importable never leaves an
+    # empty BOM behind.
+    def cell(row: dict, field: str) -> Optional[str]:
+        col = columns.get(field)
+        value = row.get(col) if col else None
+        if value is None:
+            return None
+        return str(value).strip() or None
+
+    parsed: list[dict] = []  # one entry per non-blank row, in file order
+    errors: list[dict] = []
+    skipped = 0
+
+    # Decide the level convention ONCE for the whole file. A bare "2" means
+    # depth 2 in an indent-style sheet but a SECOND ROOT in outline style;
+    # deciding per row silently re-parents a second top-level assembly.
+    _dotted_levels = False
+    if level_col is not None:
+        for _r in rows:
+            _v = _r.get(level_col)
+            if _v is not None and "." in str(_v).strip() and not isinstance(_v, float):
+                _dotted_levels = True
+                break
+
+    for idx, row in enumerate(rows):
+        row_no = idx + 2  # the header is row 1
+        if all(v is None or str(v).strip() == "" for v in row.values()):
+            skipped += 1  # spacer row
+            continue
+
+        pn = cell(row, "part_number")
+        if not pn:
+            skipped += 1
+            continue
+
+        row_errors: list[str] = []
+
+        level = 1
+        if level_col is not None:
+            try:
+                level = _parse_bom_level(row.get(level_col), _dotted_levels)
+            except ValueError as exc:
+                row_errors.append(f"level: {exc}")
+
+        quantity = Decimal("1")
+        qty_raw = cell(row, "quantity")
+        if qty_raw is not None:
+            try:
+                quantity = Decimal(qty_raw)
+            except (ArithmeticError, ValueError):
+                row_errors.append(f"quantity: '{qty_raw}' is not a number")
+            else:
+                if quantity <= 0:
+                    row_errors.append(f"quantity: '{qty_raw}' must be greater than zero")
+
+        parsed.append(
+            {
+                "row_no": row_no,
+                "pn": pn,
+                "level": level,
+                "quantity": quantity,
+                "unit": cell(row, "unit") or "EA",
+                "reference_designator": cell(row, "reference_designator"),
+                "find_number": cell(row, "find_number"),
+                "notes": cell(row, "notes"),
+                "errors": row_errors,
+            }
+        )
+
+    # Levels are normalised against the shallowest valid row, so a 0-based
+    # indent column ("0/1/2") describes the same tree as a 1-based one.
+    levels = [p["level"] for p in parsed if not p["errors"]]
+    base_level = min(levels) if levels else 1
+
+    parts_by_pn = await _match_parts_by_number(db, tid, {p["pn"] for p in parsed})
+    # Case-insensitive fallback, but only for part numbers that stay unambiguous
+    # when folded — never guess between a tenant's "abc" and "ABC".
+    folded: dict[str, Optional[Part]] = {}
+    for pn, part in parts_by_pn.items():
+        key = pn.lower()
+        folded[key] = None if key in folded else part
+
+    for entry in parsed:
+        part = parts_by_pn.get(entry["pn"]) or folded.get(entry["pn"].lower())
+        if part is None:
+            entry["errors"].append(f"part number '{entry['pn']}' does not exist")
+        entry["part"] = part
+
+    # ---- 3. rebuild the hierarchy ----
+    # stack[depth] = the entry that currently owns that depth, or None once a
+    # row at that depth has failed (its children have nothing to hang off).
+    stack: dict[int, Optional[dict]] = {}
+    plan: list[dict] = []
+    seen_lines: set[tuple] = set()
+
+    for entry in parsed:
+        depth = entry["level"] - base_level + 1
+        parent: Optional[dict] = None
+        if not entry["errors"] and depth > 1:
+            if depth - 1 not in stack:
+                entry["errors"].append(
+                    f"level {entry['level']}: no level-{depth - 1} row above it to attach to"
+                )
+            elif stack[depth - 1] is None:
+                entry["errors"].append("parent row failed to import")
+            else:
+                parent = stack[depth - 1]
+
+        if not entry["errors"]:
+            # The duplicate rule create_bom_item enforces (part + parent +
+            # refdes), applied in memory so an import cannot build a BOM the
+            # items API would have rejected.
+            line_key = (
+                entry["part"].id,
+                id(parent) if parent is not None else None,
+                entry["reference_designator"],
+            )
+            if line_key in seen_lines:
+                entry["errors"].append(
+                    "duplicate line: same part under the same parent with the same "
+                    "reference designator"
+                )
+            else:
+                seen_lines.add(line_key)
+
+        if entry["errors"]:
+            errors.append({"row": entry["row_no"], "error": "; ".join(entry["errors"])})
+            stack[depth] = None
+        else:
+            entry["parent"] = parent
+            plan.append(entry)
+            stack[depth] = entry
+        # Anything deeper belongs to the branch we just left.
+        for deeper in [d for d in stack if d > depth]:
+            del stack[deeper]
+
+    failed = len(errors)
+    if not plan:
+        # Nothing importable: report it instead of handing back an empty BOM
+        # that looks like a successful (if pointless) import.
+        return {
+            "bom_id": None,
+            "import_status": "failed",
+            "items_imported": 0,
+            "items_skipped": skipped,
+            "items_failed": failed,
+            "errors": errors,
+        }
+
+    # ---- 4. write ----
     bom = await create_bom(
         db,
         {
-            "name": f"Imported BOM ({datetime.now(UTC).strftime('%Y-%m-%d')})",
-            "description": f"Imported from {file_url} ({format})",
+            "name": name or f"Imported BOM ({datetime.now(UTC).strftime('%Y-%m-%d')})",
+            "description": f"Imported from {filename}",
             "project_id": project_id,
         },
         tenant_id=tid,
     )
-    # bom-integrity finding 2: file_url is never fetched or parsed here, so no
-    # rows are ever created — reporting "success" made an empty draft BOM
-    # indistinguishable from a real import. Report "not_implemented" instead.
+    try:
+        for sort_order, entry in enumerate(plan):
+            item = BOMItem(
+                bom_id=bom.id,
+                part_id=entry["part"].id,
+                quantity=entry["quantity"],
+                unit=entry["unit"],
+                reference_designator=entry["reference_designator"],
+                find_number=entry["find_number"],
+                notes=entry["notes"],
+                sort_order=sort_order,
+                parent_item_id=entry["parent"]["item"].id if entry["parent"] else None,
+                # Explicit, not ambient: tenant_events only stamps tenantId when
+                # a tenant context is set, which it is not on the HTTP path.
+                tenantId=tid,
+            )
+            db.add(item)
+            await db.flush()  # assigns item.id — a later row may be its child
+            entry["item"] = item
+            # The same closure bookkeeping create_bom_item does; without it
+            # where-used/explosion silently misses every imported line.
+            await _closure_add_item(db, bom.id, tid, item.id, item.parent_item_id)
+        await db.commit()
+    except Exception:
+        # One transaction: an empty BOM left by a half-done import is exactly
+        # the half-created state this must not leave behind. create_bom already
+        # committed the header, so it needs an explicit delete — tenant-scoped
+        # by hand because a Core delete() bypasses the ORM tenant listener.
+        await db.rollback()
+        await db.execute(
+            delete(BOM).where(
+                BOM.id == bom.id, *([BOM.tenantId == tid] if tid is not None else [])
+            )
+        )
+        await db.commit()
+        raise
+
+    # ponytail: no per-item webhook fan-out (create_bom_item emits one
+    # bom.item.created per line) — that is one subscription query per row and an
+    # import is up to 20k rows. Add a single "bom.imported" event if a
+    # subscriber ever needs it.
     return {
         "bom_id": bom.id,
-        "import_status": "not_implemented",
-        "items_imported": 0,
-        "warnings": [
-            f"File parsing is not implemented; no items were imported from "
-            f"{file_url}. An empty draft BOM was created — add items via the "
-            "BOM Items API."
-        ],
+        "import_status": "success" if failed == 0 else "partial",
+        "items_imported": len(plan),
+        "items_skipped": skipped,
+        "items_failed": failed,
+        "errors": errors,
     }
 
 

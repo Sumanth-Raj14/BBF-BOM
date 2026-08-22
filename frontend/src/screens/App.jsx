@@ -1,9 +1,11 @@
 import { Routes, Route, useLocation } from "react-router-dom";
 import MembersScreen from "../components/screens/MembersScreen.jsx";
+import PlanningScreen from "../components/screens/PlanningScreen.jsx";
 import ContractsScreen from "../components/screens/ContractsScreen.jsx";
 import MakeVsBuyScreen from "../components/screens/MakeVsBuyScreen.jsx";
 import SupplierScorecardsScreen from "../components/screens/SupplierScorecardsScreen.jsx";
 import ESignaturesScreen from "../components/screens/ESignaturesScreen.jsx";
+import AdminOpsScreen from "../components/screens/AdminOpsScreen.jsx";
 import { storage } from "../utils/storage.js";
 import {
   isOfflineCapableError,
@@ -155,6 +157,14 @@ function MembersScreenWrapper() {
   );
 }
 
+function PlanningScreenWrapper() {
+  return (
+    <ErrBD>
+      <PlanningScreen />
+    </ErrBD>
+  );
+}
+
 // These four features had a complete backend AND a working api.js client, but no
 // screen ever called them — so they were unreachable from the product. Adding the
 // missing surface; nothing existing is changed.
@@ -186,6 +196,17 @@ function ESignaturesScreenWrapper() {
   return (
     <ErrBD>
       <ESignaturesScreen />
+    </ErrBD>
+  );
+}
+
+// Backup/restore/PITR and session management: both backends were live and
+// superuser-gated, but no screen ever called them, so disaster recovery and
+// "who is signed in" were unreachable from the product.
+function AdminOpsScreenWrapper() {
+  return (
+    <ErrBD>
+      <AdminOpsScreen />
     </ErrBD>
   );
 }
@@ -554,6 +575,7 @@ function AppShell() {
             <Route path="/vendors" element={<VendorsScreenWrapper />} />
             <Route path="/members" element={<MembersScreenWrapper />} />
             <Route path="/contracts" element={<ContractsScreenWrapper />} />
+            <Route path="/planning" element={<PlanningScreenWrapper />} />
             <Route
               path="/make-vs-buy"
               element={<MakeVsBuyScreenWrapper />}
@@ -566,6 +588,7 @@ function AppShell() {
               path="/esignatures"
               element={<ESignaturesScreenWrapper />}
             />
+            <Route path="/admin-ops" element={<AdminOpsScreenWrapper />} />
             <Route path="/procurement" element={<ProcurementScreenWrapper />} />
             <Route path="/diff" element={<DiffScreenWrapper />} />
             <Route
