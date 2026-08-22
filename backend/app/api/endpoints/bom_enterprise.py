@@ -7,7 +7,7 @@ import io
 from decimal import Decimal
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -430,13 +430,32 @@ async def export_bom(
 
 @router.post("/import")
 async def import_bom(
-    file_url: str,
-    project_id: int,
-    format: str = Query("csv", pattern="^(csv|excel|json)$"),
+    file: UploadFile = File(None),
+    project_id: Optional[int] = Query(None),
+    name: Optional[str] = Query(None),
+    file_url: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_engineering),
 ):
-    return await bom_service.import_bom(db, file_url, project_id, format)
+    """Import a multi-level BOM from an uploaded CSV/XLSX spreadsheet.
+
+    `file_url` is still accepted so the old query-param callers get a clear
+    400 instead of a bare 422 — server-side fetching was never implemented
+    (it only ever produced an empty draft BOM), the file is uploaded instead.
+    """
+    if file is None:
+        detail = "Upload the spreadsheet as multipart/form-data field 'file'."
+        if file_url:
+            detail += " Fetching a file_url server-side is not supported."
+        raise HTTPException(status_code=400, detail=detail)
+    return await bom_service.import_bom(
+        db,
+        filename=file.filename or "upload.csv",
+        content=await file.read(),
+        project_id=project_id,
+        tenant_id=current_user.tenantId,
+        name=name,
+    )
 
 
 @router.post("/templates")

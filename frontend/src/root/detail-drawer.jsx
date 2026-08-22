@@ -11,6 +11,8 @@ import {
   TabPanel,
   Card,
   Field,
+  Input,
+  Select,
   Textarea,
   EmptyState,
 } from "../components/ui/index.js";
@@ -32,6 +34,14 @@ function getRealPartId(row) {
   }
   if (row && typeof row.id === "number") return row.id;
   return null;
+}
+// List endpoints in this API are inconsistent: paginated ones return
+// {items:[…]}, a few return {data:[…]}, some return a bare array.
+function unwrapList(res) {
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res?.items)) return res.items;
+  if (Array.isArray(res?.data)) return res.data;
+  return [];
 }
 function Drawer({ row, onClose, data, openModal, overlay }) {
   const ctx = useAppStore();
@@ -154,6 +164,10 @@ function Drawer({ row, onClose, data, openModal, overlay }) {
               label: __t("detailDrawer.whereUsed") || "Where used",
             },
             { value: "files", label: __t("detailDrawer.files") || "Files" },
+            {
+              value: "derivatives",
+              label: __t("detailDrawer.derivatives") || "CAD",
+            },
             { value: "barcode", label: __t("detailDrawer.barcode") || "Barcode" },
             {
               value: "compliance",
@@ -184,6 +198,13 @@ function Drawer({ row, onClose, data, openModal, overlay }) {
           </TabPanel>
           <TabPanel id={DRAWER_TABS_ID} value="files" active={tab === "files"}>
             <FilesTab row={row} openModal={openModal} />
+          </TabPanel>
+          <TabPanel
+            id={DRAWER_TABS_ID}
+            value="derivatives"
+            active={tab === "derivatives"}
+          >
+            {tab === "derivatives" && <DerivativesTab row={row} />}
           </TabPanel>
           <TabPanel id={DRAWER_TABS_ID} value="barcode" active={tab === "barcode"}>
             <BarcodeTab row={row} />
@@ -567,36 +588,7 @@ function SpecsTab({ row, ext, approval, approvalKey }) {
           </dl>
         </>
       )}
-      {row.countryHistory && row.countryHistory.length > 0 && (
-        <div className="mb-16">
-          <div className="section-title">
-            {__t("detailDrawer.countryHistory") || "Country History"}
-          </div>
-          <div className="pos-relative" style={{ paddingLeft: 18 }}>
-            <div
-              className="pos-absolute w-1"
-              style={{ left: 6, top: 4, bottom: 4, background: "var(--line)" }}
-            />
-            {row.countryHistory.map((ch, i) => (
-              <div key={ch.country + "-" + ch.date} className="relative mb-10">
-                <div className="pos-absolute" />
-                <div>
-                  <span
-                    className="chip fs-11 fw-600 fs-9 mr-4"
-                    style={{ padding: "0 4px" }}
-                  >
-                    {ch.country}
-                  </span>{" "}
-                  {ch.reason}
-                </div>
-                <div className="font-mono fs-10 fg-3" style={{ marginTop: 1 }}>
-                  {ch.date}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <CountryOriginSection row={row} />
       <div className="flex gap-8 mt-16" style={{ flexWrap: "wrap" }}>
         <Button
           variant="secondary"
@@ -1046,6 +1038,511 @@ function FilesTab({ row, openModal }) {
 FilesTab.propTypes = {
   row: PropTypes.object,
   openModal: PropTypes.func,
+};
+// --- CAD derivatives (part_derivatives) ------------------------------------
+// A derivative is a typed (kind, url) pointer to something a CAD/PLM pipeline
+// produced from a part's geometry — the released PDF drawing, the STEP export,
+// etc. The backend only stores + serves the LINK (no geometry kernel, no file
+// bytes), so "attach" here registers a URL rather than uploading a file.
+// POST upserts on (part, kind): re-attaching a kind replaces its url in place.
+const DERIVATIVE_KINDS = ["step", "pdf", "dwg", "dxf", "other"];
+const BLANK_DERIVATIVE = { kind: "step", url: "", drawingStatus: "" };
+
+function DerivativesTab({ row }) {
+  const partId = getRealPartId(row);
+  const [state, setState] = React.useState({
+    loading: true,
+    items: [],
+    error: null,
+  });
+  const [form, setForm] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+
+  const load = React.useCallback(() => {
+    if (partId == null || !api?.derivatives?.list) {
+      setState({ loading: false, items: [], error: null });
+      return;
+    }
+    setState((s) => ({ ...s, loading: true, error: null }));
+    api.derivatives
+      .list({ partId, per_page: 100 })
+      .then((res) => setState({ loading: false, items: unwrapList(res), error: null }))
+      .catch((e) =>
+        setState({
+          loading: false,
+          items: [],
+          error:
+            e?.message ||
+            __t("detailDrawer.derivativesLoadError") ||
+            "Couldn't load CAD derivatives for this part.",
+        }),
+      );
+  }, [partId]);
+
+  React.useEffect(() => {
+    load();
+  }, [load]);
+
+  const attach = async () => {
+    const url = (form?.url || "").trim();
+    if (!url) {
+      toast(__t("detailDrawer.derivativeUrlRequired") || "A file URL or path is required", {
+        kind: "error",
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.derivatives.attach({
+        partId,
+        kind: form.kind,
+        url,
+        drawingStatus: (form.drawingStatus || "").trim() || null,
+      });
+      toast(__t("detailDrawer.derivativeAttached") || "Derivative attached");
+      setForm(null);
+      load();
+    } catch (e) {
+      toast(
+        e?.message || __t("detailDrawer.derivativeAttachFailed") || "Failed to attach derivative",
+        { kind: "error" },
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (d) => {
+    setBusy(true);
+    try {
+      await api.derivatives.delete(d.id);
+      toast(
+        (d.kind || "").toUpperCase() + " " + (__t("detailDrawer.deleted") || "deleted"),
+        { kind: "warn" },
+      );
+      load();
+    } catch (e) {
+      toast(
+        e?.message ||
+          __t("detailDrawer.derivativeDeleteFailed") ||
+          "Failed to delete derivative",
+        { kind: "error" },
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const { loading, items, error } = state;
+
+  return (
+    <>
+      <div className="flex justify-between items-center mb-10">
+        <div className="hint">
+          {loading
+            ? __t("common.loading") || "Loading…"
+            : `${items.length} ${
+                items.length === 1
+                  ? __t("detailDrawer.derivative") || "derivative"
+                  : __t("detailDrawer.derivatives") || "derivatives"
+              }`}
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={partId == null || busy || !!form}
+          onClick={() => setForm({ ...BLANK_DERIVATIVE })}
+        >
+          <Icon.Plus size={11} /> {__t("detailDrawer.attachDerivative") || "Attach"}
+        </Button>
+      </div>
+      {error && (
+        <div className="fs-11 mb-10" style={{ color: "var(--danger, #c0392b)" }} role="alert">
+          {error}
+        </div>
+      )}
+      {form && (
+        <Card className="mb-10">
+          <div className="flex gap-8" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ width: 96 }}>
+              <Field label={__t("detailDrawer.derivativeKind") || "Kind"}>
+                <Select
+                  value={form.kind}
+                  onChange={(e) => setForm({ ...form, kind: e.target.value })}
+                >
+                  {DERIVATIVE_KINDS.map((k) => (
+                    <option key={k} value={k}>
+                      {k.toUpperCase()}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            <div style={{ flex: "2 1 220px" }}>
+              <Field
+                label={__t("detailDrawer.derivativeUrl") || "File URL / path"}
+                hint={
+                  __t("detailDrawer.derivativeUrlHint") ||
+                  "Link to the export produced by CAD/PLM — no file is uploaded here."
+                }
+              >
+                <Input
+                  mono
+                  value={form.url}
+                  placeholder="cad/exports/W-1.step"
+                  onChange={(e) => setForm({ ...form, url: e.target.value })}
+                />
+              </Field>
+            </div>
+            <div style={{ flex: "1 1 130px" }}>
+              <Field label={__t("detailDrawer.drawingStatus") || "Drawing status"}>
+                <Input
+                  value={form.drawingStatus}
+                  placeholder="released"
+                  onChange={(e) => setForm({ ...form, drawingStatus: e.target.value })}
+                />
+              </Field>
+            </div>
+          </div>
+          <div className="flex gap-8 mt-10">
+            <Button size="sm" disabled={busy} onClick={attach}>
+              <Icon.Check size={11} /> {__t("common.save") || "Save"}
+            </Button>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setForm(null)}>
+              {__t("common.cancel") || "Cancel"}
+            </Button>
+          </div>
+        </Card>
+      )}
+      {!loading && items.length === 0 ? (
+        <EmptyState
+          message={
+            partId == null
+              ? __t("detailDrawer.derivativesNoPart") ||
+                "This row is not linked to a saved part, so it has no CAD derivatives."
+              : error
+                ? __t("detailDrawer.derivativesLoadError") ||
+                  "Couldn't load CAD derivatives for this part."
+                : __t("detailDrawer.noDerivativesYet") ||
+                  "No STEP / PDF / DWG / DXF derivatives attached to this part yet."
+          }
+        />
+      ) : (
+        items.map((d) => (
+          <div
+            key={d.id}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "56px 1fr auto",
+              gap: 10,
+              alignItems: "center",
+              padding: "8px 10px",
+              border: "1px solid var(--line)",
+              borderRadius: "var(--r-2)",
+              marginBottom: 6,
+              background: "var(--bg)",
+            }}
+          >
+            <Badge tone="neutral" className="font-mono fs-9 text-center">
+              {(d.kind || "").toUpperCase() || "FILE"}
+            </Badge>
+            <div style={{ minWidth: 0 }}>
+              <a
+                href={d.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="fs-12 font-mono"
+                style={{ wordBreak: "break-all" }}
+              >
+                {d.url}
+              </a>
+              <div className="fs-10 fg-3 font-mono">
+                {d.drawingStatus || __t("detailDrawer.noDrawingStatus") || "no status"}
+                {" · "}
+                {d.createdAt ? String(d.createdAt).slice(0, 10) : "—"}
+              </div>
+            </div>
+            <div className="flex gap-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                iconOnly
+                title={__t("common.copyLink") || "Copy link"}
+                aria-label={__t("common.copyLink") || "Copy link"}
+                onClick={() =>
+                  navigator.clipboard
+                    ?.writeText?.(d.url)
+                    .then(() => toast(__t("common.copied") || "Link copied"))
+                    .catch(() => toast(__t("common.copied") || "Link copied"))
+                }
+              >
+                <Icon.Link size={12} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                iconOnly
+                disabled={busy}
+                title={__t("common.delete") || "Delete"}
+                aria-label={__t("common.delete") || "Delete"}
+                onClick={() => remove(d)}
+              >
+                <Icon.Trash size={12} />
+              </Button>
+            </div>
+          </div>
+        ))
+      )}
+    </>
+  );
+}
+DerivativesTab.propTypes = {
+  row: PropTypes.object,
+};
+
+// --- Country-of-origin history (trade / tariff compliance) -----------------
+// Backed by /country-history/parts/{id}/country-history. There is no
+// per-entry PUT: editing an entry replaces the whole ordered list (the backend
+// rewrites the rows and re-derives part.origin from the last one), and delete
+// addresses an entry by its INDEX in that same order.
+const BLANK_COUNTRY_ENTRY = { country: "", date: "", reason: "" };
+const stripCountryEntry = (e) => ({
+  country: e.country || "",
+  date: e.date || null,
+  reason: e.reason || null,
+});
+
+function CountryOriginSection({ row }) {
+  const partId = getRealPartId(row);
+  const [list, setList] = React.useState([]);
+  const [loading, setLoading] = React.useState(partId != null);
+  const [error, setError] = React.useState(null);
+  const [draft, setDraft] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    // Demo/fixture rows have no backend id — show whatever the payload
+    // happened to carry, read-only, instead of calling with a bogus id.
+    if (partId == null || !api?.countryHistory?.getPartHistory) {
+      setList(unwrapList(row?.countryHistory));
+      setLoading(false);
+      return undefined;
+    }
+    let alive = true;
+    setLoading(true);
+    setError(null);
+    api.countryHistory
+      .getPartHistory(partId)
+      .then((res) => {
+        if (!alive) return;
+        setList(unwrapList(res?.countryHistory ?? res));
+        setLoading(false);
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setError(
+          e?.message ||
+            __t("detailDrawer.countryHistoryLoadError") ||
+            "Couldn't load country-of-origin history.",
+        );
+        setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [partId, row]);
+
+  const editable = partId != null && !!api?.countryHistory?.addEntry;
+
+  const save = async () => {
+    const entry = stripCountryEntry({ ...draft, country: (draft.country || "").trim() });
+    if (!entry.country) {
+      toast(__t("detailDrawer.countryRequired") || "Country is required", { kind: "error" });
+      return;
+    }
+    setBusy(true);
+    try {
+      const res =
+        draft.index == null
+          ? await api.countryHistory.addEntry(partId, entry)
+          : await api.countryHistory.updateHistory(
+              partId,
+              list.map((e, i) => (i === draft.index ? entry : stripCountryEntry(e))),
+            );
+      setList(unwrapList(res?.countryHistory ?? res));
+      setDraft(null);
+      toast(__t("detailDrawer.countryHistorySaved") || "Country history updated");
+    } catch (e) {
+      toast(
+        e?.message ||
+          __t("detailDrawer.countryHistorySaveFailed") ||
+          "Failed to save country history",
+        { kind: "error" },
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (index) => {
+    setBusy(true);
+    try {
+      const res = await api.countryHistory.deleteEntry(partId, index);
+      setList(unwrapList(res?.countryHistory ?? res));
+      toast(__t("detailDrawer.countryHistoryDeleted") || "Entry deleted", { kind: "warn" });
+    } catch (e) {
+      toast(
+        e?.message ||
+          __t("detailDrawer.countryHistoryDeleteFailed") ||
+          "Failed to delete entry",
+        { kind: "error" },
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Nothing to show and nothing to add (fixture row) — stay out of the way,
+  // exactly as the old read-only block did.
+  if (!editable && list.length === 0 && !loading) return null;
+
+  return (
+    <div className="mb-16">
+      <div className="flex justify-between items-center">
+        <div className="section-title">
+          {__t("detailDrawer.countryHistory") || "Country History"}
+        </div>
+        {editable && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy || !!draft}
+            onClick={() => setDraft({ ...BLANK_COUNTRY_ENTRY, index: null })}
+          >
+            <Icon.Plus size={11} /> {__t("common.add") || "Add"}
+          </Button>
+        )}
+      </div>
+      {loading && <div className="hint">{__t("common.loading") || "Loading…"}</div>}
+      {error && (
+        <div className="fs-11" style={{ color: "var(--danger, #c0392b)" }} role="alert">
+          {error}
+        </div>
+      )}
+      {!loading && !error && list.length === 0 && !draft && (
+        <div className="hint">
+          {__t("detailDrawer.noCountryHistory") ||
+            "No country-of-origin changes recorded for this part."}
+        </div>
+      )}
+      {list.length > 0 && (
+        <div className="pos-relative" style={{ paddingLeft: 18 }}>
+          <div
+            className="pos-absolute w-1"
+            style={{ left: 6, top: 4, bottom: 4, background: "var(--line)" }}
+          />
+          {list.map((ch, i) => (
+            <div
+              key={i}
+              className="relative mb-10 flex justify-between items-center gap-8"
+            >
+              <div>
+                <div>
+                  <span
+                    className="chip fs-11 fw-600 fs-9 mr-4"
+                    style={{ padding: "0 4px" }}
+                  >
+                    {ch.country}
+                  </span>{" "}
+                  {ch.reason}
+                </div>
+                <div className="font-mono fs-10 fg-3" style={{ marginTop: 1 }}>
+                  {ch.date ? String(ch.date).slice(0, 10) : "—"}
+                </div>
+              </div>
+              {editable && (
+                <div className="flex gap-4">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    iconOnly
+                    disabled={busy || !!draft}
+                    title={__t("common.edit") || "Edit"}
+                    aria-label={__t("common.edit") || "Edit"}
+                    onClick={() =>
+                      setDraft({
+                        index: i,
+                        country: ch.country || "",
+                        date: ch.date ? String(ch.date).slice(0, 10) : "",
+                        reason: ch.reason || "",
+                      })
+                    }
+                  >
+                    <Icon.Edit size={12} />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    iconOnly
+                    disabled={busy || !!draft}
+                    title={__t("common.delete") || "Delete"}
+                    aria-label={__t("common.delete") || "Delete"}
+                    onClick={() => remove(i)}
+                  >
+                    <Icon.Trash size={12} />
+                  </Button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {draft && (
+        <Card className="mt-8">
+          <div className="flex gap-8" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ flex: "1 1 110px" }}>
+              <Field label={__t("detailDrawer.country") || "Country"} required>
+                <Input
+                  value={draft.country}
+                  placeholder="IN"
+                  onChange={(e) => setDraft({ ...draft, country: e.target.value })}
+                />
+              </Field>
+            </div>
+            <div style={{ flex: "1 1 130px" }}>
+              <Field label={__t("detailDrawer.effectiveFrom") || "Effective from"}>
+                <Input
+                  type="date"
+                  value={draft.date}
+                  onChange={(e) => setDraft({ ...draft, date: e.target.value })}
+                />
+              </Field>
+            </div>
+            <div style={{ flex: "2 1 180px" }}>
+              <Field label={__t("detailDrawer.reason") || "Reason"}>
+                <Input
+                  value={draft.reason}
+                  placeholder={__t("detailDrawer.reasonPlaceholder") || "Tariff / resourcing"}
+                  onChange={(e) => setDraft({ ...draft, reason: e.target.value })}
+                />
+              </Field>
+            </div>
+          </div>
+          <div className="flex gap-8 mt-10">
+            <Button size="sm" disabled={busy} onClick={save}>
+              <Icon.Check size={11} /> {__t("common.save") || "Save"}
+            </Button>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setDraft(null)}>
+              {__t("common.cancel") || "Cancel"}
+            </Button>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+CountryOriginSection.propTypes = {
+  row: PropTypes.object,
 };
 function CommentsTab({ row }) {
   const ctx = useAppStore();
