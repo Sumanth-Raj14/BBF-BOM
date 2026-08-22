@@ -47,6 +47,7 @@ const APPROVAL_TYPE_LABEL = {
 function ApprovalsScreen() {
   const ctx = useAppStore();
   const [filter, setFilter] = React.useState("all");
+  const [prefsOpen, setPrefsOpen] = React.useState(false);
   const [apiApprovals, setApiApprovals] = React.useState(null); // null = loading
   React.useEffect(() => {
     let cancelled = false;
@@ -100,7 +101,10 @@ function ApprovalsScreen() {
           a.title || (a.entityType ? a.entityType + " #" + a.entityId : "—"),
         role: APPROVAL_TYPE_DEPARTMENT[a.type] || "engineering",
         status: a.status || "pending",
-        requester: a.requesterId != null ? "User #" + a.requesterId : "—",
+        // ApprovalResponse (backend/app/api/endpoints/approvals.py) names this
+        // requestedById — reading a.requesterId silently rendered "—" for every
+        // row even though the API returned the requester.
+        requester: a.requestedById != null ? "User #" + a.requestedById : "—",
         date: a.createdAt ? String(a.createdAt).slice(0, 10) : "—",
         value: null,
       });
@@ -132,22 +136,48 @@ function ApprovalsScreen() {
   // every other row (previously the 5 fake ones) silently did nothing on
   // approve/reject. Now that the other rows are real `api.approvals`
   // records, route the mutation through the matching real source instead.
+  // Writes for a set of rows. Returns the number that actually succeeded, so
+  // callers can report a real outcome instead of assuming one. Silent (no
+  // toasts) — the caller owns the messaging.
+  const applyAction = async (rows, nextStatus) => {
+    const ctxRows = rows.filter((a) => a.source === "ctx");
+    const apiRows = rows.filter((a) => a.source === "api");
+    let ok = 0;
+    // One merged setApprovals call: a per-row loop each spread the SAME stale
+    // ctx.approvals, so a bulk run kept only the last row's change while
+    // claiming all of them.
+    if (ctxRows.length && ctx?.setApprovals) {
+      const next = { ...ctx.approvals };
+      ctxRows.forEach((a) => {
+        next[a.target] = { ...next[a.target], [a.role]: nextStatus };
+      });
+      ctx.setApprovals(next);
+      ok += ctxRows.length;
+    }
+    if (apiRows.length && api?.approvals?.update) {
+      const results = await Promise.all(
+        apiRows.map((a) =>
+          api.approvals
+            .update(a.id, { status: nextStatus })
+            .then(() => a.id)
+            .catch(() => null),
+        ),
+      );
+      const done = results.filter(Boolean);
+      if (done.length) {
+        const doneSet = new Set(done);
+        setApiApprovals((list) => (list || []).filter((x) => !doneSet.has(x.id)));
+      }
+      ok += done.length;
+    }
+    return ok;
+  };
   const act = async (a, action) => {
     const nextStatus = action === "approve" ? "approved" : "rejected";
-    if (a.source === "ctx" && ctx?.setApprovals) {
-      const next = { ...ctx.approvals };
-      next[a.target] = { ...next[a.target], [a.role]: nextStatus };
-      ctx.setApprovals(next);
-    } else if (a.source === "api" && api?.approvals?.update) {
-      try {
-        await api.approvals.update(a.id, { status: nextStatus });
-        setApiApprovals((list) => (list || []).filter((x) => x.id !== a.id));
-      } catch (_e) {
-        toast(__t("common.actionFailed") || "Action failed", {
-          kind: "error",
-        });
-        return;
-      }
+    const ok = await applyAction([a], nextStatus);
+    if (!ok) {
+      toast(__t("common.actionFailed") || "Action failed", { kind: "error" });
+      return;
     }
     toast(
       `${action === "approve" ? __t("common.approved") || "Approved" : __t("common.rejected") || "Rejected"} · ${a.target}`,
@@ -217,15 +247,15 @@ function ApprovalsScreen() {
         }
         actions={
           <>
+            {/* finding: this button was a pure no-op that toasted
+                "Subscribed · email + Slack alerts on" — it subscribed to
+                nothing, changed no state, and named a Slack channel the
+                backend has no code for. It now opens the real notification
+                preferences modal, which persists to the server. */}
             <Button
               variant="secondary"
               size="sm"
-              onClick={() =>
-                toast(
-                  __t("approvals.subscribed") ||
-                    "Subscribed · email + Slack alerts on",
-                )
-              }
+              onClick={() => setPrefsOpen(true)}
             >
               <Icon.Bell size={12} />{" "}
               {__t("approvals.notifySettings") || "Notify settings"}
@@ -233,13 +263,33 @@ function ApprovalsScreen() {
             <Button
               variant="primary"
               size="sm"
-              onClick={() => {
-                filtered.forEach((a) => act(a, "approve"));
-                toast(
-                  __t("approvals.bulkApproved", { count: filtered.length }) ||
-                    `Bulk approved ${filtered.length} items`,
-                  { kind: "success" },
-                );
+              // Nothing visible to approve => the button must not look live and
+              // then do nothing when clicked.
+              disabled={!filtered.length}
+              /* WHAT WAS FALSE BEFORE: this fired the writes without awaiting
+                 them and immediately claimed "Bulk approved N items" — the
+                 success toast appeared before the server had answered for a
+                 single one, and any per-item failure landed as an error toast
+                 afterwards, behind a success message counting it. Now: await
+                 everything, then report succeeded/failed for real. */
+              onClick={async () => {
+                const rows = filtered;
+                const ok = await applyAction(rows, "approved");
+                const failed = rows.length - ok;
+                if (ok) {
+                  toast(
+                    (__t("approvals.bulkApproved", { count: ok }) ||
+                      `Bulk approved ${ok} items`) +
+                      (failed ? ` · ${failed} failed` : ""),
+                    { kind: failed ? "warn" : "success" },
+                  );
+                } else if (rows.length) {
+                  toast(
+                    (__t("common.actionFailed") || "Action failed") +
+                      ` · 0 of ${rows.length} approved`,
+                    { kind: "error" },
+                  );
+                }
               }}
             >
               <Icon.Check size={12} />{" "}
@@ -284,6 +334,7 @@ function ApprovalsScreen() {
           />
         </div>
       )}
+      <NotifPrefsModal open={prefsOpen} onClose={() => setPrefsOpen(false)} />
     </div>
   );
 }
@@ -370,44 +421,14 @@ function RoadmapModal({ open, onClose }) {
                 {it}
               </div>
             ))}
-            {col.q.startsWith("Future") && (
-              <Button
-                variant="secondary"
-                size="sm"
-                block
-                className="mt-8 justify-center"
-                onClick={() =>
-                  toast(
-                    __t("roadmap.voteRecorded") ||
-                      "Vote recorded · we'll prioritize based on demand",
-                  )
-                }
-              >
-                <Icon.Sparkles size={11} /> {__t("roadmap.vote") || "Vote"}
-              </Button>
-            )}
           </div>
         ))}
       </div>
-      <div
-        className="mt-14 bg-sunk rounded-r2 text-center fs-11 fg-3"
-        style={{ padding: 12, border: "1px dashed var(--line)" }}
-      >
-        {__t("roadmap.suggestPrefix") || "Have an idea?"}{" "}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            onClose();
-            toast(
-              __t("roadmap.ideaSubmitted") ||
-                "Idea submitted · thank you!",
-            );
-          }}
-        >
-          {__t("roadmap.suggestAction") || "Suggest a feature →"}
-        </Button>
-      </div>
+      {/* finding: a "Vote" button toasted "Vote recorded · we'll prioritize
+          based on demand" and a "Suggest a feature" button toasted "Idea
+          submitted · thank you!" — both were pure no-ops. There is no vote or
+          feature-request endpoint anywhere in backend/app, so nothing was ever
+          recorded or submitted. Removed rather than faked. */}
     </Modal>
   );
 }
@@ -624,18 +645,61 @@ BulkVendorImportModal.propTypes = {
   onClose: PropTypes.func,
 };
 // ============ NOTIFICATION PREFERENCES ============
+// finding: this modal offered a SLACK channel per event, but there is no
+// Slack code anywhere in backend/app — nothing could ever have delivered to
+// it. The column is gone. In-app (/api/v1/notifications/) and email
+// (app/services/email_service.py, SMTP + queue) are both real, so they stay.
+// finding: save() only wrote localStorage yet toasted "Notification
+// preferences saved" — the settings were invisible to the server and vanished
+// on any other machine. Now persisted per-user via
+// GET/PUT /api/v1/user-sync/preferences (api.userDataSync).
+const NOTIF_PREFS_KEY = "notif_prefs";
+const NOTIF_CHANNELS = ["inapp", "email"];
+const DEFAULT_NOTIF_PREFS = {
+  mentions: { inapp: true, email: true },
+  approvals: { inapp: true, email: true },
+  cost_alerts: { inapp: true, email: false },
+  supply_risk: { inapp: true, email: true },
+  weekly_digest: { inapp: false, email: true },
+  new_vendors: { inapp: false, email: false },
+};
 function NotifPrefsModal({ open, onClose }) {
+  // Local copy is a cache for offline/first paint only — the server is the
+  // source of truth and overwrites it once the fetch lands.
   const [prefs, setPrefs] = React.useState(
-    () =>
-      storage.notifPrefs.get() || {
-        mentions: { inapp: true, email: true, slack: false },
-        approvals: { inapp: true, email: true, slack: true },
-        cost_alerts: { inapp: true, email: false, slack: false },
-        supply_risk: { inapp: true, email: true, slack: true },
-        weekly_digest: { inapp: false, email: true, slack: false },
-        new_vendors: { inapp: false, email: false, slack: false },
-      },
+    () => storage.notifPrefs.get() || DEFAULT_NOTIF_PREFS,
   );
+  const [loading, setLoading] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  React.useEffect(() => {
+    if (!open || !api?.userDataSync?.getPreferences) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    api.userDataSync
+      .getPreferences()
+      .then((rows) => {
+        if (cancelled) return;
+        const row = (Array.isArray(rows) ? rows : []).find(
+          (r) => r.pref_key === NOTIF_PREFS_KEY,
+        );
+        if (row?.pref_value) {
+          try {
+            setPrefs({ ...DEFAULT_NOTIF_PREFS, ...JSON.parse(row.pref_value) });
+          } catch (_e) {
+            // Corrupt stored value — keep the defaults rather than crash.
+          }
+        }
+      })
+      .catch(() => {
+        // Honest failure: keep showing the cached values, don't invent any.
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
   const toggle = (event, channel) => {
     const next = {
       ...prefs,
@@ -643,8 +707,32 @@ function NotifPrefsModal({ open, onClose }) {
     };
     setPrefs(next);
   };
-  const save = () => {
+  const save = async () => {
+    if (!api?.userDataSync?.upsertPreference) {
+      toast(
+        __t("notifications.saveUnavailable") ||
+          "Preferences API unavailable — nothing was saved",
+        { kind: "error" },
+      );
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.userDataSync.upsertPreference(
+        NOTIF_PREFS_KEY,
+        JSON.stringify(prefs),
+        "json",
+      );
+    } catch (_e) {
+      // Never close or claim success on a failed write.
+      setSaving(false);
+      toast(__t("notifications.saveFailed") || "Could not save preferences", {
+        kind: "error",
+      });
+      return;
+    }
     storage.notifPrefs.set(prefs);
+    setSaving(false);
     onClose();
     toast(__t("notifications.saved") || "Notification preferences saved", {
       kind: "success",
@@ -700,10 +788,15 @@ function NotifPrefsModal({ open, onClose }) {
       }
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>
             {__t("common.cancel") || "Cancel"}
           </Button>
-          <Button variant="primary" onClick={save}>
+          <Button
+            variant="primary"
+            onClick={save}
+            loading={saving}
+            disabled={saving || loading}
+          >
             {__t("notifications.savePrefs") || "Save preferences"}
           </Button>
         </>
@@ -711,7 +804,7 @@ function NotifPrefsModal({ open, onClose }) {
     >
       <div
         className="d-grid items-center border-line rounded-r2 overflow-h"
-        style={{ gridTemplateColumns: "1fr 60px 60px 60px", gap: 0 }}
+        style={{ gridTemplateColumns: "1fr 60px 60px", gap: 0 }}
       >
         <div
           className="bg-sunk font-mono fs-9 uppercase letter-sp-6 fg-3"
@@ -731,12 +824,6 @@ function NotifPrefsModal({ open, onClose }) {
         >
           {__t("notifications.columnEmail") || "Email"}
         </div>
-        <div
-          className="bg-sunk text-center font-mono fs-9 uppercase fg-3"
-          style={{ padding: "10px 12px" }}
-        >
-          {__t("notifications.columnSlack") || "Slack"}
-        </div>
         {events.map(([key, name, desc], i) => (
           <React.Fragment key={key}>
             <div
@@ -748,7 +835,7 @@ function NotifPrefsModal({ open, onClose }) {
               <div className="fw-500 fs-12">{name}</div>
               <div className="font-mono fs-10 fg-3 mt-2">{desc}</div>
             </div>
-            {["inapp", "email", "slack"].map((ch) => (
+            {NOTIF_CHANNELS.map((ch) => (
               <div
                 key={ch}
                 className="flex justify-center"
@@ -757,7 +844,7 @@ function NotifPrefsModal({ open, onClose }) {
                 <Checkbox
                   id={"notif-" + key + "-" + ch}
                   name={"notif_" + key + "_" + ch}
-                  checked={prefs[key][ch]}
+                  checked={!!prefs[key]?.[ch]}
                   onChange={() => toggle(key, ch)}
                   aria-label={name + " " + ch}
                 />
@@ -766,15 +853,19 @@ function NotifPrefsModal({ open, onClose }) {
           </React.Fragment>
         ))}
       </div>
+      {/* finding: this row displayed "Quiet hours · 8pm — 8am IST · weekends
+          off" as though it were a configured, enforced policy. Nothing set it
+          and nothing enforced it — there is no quiet-hours field in
+          user_preferences and no scheduler that honours one. Replaced with an
+          honest note about what these preferences currently do: they are
+          stored against your account, but the notification queue does not yet
+          read them when deciding what to send. */}
       <div
-        className="mt-14 bg-sunk border-line rounded-r2 fs-11 fg-3 flex justify-between"
+        className="mt-14 bg-sunk border-line rounded-r2 fs-11 fg-3"
         style={{ padding: 10 }}
       >
-        <span>{__t("notifications.quietHours") || "Quiet hours"}</span>
-        <span className="font-mono">
-          {__t("notifications.quietHoursValue") ||
-            "8pm — 8am IST · weekends off"}
-        </span>
+        {__t("notifications.prefsScopeNote") ||
+          "Saved to your account and shared across your devices. Delivery filtering is not applied yet — the notification queue currently ignores these settings."}
       </div>
     </Modal>
   );
@@ -866,8 +957,16 @@ export async function printPO(item, vendorHint) {
   // 18% is the real configured GST rate (see power-features.jsx landed-cost
   // calc), so make the math match the label instead of the other way round.
   const tax = lineCost * 0.18;
-  const ship = 12.5;
-  const total = lineCost + tax + ship;
+  // finding: shipping was a hardcoded 12.5 printed as a real freight charge
+  // and rolled into TOTAL. Nothing supplies a freight figure — no shipping
+  // field on the PO/item — so the line is gone rather than invented.
+  const total = lineCost + tax;
+  // Money is only real when we actually have a cost; otherwise print "—"
+  // instead of a confident ₹0.00.
+  const money = (v) =>
+    hasCost
+      ? `₹${(v * getInrRate()).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
+      : "—";
   // finding: current logged-in user for the signatory line instead of a
   // hardcoded fake name.
   const currentUser = storage.auth.get();
@@ -887,12 +986,14 @@ export async function printPO(item, vendorHint) {
   } catch (_e) {
     // Vendor lookup is best-effort — keep whatever hint was passed in.
   }
-  // Use the real PO number when the caller has one; only fabricate a
-  // placeholder as a last resort so the document still renders.
-  const poNumber =
-    item.poNumber ||
-    "PO-2026-" +
-      String(item.pn ? item.pn.charCodeAt(0) * 7 : 491).padStart(4, "0");
+  // finding: when the caller had no PO number this minted one from the part
+  // number's char code ("PO-2026-0491"-style) and the Status box always read
+  // "ISSUED" — a printable document carrying an invented PO number and a
+  // false status. Print what we actually know, or nothing.
+  const poNumber = item.poNumber || "—";
+  const poStatus = item.poNumber
+    ? String(item.status || "issued").toUpperCase()
+    : "DRAFT";
   const poTitle = item.pn
     ? "PO · " + item.pn
     : __t("printPo.title") || "Purchase Order";
@@ -943,7 +1044,7 @@ export async function printPO(item, vendorHint) {
     "<div class='row'><span>" +
     h(__t("printPo.status") || "Status") +
     "</span><strong style='color:#b8480f'>" +
-    h(__t("printPo.issued") || "ISSUED") +
+    h(poStatus) +
     "</strong></div>" +
     "</div></div>" +
     "<div class='parties'>" +
@@ -955,11 +1056,10 @@ export async function printPO(item, vendorHint) {
     // A printed PO must show blank/"—" when we don't actually know these.
     h(item.vendor || "—") +
     "</div>" +
-    (item.vendor
-      ? "<div>orders@" +
-        h(item.vendor.toLowerCase().replace(/\s+/g, "")) +
-        ".com</div>"
-      : "") +
+    // finding: the vendor contact line was still fabricated — it minted
+    // "orders@<vendorname>.com" from the vendor's display name. The backend
+    // Vendor schema has no email field at all, so that address was invented
+    // on a document meant to be sent to a supplier. Line removed.
     // Backend Vendor schema has no address field (see BulkVendorImportModal
     // comment above) — never had real data to show here, so don't fake it.
     "<div>—</div><div>" +
@@ -993,49 +1093,26 @@ export async function printPO(item, vendorHint) {
     h(item.qty) +
     "</td>" +
     "<td class='r'>" +
-    (hasCost
-      ? "₹" +
-        (item.cost * getInrRate()).toLocaleString("en-IN", {
-          minimumFractionDigits: 2,
-        })
-      : "—") +
+    money(item.cost) +
     "</td>" +
     "<td class='r' style='font-weight:600'>" +
-    (hasCost
-      ? "₹" +
-        (lineCost * getInrRate()).toLocaleString("en-IN", {
-          minimumFractionDigits: 2,
-        })
-      : "—") +
+    money(lineCost) +
     "</td></tr></tbody></table>" +
     "<div class='totals'><table>" +
     "<tr><td>" +
     h(__t("printPo.subtotal") || "Subtotal") +
-    "</td><td class='r'>₹" +
-    (lineCost * getInrRate()).toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-    }) +
+    "</td><td class='r'>" +
+    money(lineCost) +
     "</td></tr>" +
     "<tr><td>" +
     h(__t("printPo.tax") || "Tax (GST 18%)") +
-    "</td><td class='r'>₹" +
-    (tax * getInrRate()).toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-    }) +
-    "</td></tr>" +
-    "<tr><td>" +
-    h(__t("printPo.shipping") || "Shipping") +
-    "</td><td class='r'>₹" +
-    (ship * getInrRate()).toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-    }) +
+    "</td><td class='r'>" +
+    money(tax) +
     "</td></tr>" +
     "<tr class='total'><td>" +
     h(__t("printPo.total") || "TOTAL") +
-    "</td><td class='r'>₹" +
-    (total * getInrRate()).toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-    }) +
+    "</td><td class='r'>" +
+    money(total) +
     "</td></tr>" +
     "</table></div>" +
     "<div class='terms'><strong>" +
@@ -1067,13 +1144,19 @@ export async function printPO(item, vendorHint) {
     new Date().toLocaleString() +
     "</span></div>" +
     "<script>setTimeout(function(){window.print()},400)<\/script></body></html>";
-  openPrintWindow("PO Print", html, {
+  // finding: this claimed "PO PDF preview opened" unconditionally, including
+  // when openPrintWindow returned null because the pop-up was blocked — the
+  // user got a success toast stacked on top of the blocker warning and no
+  // document. Only claim it when a window actually opened.
+  const win = openPrintWindow("PO Print", html, {
     features: "width=800,height=600",
     printDelay: 400,
   });
-  toast(__t("printPo.previewOpened") || "PO PDF preview opened", {
-    kind: "success",
-  });
+  if (win) {
+    toast(__t("printPo.previewOpened") || "PO PDF preview opened", {
+      kind: "success",
+    });
+  }
 }
 // ============ URL FILTER SYNC HOOK ============
 export function useURLState(key, initial) {

@@ -9,6 +9,15 @@ from app.models.mixins import TenantAwareMixin
 class AuditLog(Base, TenantAwareMixin):
     __tablename__ = "audit_logs"
 
+    # Keep this in sync with every entityType any service actually writes. The
+    # before_insert validator RAISES on an unlisted value, and the audit write
+    # happens AFTER the business change is already persisted — so a missing
+    # entry here does not merely lose an audit row, it 500s the request while
+    # the stock adjustment / inspection record stays saved. The user is told the
+    # operation failed when it succeeded.
+    #
+    # "inventory" (inventory_service.adjust) and "quality"
+    # (quality_service inspection records) were both written and both missing.
     ALLOWED_ENTITY_TYPES = {
         "part",
         "project",
@@ -23,6 +32,8 @@ class AuditLog(Base, TenantAwareMixin):
         "auth",
         "api_key",
         "work_order",
+        "inventory",
+        "quality",
     }
 
     id = Column(Integer, primary_key=True)

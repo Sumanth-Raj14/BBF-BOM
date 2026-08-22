@@ -16,6 +16,32 @@ from app.models.user import User
 
 router = APIRouter()
 
+
+def _json_safe_columns(obj, *, exclude: set[str] | None = None) -> dict:
+    """Snapshot a model's columns as JSON-encodable primitives.
+
+    Two traps this exists to avoid, both of which produced a 500 on rollback:
+      1. `for field in obj.__table__.columns` iterates Column OBJECTS, not
+         names, so getattr() raised "attribute name must be string".
+      2. bomSnapshot is a JSON column, but Part carries Decimal / date /
+         datetime values that json.dumps cannot encode.
+    """
+    from datetime import date, datetime
+    from decimal import Decimal
+
+    exclude = exclude or set()
+    out: dict = {}
+    for name in obj.__table__.columns.keys():
+        if name in exclude:
+            continue
+        value = getattr(obj, name, None)
+        if isinstance(value, Decimal):
+            value = float(value)
+        elif isinstance(value, (datetime, date)):
+            value = value.isoformat()
+        out[name] = value
+    return out
+
 # Columns callers may sort revisions by via PageParams.sort_by — kept narrow
 # to avoid arbitrary attribute access off the ORM model.
 _SORTABLE_COLUMNS = {"id", "createdAt", "revisionNumber", "entityType"}
@@ -142,9 +168,15 @@ async def rollback_to_revision(
             revisionNumber=next_rev,
             revisionLabel=f"Rollback to revision {revision.revisionNumber}",
             description=f"Rolled back to revision {revision.revisionNumber} ({revision.description or 'no description'})",
-            bomSnapshot={
-                field: getattr(part, field) for field in part.__table__.columns if field != "id"
-            },
+            # Iterating a ColumnCollection yields Column OBJECTS, not names, so
+            # `getattr(part, <Column>)` raised "attribute name must be string,
+            # not 'Column'" and EVERY part rollback returned 500. Use .keys().
+            #
+            # Values are coerced to JSON-safe primitives too: bomSnapshot is a
+            # JSON column, and a Part carries Decimal/date/datetime values that
+            # json cannot encode — which would have been the next 500 after the
+            # attribute error was fixed.
+            bomSnapshot=_json_safe_columns(part, exclude={"id"}),
             createdById=current_user.id,
             tenantId=current_user.tenantId,
         )

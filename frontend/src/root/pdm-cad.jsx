@@ -145,8 +145,8 @@ function PDMVaultScreen() {
             ext: (doc.fileType || "").toUpperCase() || "FILE",
             size: formatFileSize(doc.fileSize),
             rev: doc.version != null ? String(doc.version) : "—",
-            // No lock/checkout table exists on the backend yet — this stays
-            // a local, session-only toggle (see toggleCheckout below).
+            // No lock/checkout table exists on the backend, so this is always
+            // unknown — never a locked-by name. See LOCKING_UNAVAILABLE below.
             checked_out: null,
             modified: (doc.updatedAt || doc.createdAt || "").slice(0, 10) || "—",
             author: doc.uploadedBy || "—",
@@ -187,42 +187,17 @@ function PDMVaultScreen() {
     count: f.count,
   }));
 
-  // File locking has no backend table yet, so check-in/out stays a local,
-  // non-persisting toggle (preserved as a working UI affordance rather than
-  // removed, since there's nothing server-side to wire it to).
-  const toggleCheckout = (i) => {
-    const f = files[i];
-    if (f.checked_out === ME) {
-      const next = files.map((x, j) =>
-        j === i ? { ...x, checked_out: null } : x,
-      );
-      setFiles(next);
-      toast(
-        (
-          __t("pdm.checkedIn") || "Checked in {name} · others can now edit"
-        ).replace("{name}", f.name),
-        { kind: "success" },
-      );
-    } else if (f.checked_out) {
-      toast(
-        (
-          __t("pdm.cannotCheckOut") || "Cannot check out — locked by {user}"
-        ).replace("{user}", f.checked_out),
-        { kind: "warn" },
-      );
-    } else {
-      const next = files.map((x, j) =>
-        j === i ? { ...x, checked_out: ME } : x,
-      );
-      setFiles(next);
-      toast(
-        (
-          __t("pdm.checkedOut") || "Checked out {name} · locked for your edits"
-        ).replace("{name}", f.name),
-        { kind: "success" },
-      );
-    }
-  };
+  // WAS FALSE: this was a local, non-persisting toggle that nonetheless toasted
+  // "Checked out {name} · locked for your edits" and "Checked in {name} ·
+  // others can now edit" — a guarantee ABOUT OTHER USERS that nothing could
+  // honour. There is no lock/checkout route or table on the backend (verified
+  // against the live route list and the models: no /documents/*/lock, no
+  // checkout/lock model, no checked_out/locked_by column), so two engineers
+  // could each "check out" the same file and each be told it was locked.
+  // The control stays visible but disabled until a real lock store exists.
+  const LOCKING_UNAVAILABLE =
+    __t("pdm.lockingUnavailable") ||
+    "File locking is not available in this build — the server has no checkout store, so nothing can be locked against other users.";
 
   const columns = [
     {
@@ -304,29 +279,25 @@ function PDMVaultScreen() {
       key: "actions",
       header: "",
       render: (f) => {
-        const i = files.indexOf(f);
         const checkLabel =
-          f.checked_out === ME
-            ? __t("pdm.checkIn") || "Check in"
-            : __t("pdm.checkOut") || "Check out";
+          (__t("pdm.checkOut") || "Check out") + " — " + LOCKING_UNAVAILABLE;
         return (
           <div
             className="flex gap-2 items-center"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* WAS FALSE: this toggled a local flag and claimed the file was
+                locked for/against other users. Disabled until a lock table
+                exists — see LOCKING_UNAVAILABLE above. */}
             <Button
               variant="ghost"
               size="sm"
               iconOnly
-              onClick={() => toggleCheckout(i)}
+              disabled
               title={checkLabel}
               aria-label={checkLabel}
             >
-              {f.checked_out === ME ? (
-                <Icon.Check size={11} />
-              ) : (
-                <Icon.X size={11} />
-              )}
+              <Icon.X size={11} />
             </Button>
             <Menu
               ariaLabel={__t("pdm.moreOptions") || "More options"}
@@ -394,21 +365,14 @@ function PDMVaultScreen() {
   ];
 
   // Derived from the currently loaded folder's real files — the backend has
-  // no vault-wide aggregate for these two, so they're honestly scoped to
-  // what's on screen rather than a fabricated tenant-wide number.
-  const checkedOutCount = files.filter((f) => f.checked_out).length;
+  // no vault-wide aggregate for this, so it's honestly scoped to what's on
+  // screen rather than a fabricated tenant-wide number.
   const pendingReviewCount = files.filter((f) => f.state === "review").length;
 
+  // WAS FALSE: this appended "{n} checked out" — a count of the local toggle
+  // above, never of anything the server knows. Dropped with the toggle.
   const statusLine =
-    selectedPath +
-    " · " +
-    files.length +
-    " " +
-    (__t("pdm.files") || "files") +
-    " · " +
-    checkedOutCount +
-    " " +
-    (__t("pdm.checkedOutLower") || "checked out");
+    selectedPath + " · " + files.length + " " + (__t("pdm.files") || "files");
 
   const stats = [
     {
@@ -416,8 +380,11 @@ function PDMVaultScreen() {
       v: vaultStats?.totalFiles ?? 0,
     },
     {
+      // WAS FALSE: reported the local toggle's count as a fact ("0 checked
+      // out"). Nothing tracks checkouts server-side, so the number is unknown,
+      // not zero.
       l: __t("pdm.checkedOutColumn") || "Checked out",
-      v: checkedOutCount,
+      v: "—",
     },
     {
       l: __t("pdm.pendingReview") || "Pending review",
@@ -1108,17 +1075,19 @@ function CADMarkupModal({ open, onClose, file }) {
           <Button variant="secondary" onClick={onClose}>
             {__t("common.cancel") || "Cancel"}
           </Button>
+          {/* WAS FALSE: this button called onClose() and toasted "Saved {n}
+              markup annotations" without any API call — `marks` is component
+              state that is discarded on close. There is no annotation/markup
+              persistence on the backend (no annotations route under
+              /documents, no annotation model), so the button is disabled
+              rather than lying. */}
           <Button
             variant="primary"
-            onClick={() => {
-              onClose();
-              toast(
-                (
-                  __t("pdm.markupSaved") || "Saved {count} markup annotations"
-                ).replace("{count}", marks.length),
-                { kind: "success" },
-              );
-            }}
+            disabled
+            title={
+              __t("pdm.markupNotPersisted") ||
+              "Saving markup is not available in this build — the server has no annotation store."
+            }
           >
             <Icon.Check size={12} />{" "}
             {(__t("pdm.saveMarkup") || "Save markup ({count})").replace(
@@ -1129,6 +1098,10 @@ function CADMarkupModal({ open, onClose, file }) {
         </>
       }
     >
+      <div className="fs-11 fg-3 mb-10" role="note">
+        {__t("pdm.markupNotPersisted") ||
+          "Saving markup is not available in this build — the server has no annotation store. Annotations below are a scratch overlay and are discarded when this dialog closes."}
+      </div>
       <div
         className="flex gap-6 mb-10"
         role="group"
@@ -1323,10 +1296,33 @@ CADMarkupModal.propTypes = {
 };
 
 // ============ CAD ATTRIBUTE EXTRACTION ============
+// Map extracted CAD metadata onto the fields a Part record actually has.
+// PUT /parts/{id} is a partial update (model_dump(exclude_unset=True)), so
+// only what the parser genuinely read is sent — anything it could not read
+// comes back as "—" and is skipped rather than written as junk.
+function partPatchFromAttrs(attrs) {
+  const real = (v) => (v && v !== "—" ? v : null);
+  const patch = {};
+  if (real(attrs.material)) patch.material = attrs.material;
+  if (real(attrs.bounding_box)) patch.dimensions = attrs.bounding_box;
+  const massNum = parseFloat(String(attrs.mass ?? ""));
+  if (Number.isFinite(massNum)) patch.weight = massNum;
+  // Everything else the parser exposes (custom properties, format, CAD
+  // version, entity count) has no dedicated Part column — it goes to
+  // customFields, which is a free-form dict.
+  const custom = { ...(attrs.custom || {}) };
+  if (real(attrs.file_format)) custom.cadFileFormat = attrs.file_format;
+  if (real(attrs.sw_version)) custom.cadVersion = attrs.sw_version;
+  if (real(attrs.entity_count)) custom.cadEntityCount = attrs.entity_count;
+  if (Object.keys(custom).length) patch.customFields = custom;
+  return patch;
+}
+
 function CADAttrsModal({ open, onClose, file }) {
   const [extracting, setExtracting] = React.useState(false);
   const [attrs, setAttrs] = React.useState(null);
   const [extractError, setExtractError] = React.useState(null);
+  const [syncing, setSyncing] = React.useState(false);
   React.useEffect(() => {
     if (open) {
       setExtracting(true);
@@ -1395,18 +1391,67 @@ function CADAttrsModal({ open, onClose, file }) {
             <Button variant="secondary" onClick={onClose}>
               {__t("common.close") || "Close"}
             </Button>
+            {/* WAS FALSE: this only called onClose() and toasted "Attributes
+                synced to part record" — no API call at all, nothing was ever
+                written. Now writes the extracted attributes back with
+                api.parts.update (PUT /parts/{id}) and reports the real
+                outcome; disabled when the file has no linked part to sync to. */}
             <Button
               variant="primary"
-              onClick={() => {
-                onClose();
-                toast(
-                  __t("pdm.attributesSynced") ||
-                    "Attributes synced to part record",
-                  { kind: "success" },
-                );
+              disabled={syncing || !file.partId}
+              title={
+                file.partId
+                  ? undefined
+                  : __t("pdm.noPartLinked") ||
+                    "This file isn't linked to a part record, so there is nothing to sync to."
+              }
+              onClick={async () => {
+                const patch = partPatchFromAttrs(attrs);
+                if (Object.keys(patch).length === 0) {
+                  toast(
+                    __t("pdm.nothingToSync") ||
+                      "Nothing to sync — none of the extracted metadata maps to a field on the part record.",
+                    { kind: "info" },
+                  );
+                  return;
+                }
+                setSyncing(true);
+                try {
+                  if (patch.customFields) {
+                    // customFields is a whole-column replace on PUT, so send
+                    // the part's existing dict merged with the CAD keys —
+                    // otherwise syncing wipes every unrelated custom field.
+                    const part = await api.parts.get(file.partId);
+                    patch.customFields = {
+                      ...(part?.customFields || {}),
+                      ...patch.customFields,
+                    };
+                  }
+                  await api.parts.update(file.partId, patch);
+                  onClose();
+                  toast(
+                    (
+                      __t("pdm.attributesSynced") ||
+                      "Synced {count} attributes to the part record"
+                    ).replace("{count}", Object.keys(patch).length),
+                    { kind: "success" },
+                  );
+                } catch (e) {
+                  toast(
+                    e.message ||
+                      __t("pdm.syncToPartFailed") ||
+                      "Sync to part failed",
+                    { kind: "error" },
+                  );
+                } finally {
+                  setSyncing(false);
+                }
               }}
             >
-              <Icon.Check size={12} /> {__t("pdm.syncToPart") || "Sync to part"}
+              <Icon.Check size={12} />{" "}
+              {syncing
+                ? __t("common.working") || "Working…"
+                : __t("pdm.syncToPart") || "Sync to part"}
             </Button>
           </>
         )
@@ -1438,6 +1483,12 @@ function CADAttrsModal({ open, onClose, file }) {
       )}
       {attrs && (
         <>
+          {!file.partId && (
+            <div className="fs-11 fg-3 mb-10" role="note">
+              {__t("pdm.noPartLinked") ||
+                "This file isn't linked to a part record, so there is nothing to sync to."}
+            </div>
+          )}
           <div className="font-mono fs-10 fg-3 uppercase letter-sp-6 mb-8">
             {__t("pdm.geometricProperties") || "Geometric properties"}
           </div>

@@ -2,7 +2,7 @@ import PropTypes from "prop-types";
 import { getInrRate } from "../utils/currency.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
-import { api } from "../globals";
+import { api, escapeHtml, openPrintWindow } from "../globals";
 import {
   Button,
   Menu,
@@ -448,17 +448,22 @@ function InventoryScreen() {
                   );
                   return;
                 }
+                // Was: toast("Reorder report drafted \u00B7 N SKUs flagged",
+                // {kind:"success"}) \u2014 nothing was drafted anywhere; the count
+                // is real but the claim was not. No safe way to draft a PO
+                // from here: POST /api/v1/procurement/ requires a vendorId and
+                // an inventory row carries none, and /planning/{bom_id}/
+                // generate-po works off a BOM, not off stock levels. Prefilling
+                // the PO modal is not possible either \u2014 NewPOModal
+                // (root/overlays.jsx) takes no payload and ModalsHost passes it
+                // none. So: state the true count and really open the PO modal.
+                // Wire the prefill when NewPOModal accepts modalContext.
                 toast(
-                  __t("inventory.reorderReport", { count: flagged }) ||
-                    `Reorder report drafted \u00B7 ${flagged} SKU${flagged === 1 ? "" : "s"} flagged`,
-                  {
-                    kind: "success",
-                    action: {
-                      label: __t("inventory.openPo") || "Open PO",
-                      onClick: () => ctx?.openModal("new-po"),
-                    },
-                  },
+                  __t("inventory.reorderFlagged", { count: flagged }) ||
+                    `${flagged} SKU${flagged === 1 ? "" : "s"} at or below reorder point \u00B7 nothing ordered yet`,
+                  { kind: "warn" },
                 );
+                ctx?.openModal("new-po");
               }}
             >
               <Icon.Cart size={12} />{" "}
@@ -657,11 +662,35 @@ function InventoryScreen() {
                     icon: <Icon.Scan size={11} />,
                     label:
                       __t("inventory.printBinLabel") || "Print bin label",
-                    onSelect: () =>
-                      toast(
-                        __t("inventory.printing", { bin: r.bin }) ||
-                          "Printing " + r.bin,
-                      ),
+                    // Was: toast("Printing <bin>") — nothing printed. Uses the
+                    // same escapeHtml + openPrintWindow path as the other print
+                    // actions (detail-drawer, DiffScreen, ECRScreen).
+                    onSelect: () => {
+                      if (!r.bin || r.bin === "—") {
+                        toast(
+                          __t("inventory.noBinLocation", { pn: r.pn }) ||
+                            `${r.pn} has no bin location to label`,
+                          { kind: "warn" },
+                        );
+                        return;
+                      }
+                      const h = escapeHtml;
+                      openPrintWindow(
+                        r.bin,
+                        "<!doctype html><html><head><title>" +
+                          h(r.bin) +
+                          "</title><style>body{font-family:monospace;text-align:center;padding:30px}" +
+                          ".bin{font-size:34px;font-weight:700;letter-spacing:2px}</style>" +
+                          "</head><body><div class='bin'>" +
+                          h(r.bin) +
+                          "</div><div style='margin-top:10px;font-size:15px'>" +
+                          h(r.pn) +
+                          "</div><div style='font-size:12px;color:#666'>" +
+                          h(r.name) +
+                          "</div></body></html>",
+                        { printDelay: 200 },
+                      );
+                    },
                   },
                 ]}
               />

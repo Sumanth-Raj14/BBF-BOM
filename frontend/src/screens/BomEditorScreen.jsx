@@ -36,7 +36,15 @@ function BomEditorScreen({
   const userRole = ctx?.userRole || "Viewer";
   const p = ctx?.project || data.project;
   const r = ctx?.rollup || data.rollup;
-  const deltaPct = ((r.bomCost - r.lastCost) / r.lastCost) * 100;
+  // fixfe: rollup is derived from the rows on screen now (AppCtx.deriveRollup)
+  // and carries lastCost: null — no prior-revision cost is loaded anywhere in
+  // the app. The unguarded ((bomCost - null) / null) * 100 rendered
+  // "▲ Infinity% vs last rev" (or NaN% on an empty BOM). null = nothing to
+  // compare against; the cell shows "—".
+  const deltaPct =
+    Number.isFinite(r.lastCost) && r.lastCost !== 0
+      ? ((r.bomCost - r.lastCost) / r.lastCost) * 100
+      : null;
   // Same fallback convention BomEditor uses for the canonical instance-BOM
   // id (see root/bom-editor.jsx) — neither the demo fixture nor the
   // Parts-backed row source currently threads a real bom_id through.
@@ -218,8 +226,17 @@ function BomEditorScreen({
         <div className="ribbon-cell">
           <div className="label">{__t("bomShell.bomCost")}</div>
           <div className="value">{INR(r.bomCost, 2)}</div>
-          <div className={"delta " + (deltaPct > 0 ? "up" : "down")}>
-            {deltaPct > 0 ? "▲" : "▼"} {deltaPct.toFixed(2)}% vs last rev
+          <div
+            className={
+              "delta " +
+              (deltaPct === null ? "flat" : deltaPct > 0 ? "up" : "down")
+            }
+          >
+            {deltaPct === null
+              ? "—"
+              : (deltaPct > 0 ? "▲ " : "▼ ") +
+                deltaPct.toFixed(2) +
+                "% vs last rev"}
           </div>
         </div>
         <div className="ribbon-cell">

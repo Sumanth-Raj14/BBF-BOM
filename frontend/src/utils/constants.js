@@ -7,33 +7,19 @@ export const TWEAK_DEFAULTS = {
 // — was the stray near-duplicate "#ba4816" (four-contradictory-accents bug).
 export const ACCENT_PRESETS = ["#e85d1f", "#b8480f", "#0288d1", "#2e7d32"];
 
-export const INITIAL_COMMENTS = {
-  "EL-MCU-STM32H7": [
-    { id: 1, who: "E. Chen", init: "EC", color: "", text: "H743 errata ES0392 \u2014 moving Rev A \u2192 Rev B fixes the I2C wakeup bug. Confirmed in stress tests.", time: "12 min" },
-    { id: 2, who: "M. Park", init: "MP", color: "user-2", text: "Lead bumped to 42 days \u2014 let's keep 250 on the shelf min.", time: "8 min" },
-  ],
-  "EL-PCB-MAIN-R3": [
-    { id: 1, who: "R. Sato", init: "RS", color: "user-3", text: "JLCPCB lead time looks fine but we should keep a 100-board safety stock \u2014 14d is tight for the August demo.", time: "2 hr" },
-  ],
-  "EL-BMS-12S": [
-    { id: 1, who: "System", init: "\u232C", color: "sys", text: "Lead time crept 28 \u2192 35 days. Flagged as supply risk.", time: "2 days" },
-  ],
-};
-
-export const INITIAL_APPROVALS = {
-  "ATL-MFR-CHS": { engineering: "approved", procurement: "approved", finance: "approved" },
-  "ATL-MFR-PWR": { engineering: "approved", procurement: "approved", finance: "pending" },
-  "ATL-MFR-CTL": { engineering: "approved", procurement: "pending", finance: "pending" },
-  "ATL-MFR-IO":  { engineering: "pending",  procurement: "pending", finance: "pending" },
-};
-
-export const INITIAL_NOTIFICATIONS = [
-  { id: 1, who: "M. Park", init: "MP", color: "user-2", action: "requested approval on", obj: "ATL-MFR-CTL Rev D", time: "54 min", read: false, route: "bom" },
-  { id: 2, who: "R. Sato", init: "RS", color: "user-3", action: "commented on", obj: "EL-PCB-MAIN-R3", time: "2 hr", read: false, route: "bom" },
-  { id: 3, who: "System", init: "\u232C", color: "sys", action: "detected duplicate", obj: "HW-FAS-M3-08", time: "3 hr", read: false, route: "parts" },
-  { id: 4, who: "K. Singh", init: "KS", color: "user-4", action: "approved PO", obj: "PO-2026-0481", time: "5 hr", read: true, route: "procurement" },
-  { id: 5, who: "E. Chen", init: "EC", color: "", action: "released BOM", obj: "v3.2.0", time: "yesterday", read: true, route: "bom" },
-  { id: 6, who: "System", init: "\u232C", color: "sys", action: "flagged supply risk on", obj: "EL-BMS-12S", time: "2 days", read: true, route: "bom" },
-];
-
-
+// fixfe: three fabricated-data fixtures used to live here and have been deleted.
+//
+//   INITIAL_NOTIFICATIONS — six invented activity entries ("M. Park requested
+//     approval on ATL-MFR-CTL Rev D · 54 min", "K. Singh approved PO-2026-0481",
+//     …). They were the localStorage default for AppCtx's notification state and
+//     rendered verbatim in the TopBar bell, so every fresh install saw six
+//     events that never happened, complete with an unread badge. The bell now
+//     reads GET /api/v1/notifications (api.notifications.list) and shows the
+//     real list — or an empty "all caught up" state, which is honest.
+//
+//   INITIAL_COMMENTS / INITIAL_APPROVALS — invented reviewer names, comment
+//     text and approval statuses. Already unreferenced (AppCtx starts these
+//     empty and hydrates them from the real API), so this only removes the
+//     temptation to wire them back up.
+//
+// Nothing replaces them: fabricated data has no honest version.

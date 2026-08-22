@@ -5,7 +5,11 @@ import MakeVsBuyScreen from "../components/screens/MakeVsBuyScreen.jsx";
 import SupplierScorecardsScreen from "../components/screens/SupplierScorecardsScreen.jsx";
 import ESignaturesScreen from "../components/screens/ESignaturesScreen.jsx";
 import { storage } from "../utils/storage.js";
-import { isOfflineCapableError } from "../utils/offlineAuth.js";
+import {
+  isOfflineCapableError,
+  rememberOfflineCredential,
+  verifyOfflineCredential,
+} from "../utils/offlineAuth.js";
 import { ACCENT_PRESETS } from "../utils/constants.js";
 import { AppContext, AppCtxProvider } from "../context/AppCtx.jsx";
 import useKeyboardShortcuts from "../hooks/useKeyboardShortcuts.js";
@@ -372,13 +376,17 @@ function AppShell() {
       <AuthScreen
         onSignIn={async (u) => {
           if (u.email) {
+            const pw = u.password; // also needed by the offline check in catch
             try {
-              const pw = u.password;
               const result = await api.auth.login(u.email, pw);
               if (result && result.access_token) {
                 // Auth is cookie-based (credentials:'include'); do not persist
                 // the token or password. storage.auth.set strips credentials.
                 storage.auth.set(u);
+                // The server just vouched for these credentials — record the
+                // verifier so a genuinely-offline login can be checked against
+                // something instead of being waved through.
+                await rememberOfflineCredential(u.email, pw);
                 ctx.setAuthed(u);
                 toast(__t("common.apiConnected") + " - " + u.name, {
                   kind: "success",
@@ -398,21 +406,34 @@ function AppShell() {
               // utils/offlineAuth.js, where it is unit-tested.
               const isNetworkError = isOfflineCapableError(e.message);
               if (isNetworkError) {
-                storage.auth.set(u);
-                ctx.setAuthed(u);
-                toast(__t("common.offlineMode"), { kind: "warn" });
-                if (
-                  intendedRoute.current &&
-                  intendedRoute.current !== "login"
-                ) {
-                  setRoute(intendedRoute.current);
+                // WHAT WAS FALSE BEFORE: an unreachable server admitted ANY
+                // email + any 4-char password and told them "Offline mode",
+                // i.e. claimed an authentication that never happened. Offline
+                // access now requires a credential this device has already
+                // seen the server accept.
+                const known = await verifyOfflineCredential(u.email, pw);
+                if (known) {
+                  storage.auth.set(u);
+                  ctx.setAuthed(u);
+                  toast(__t("common.offlineMode"), { kind: "warn" });
+                  if (
+                    intendedRoute.current &&
+                    intendedRoute.current !== "login"
+                  ) {
+                    setRoute(intendedRoute.current);
+                  }
+                  return;
                 }
+                toast(
+                  __t("auth.loginFailed") +
+                    ": server unreachable, and this account has not signed in on this device before. Offline sign-in needs a previous successful sign-in here.",
+                  { kind: "error" },
+                );
                 return;
               }
               toast(__t("auth.loginFailed") + ": " + e.message, {
                 kind: "error",
               });
-              return;
             }
           }
         }}
