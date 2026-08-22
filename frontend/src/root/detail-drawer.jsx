@@ -940,7 +940,12 @@ function FilesTab({ row, openModal }) {
         <Button
           variant="secondary"
           size="sm"
-          onClick={() => (ctx || { openModal }).openModal?.("upload")}
+          // Pass the part through so the upload actually ATTACHES to it.
+          // Without partId the file uploaded fine and then vanished from this
+          // tab — it landed unattached in the global document pool.
+          onClick={() =>
+            (ctx || { openModal }).openModal?.("upload", { partId })
+          }
         >
           <Icon.Plus size={11} /> {__t("common.upload") || "Upload"}
         </Button>
@@ -1340,7 +1345,7 @@ function CommentsTab({ row }) {
                   iconOnly
                   title={__t("detailDrawer.attachFile") || "Attach file"}
                   aria-label={__t("detailDrawer.attachFile") || "Attach file"}
-                  onClick={() => ctx?.openModal("upload")}
+                  onClick={() => ctx?.openModal("upload", { partId: getRealPartId(row) })}
                 >
                   <Icon.Import size={11} />
                 </Button>
