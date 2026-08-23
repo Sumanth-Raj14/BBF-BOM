@@ -86,9 +86,6 @@ function CostRollupView({ data }) {
   // the client sum only as a fallback when the call has not landed or failed.
   const total = apiRollup?.total_cost ?? clientTotal;
 
-  // Percentages must share the base with the headline number, or the bars sum
-  // to something other than 100% of the total shown above them.
-  const pctBase = total || 1;
   const uomWarnings = apiRollup?.uom_warnings || [];
   const currencyWarnings = apiRollup?.currency_warnings || [];
 
@@ -96,6 +93,19 @@ function CostRollupView({ data }) {
   // local display rate on top of that, which would be a second, invented
   // conversion. So server figures in a reporting currency get formatted as-is.
   const rc = apiRollup?.reporting_currency || null;
+
+  // Percentages must share their base — and their CURRENCY — with the numbers
+  // they divide, or the bars sum to something other than 100% of the number
+  // printed above them.
+  //
+  // /cost-rollup returns only a *total* in the reporting currency; there is no
+  // per-line breakdown in it (see get_cost_rollup: cost_by_level and
+  // cost_by_category are the only splits, neither is per sub-assembly). So the
+  // per-row figures below stay in the as-costed currency, and dividing an
+  // as-costed row by a converted total would be pure fiction — 100 EUR / a
+  // 9000 INR base. When rc is active the bars are therefore percentages of the
+  // as-costed total, and the note below says exactly that.
+  const pctBase = (rc ? clientTotal : total) || 1;
   const money = (n) => {
     if (!rc) return INR(n, 2);
     try {
@@ -110,18 +120,45 @@ function CostRollupView({ data }) {
     }
   };
 
+  // styles.css defines only .rollup-list/.rollup-row for this view — there is no
+  // .rollup-warn rule anywhere, so the warning blocks below were rendering as
+  // plain body text: present in the DOM, invisible as warnings. This file owns
+  // no stylesheet and the build has no styled-jsx, so the box is inline.
+  const box = (tone) => ({
+    maxWidth: "880px",
+    margin: "0 0 var(--sp-3)",
+    padding: "8px 12px",
+    borderLeft: `3px solid var(--status-${tone})`,
+    background: `color-mix(in srgb, var(--status-${tone}) 10%, var(--bg-elev))`,
+    borderRadius: "2px",
+    fontSize: "11px",
+  });
+
   const options = currencies.map(ccyCode).filter(Boolean);
   if (currency && !options.includes(currency)) options.unshift(currency);
   const max = Math.max(...subs.map((s) => s.ext), 1);
 
+  // "Most expensive parts" is a BOM-wide ranking, so a leaf's quantity has to be
+  // multiplied through its ancestors here too — the same effective quantity
+  // extOf uses above. Ranking on the raw per-parent qty under-counted every
+  // nested leaf (a part 3 levels down inside a qty-4 sub-assembly showed a
+  // quarter of its real spend) and made its % of BOM a fraction of the truth
+  // while still dividing by the full total.
   const leaves = [];
-  const walk = (rs) =>
+  const walk = (rs, mult = 1) =>
     rs.forEach((r) => {
-      if (r.children) walk(r.children);
-      else leaves.push(r);
+      const effQty = mult * (Number(r.qty) || 0);
+      // `children: []` is a LEAF, not an empty parent — same rule as extOf above
+      // and as deriveRollup in context/AppCtx.jsx. Testing `r.children` alone
+      // dropped every such node from the ranking while its cost stayed in
+      // pctBase, so the bars divided by money no row accounted for.
+      if (r.children && r.children.length) walk(r.children, effQty);
+      else leaves.push({ ...r, effQty, ext: (Number(r.cost) || 0) * effQty });
     });
-  walk(rows);
-  leaves.sort((a, b) => b.cost * b.qty - a.cost * a.qty);
+  // rows[0] is the top-level assembly itself; its own qty must not scale the
+  // BOM (one unit of the product is the basis), so walk its children.
+  walk(top.children);
+  leaves.sort((a, b) => b.ext - a.ext);
   const topLeaves = leaves.slice(0, 10);
 
   const columns = [
@@ -149,7 +186,7 @@ function CostRollupView({ data }) {
       key: "qty",
       header: __t("bomShell.colQty"),
       align: "num",
-      render: (r) => r.qty,
+      render: (r) => r.effQty,
     },
     {
       key: "cost",
@@ -162,7 +199,7 @@ function CostRollupView({ data }) {
       header: __t("bomShell.colExt"),
       align: "num",
       render: (r) => (
-        <span className="fw-600">{INR(r.cost * r.qty, 2)}</span>
+        <span className="fw-600">{INR(r.ext, 2)}</span>
       ),
     },
     {
@@ -170,8 +207,7 @@ function CostRollupView({ data }) {
       header: __t("bomShell.colPctOfBom"),
       align: "num",
       render: (r) => {
-        const ext = r.cost * r.qty;
-        const p = (ext / pctBase) * 100;
+        const p = (r.ext / pctBase) * 100;
         return (
           <div className="inline-flex items-center gap-8 justify-end w-100p">
             <span
@@ -231,7 +267,7 @@ function CostRollupView({ data }) {
       </div>
 
       {error && (
-        <div className="rollup-warn" role="alert">
+        <div className="rollup-warn" role="alert" style={box("danger")}>
           <strong>
             {__t("bomShell.rollupError") || "Cost roll-up could not be loaded"}
           </strong>
@@ -245,7 +281,7 @@ function CostRollupView({ data }) {
           is approximate for them. Silently dropping these warnings, as this
           view used to, presents an approximate number as an exact one. */}
       {uomWarnings.length > 0 && (
-        <div className="rollup-warn" role="status">
+        <div className="rollup-warn" role="status" style={box("warning")}>
           <strong>
             {__t("bomShell.uomWarning") ||
               "Some lines could not be unit-converted"}
@@ -270,7 +306,7 @@ function CostRollupView({ data }) {
           leaves it out and reports it here. The headline number is therefore
           incomplete for those lines, and saying so is the whole point. */}
       {currencyWarnings.length > 0 && (
-        <div className="rollup-warn" role="status">
+        <div className="rollup-warn" role="status" style={box("warning")}>
           <strong>
             {__t("bomShell.currencyWarning") ||
               "Some lines have no exchange rate and are excluded from the total"}
@@ -287,6 +323,15 @@ function CostRollupView({ data }) {
               +{currencyWarnings.length - 5} more
             </div>
           )}
+        </div>
+      )}
+
+      {/* Only the headline total is in rc. Saying so is the difference between
+          a converted report and a view that looks converted and isn't. */}
+      {rc && (
+        <div className="rollup-note" style={box("info")}>
+          {__t("bomShell.asCostedBreakdown") ||
+            `Only the total is converted to ${rc}. The sub-assembly and part figures below are as costed, and their percentages are of the as-costed total ${INR(clientTotal, 2)}.`}
         </div>
       )}
 

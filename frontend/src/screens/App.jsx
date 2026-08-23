@@ -6,6 +6,7 @@ import MakeVsBuyScreen from "../components/screens/MakeVsBuyScreen.jsx";
 import SupplierScorecardsScreen from "../components/screens/SupplierScorecardsScreen.jsx";
 import ESignaturesScreen from "../components/screens/ESignaturesScreen.jsx";
 import AdminOpsScreen from "../components/screens/AdminOpsScreen.jsx";
+import PublicShareScreen from "../components/screens/PublicShareScreen.jsx";
 import { storage } from "../utils/storage.js";
 import {
   isOfflineCapableError,
@@ -789,6 +790,15 @@ function AppShell() {
 }
 
 export default function App() {
+  // /share/:token is the ONE public route: an external supplier has no session,
+  // and AppShell renders <AuthScreen> for anyone unauthenticated. So it is
+  // matched here, above the auth gate and outside AppCtxProvider (whose data
+  // fetches are all tenant-scoped and would 401 for a public viewer).
+  const { pathname } = useLocation();
+  const shared = /^\/share\/(.+)$/.exec(pathname);
+  if (shared) {
+    return <PublicShareScreen token={decodeURIComponent(shared[1])} />;
+  }
   return (
     <AppCtxProvider>
       <AppShell />

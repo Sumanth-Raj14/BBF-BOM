@@ -1378,119 +1378,353 @@ MarginModal.propTypes = {
   open: PropTypes.bool,
   onClose: PropTypes.func,
 };
+// Share links are REAL now: create / list / revoke against
+// /api/v1/bom-shares (backend/app/api/endpoints/bom_shares.py), and the URL is
+// built from window.location.origin — the host actually serving this build.
+// What was false before: the link was "https://bbox.dev/share/" +
+// Math.random(), a domain the product does not serve, recomputed on every
+// render; "Copy link" copied that dead string and toasted success; and the
+// permission / expiry / password controls fed nothing.
+// Only what the backend enforces is offered: view-only (the public payload
+// carries no cost, no ids and no write route), an optional expiry, and an
+// optional password. There is no comment/suggest mode and no un-revoke.
+const SHARE_EXPIRY_MS = {
+  "24h": 24 * 3600 * 1000,
+  "7d": 7 * 24 * 3600 * 1000,
+  "30d": 30 * 24 * 3600 * 1000,
+};
+
+function shareUrl(token) {
+  return window.location.origin + "/share/" + token;
+}
+
+function shareDate(v) {
+  if (!v) return "—";
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? String(v) : d.toLocaleString();
+}
+
 function ShareLinkModal({ open, onClose }) {
-  if (!open) return null;
-  // Fix: this modal handed the user a fabricated URL —
-  // "https://bbox.dev/share/" + Math.random().toString(36).slice(2,12) — on a
-  // domain the product does not serve, recomputed on every render, and "Copy
-  // link" copied that dead string and toasted success. The permission /
-  // expiry / password controls fed nothing: there is no share or public-link
-  // route anywhere in the backend (checked against the live route list).
-  // Nothing here can be made real without a backend, so the link is gone and
-  // the controls are disabled with the reason stated in the notice below.
-  const [permission, setPermission] = React.useState("view");
+  const ctx = useAppStore();
+  const bomId = ctx?.bomId;
+  const [links, setLinks] = React.useState([]);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
   const [expires, setExpires] = React.useState("7d");
-  const [password, setPassword] = React.useState(false);
+  const [pwOn, setPwOn] = React.useState(false);
+  const [password, setPassword] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  const load = React.useCallback(async () => {
+    if (bomId == null) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.bomShares.list(bomId);
+      setLinks(Array.isArray(res) ? res : res?.items || res?.data || []);
+    } catch (e) {
+      setError(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [bomId]);
+
+  React.useEffect(() => {
+    if (open) load();
+  }, [open, load]);
+
+  // After the hooks, never before: `open` flipping must not change the hook
+  // count for this component instance.
+  if (!open) return null;
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const ms = SHARE_EXPIRY_MS[expires];
+      await api.bomShares.create({
+        bom_id: bomId,
+        expires_at: ms ? new Date(Date.now() + ms).toISOString() : null,
+        password: pwOn && password ? password : null,
+      });
+      toast(__t("power.shareLink.created") || "Share link created", {
+        kind: "success",
+      });
+      setPassword("");
+      setPwOn(false);
+      await load();
+    } catch (e) {
+      toast(
+        (__t("power.shareLink.createFailed") || "Could not create share link") +
+          ": " +
+          (e?.message || String(e)),
+        { kind: "error" },
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async (token) => {
+    const url = shareUrl(token);
+    try {
+      await navigator.clipboard.writeText(url);
+      toast(__t("common.copied") || "Link copied", { kind: "success" });
+    } catch {
+      // Never claim a copy that did not happen — show the link instead.
+      toast(
+        (__t("power.shareLink.copyFailed") || "Could not copy. The link is") +
+          " " +
+          url,
+        { kind: "warn" },
+      );
+    }
+  };
+
+  const revoke = async (row) => {
+    if (
+      !window.confirm(
+        __t("power.shareLink.revokeConfirm") ||
+          "Revoke this link? Anyone holding it loses access immediately, and it cannot be restored.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.bomShares.revoke(row.id);
+      toast(__t("power.shareLink.revoked") || "Share link revoked", {
+        kind: "success",
+      });
+      await load();
+    } catch (e) {
+      toast(
+        (__t("power.shareLink.revokeFailed") || "Could not revoke link") +
+          ": " +
+          (e?.message || String(e)),
+        { kind: "error" },
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const isExpired = (row) =>
+    row.expires_at != null && new Date(row.expires_at).getTime() <= Date.now();
+
+  const columns = [
+    {
+      key: "link",
+      header: __t("power.shareLink.link") || "Link",
+      render: (row) => (
+        <div
+          className="font-mono fs-10 fg-2"
+          style={{ wordBreak: "break-all" }}
+        >
+          {shareUrl(row.token)}
+          {row.has_password && (
+            <Badge tone="info" className="ml-4">
+              {__t("power.shareLink.passwordProtected") || "Password"}
+            </Badge>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "status",
+      header: __t("power.shareLink.status") || "Status",
+      render: (row) => {
+        if (row.revoked) {
+          return (
+            <StatusPill tone="neutral">
+              {__t("power.shareLink.revokedState") || "Revoked"}
+            </StatusPill>
+          );
+        }
+        if (isExpired(row)) {
+          return (
+            <StatusPill tone="neutral">
+              {__t("power.shareLink.expired") || "Expired"}
+            </StatusPill>
+          );
+        }
+        return (
+          <StatusPill tone="success">
+            {__t("power.shareLink.active") || "Active"}
+          </StatusPill>
+        );
+      },
+    },
+    {
+      key: "expires",
+      header: __t("power.shareLink.expiresAt") || "Expires",
+      render: (row) =>
+        row.expires_at
+          ? shareDate(row.expires_at)
+          : __t("power.shareLink.never") || "Never",
+    },
+    {
+      key: "access",
+      header: __t("power.shareLink.opens") || "Opens",
+      align: "num",
+      render: (row) => row.access_count ?? 0,
+    },
+    {
+      key: "last",
+      header: __t("power.shareLink.lastOpened") || "Last opened",
+      render: (row) => shareDate(row.last_accessed_at),
+    },
+    {
+      key: "actions",
+      header: "",
+      align: "right",
+      render: (row) => (
+        <div className="inline-flex gap-6">
+          <Button variant="secondary" onClick={() => copy(row.token)}>
+            <Icon.Link size={12} /> {__t("common.copy") || "Copy"}
+          </Button>
+          {!row.revoked && (
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() => revoke(row)}
+            >
+              {__t("power.shareLink.revoke") || "Revoke"}
+            </Button>
+          )}
+        </div>
+      ),
+    },
+  ];
+
   return (
     <Modal
       open={open}
       onClose={onClose}
       icon={<Icon.Link size={16} />}
+      size="lg"
       title={__t("power.shareLink.title") || "Share BOM"}
       subtitle={
         __t("power.shareLink.subtitle") ||
-        "Create a public link to view or comment"
+        "Create a read-only public link to this BOM"
       }
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
             {__t("common.close") || "Close"}
           </Button>
-          <Button variant="primary" disabled>
+          <Button
+            variant="primary"
+            disabled={busy || bomId == null || (pwOn && !password)}
+            onClick={create}
+          >
             <Icon.Link size={12} />{" "}
-            {__t("power.shareLink.copyLink") || "Copy link"}
+            {__t("power.shareLink.createLink") || "Create link"}
           </Button>
         </>
       }
     >
-      <div
-        className="bg-sunk border-line rounded-r2 font-mono fs-11 fg-3 mb-12"
-        style={{ padding: 10 }}
-      >
-        {__t("power.shareLink.noBackend") ||
-          "Public share links are not available in this build. There is no backend to issue a link or to enforce expiry and password protection, so no link can be created. The settings below are shown for reference only and are not saved."}
-      </div>
-      <Field
-        label={
-          __t("power.shareLink.anyoneWithLink") || "Anyone with the link can"
-        }
-      >
-        <Select
-          name="sharePermission"
-          disabled
-          value={permission}
-          onChange={(e) => setPermission(e.target.value)}
-        >
-          <option value="view">
-            {__t("power.shareLink.viewOnly") || "View only"}
-          </option>
-          <option value="comment">
-            {__t("power.shareLink.comment") || "Comment"}
-          </option>
-          <option value="suggest">
-            {__t("power.shareLink.suggestChanges") ||
-              "Suggest changes (review)"}
-          </option>
-        </Select>
-      </Field>
-      <div className="field-row">
-        <Field label={__t("power.shareLink.linkExpires") || "Link expires"}>
-          <Select
-            name="shareExpires"
-            disabled
-            value={expires}
-            onChange={(e) => setExpires(e.target.value)}
+      {bomId == null ? (
+        <EmptyState
+          title={__t("power.shareLink.noBom") || "No BOM selected"}
+          message={
+            __t("power.shareLink.noBomMsg") ||
+            "Open a BOM first — a share link points at one specific BOM."
+          }
+        />
+      ) : (
+        <>
+          <div
+            className="bg-sunk border-line rounded-r2 fs-11 fg-3 mb-12"
+            style={{ padding: 10 }}
           >
-            <option value="24h">
-              {__t("power.shareLink.in24Hours") || "In 24 hours"}
-            </option>
-            <option value="7d">
-              {__t("power.shareLink.in7Days") || "In 7 days"}
-            </option>
-            <option value="30d">
-              {__t("power.shareLink.in30Days") || "In 30 days"}
-            </option>
-            <option value="never">
-              {__t("power.shareLink.never") || "Never"}
-            </option>
-          </Select>
-        </Field>
-        <div className="field flex flex-col justify-center gap-6">
-          <Checkbox
-            name="sharePasswordEnabled"
-            disabled
-            checked={password}
-            onChange={(e) => setPassword(e.target.checked)}
-            label={
-              __t("power.shareLink.passwordProtect") || "Password protect"
-            }
-          />
-          {password && (
-            <Input
-              name="sharePassword"
-              mono
-              disabled
-              className="mt-4"
-              aria-label={
-                __t("power.shareLink.passwordPlaceholder") || "Password"
-              }
-              placeholder={
-                __t("power.shareLink.passwordPlaceholder") || "Password"
+            {__t("power.shareLink.scopeNote") ||
+              "Anyone with the link sees this BOM read-only: line numbers, parts, quantities, reference designators and notes. Costs, people and internal ids are never included, and the link grants no way to change anything."}
+          </div>
+
+          <div className="field-row">
+            <Field label={__t("power.shareLink.linkExpires") || "Link expires"}>
+              <Select
+                name="shareExpires"
+                value={expires}
+                onChange={(e) => setExpires(e.target.value)}
+              >
+                <option value="24h">
+                  {__t("power.shareLink.in24Hours") || "In 24 hours"}
+                </option>
+                <option value="7d">
+                  {__t("power.shareLink.in7Days") || "In 7 days"}
+                </option>
+                <option value="30d">
+                  {__t("power.shareLink.in30Days") || "In 30 days"}
+                </option>
+                <option value="never">
+                  {__t("power.shareLink.never") || "Never"}
+                </option>
+              </Select>
+            </Field>
+            <div className="field flex flex-col justify-center gap-6">
+              <Checkbox
+                name="sharePasswordEnabled"
+                checked={pwOn}
+                onChange={(e) => setPwOn(e.target.checked)}
+                label={
+                  __t("power.shareLink.passwordProtect") || "Password protect"
+                }
+              />
+              {pwOn && (
+                <Input
+                  name="sharePassword"
+                  mono
+                  type="password"
+                  className="mt-4"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  aria-label={
+                    __t("power.shareLink.passwordPlaceholder") || "Password"
+                  }
+                  placeholder={
+                    __t("power.shareLink.passwordPlaceholder") || "Password"
+                  }
+                />
+              )}
+            </div>
+          </div>
+
+          {loading && (
+            <div className="fs-11 fg-3" role="status">
+              {__t("common.loading") || "Loading…"}
+            </div>
+          )}
+
+          {!loading && error && (
+            <div className="fg-danger fs-11" role="alert">
+              {(__t("power.shareLink.loadFailed") ||
+                "Could not load share links") +
+                ": " +
+                error}
+            </div>
+          )}
+
+          {!loading && !error && links.length === 0 && (
+            <EmptyState
+              title={__t("power.shareLink.emptyTitle") || "No links yet"}
+              message={
+                __t("power.shareLink.empty") ||
+                "This BOM has no share links. Create one above."
               }
             />
           )}
-        </div>
-      </div>
+
+          {!loading && !error && links.length > 0 && (
+            <DataTable
+              columns={columns}
+              rows={links}
+              dense
+              ariaLabel={__t("power.shareLink.title") || "Share BOM"}
+            />
+          )}
+        </>
+      )}
     </Modal>
   );
 }
