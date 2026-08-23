@@ -1,6 +1,16 @@
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+)
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -315,6 +325,9 @@ async def process_import(
 
 @router.get("/jobs", response_model=list[BulkImportJobResponse])
 async def list_import_jobs(
+    response: Response,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -327,10 +340,24 @@ async def list_import_jobs(
     docstring admitted it was "not safe for a tenant-facing UI to call" —
     dead, dangerous surface, so it was deleted rather than scoped.
     """
+    # Capped: import history only ever grows, so an unbounded SELECT here gets
+    # slower and heavier for the life of the deployment. X-Total-Count reports
+    # the real total so the caller knows whether it is seeing everything.
+    total = (
+        await db.execute(
+            select(func.count())
+            .select_from(BulkImportJob)
+            .where(BulkImportJob.tenantId == current_user.tenantId)
+        )
+    ).scalar_one()
+    response.headers["X-Total-Count"] = str(total)
+
     result = await db.execute(
         select(BulkImportJob)
         .where(BulkImportJob.tenantId == current_user.tenantId)
         .order_by(BulkImportJob.createdAt.desc())
+        .limit(limit)
+        .offset(offset)
     )
     jobs = result.scalars().all()
     return [

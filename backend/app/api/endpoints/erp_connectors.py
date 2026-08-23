@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -191,11 +192,40 @@ async def sync_connector(
 
 
 @router.get("/{connector_id}/logs", response_model=list[ERPSyncLogResponse])
-async def get_sync_logs(connector_id: int, db: AsyncSession = Depends(get_db)):
+async def get_sync_logs(
+    connector_id: int,
+    response: Response,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Newest-first sync log for one connector, capped.
+
+    This used to SELECT the whole table. erp_sync_logs gains a row per sync run
+    forever, so on a connector polling every few minutes the response grows
+    without bound until the request OOMs the worker and takes the instance down
+    with it -- and the older the deployment, the likelier that becomes.
+
+    The cap is not silent: X-Total-Count carries the true number of rows, so a
+    caller can tell "100 logs" from "the first 100 of 40,000" and page with
+    offset. Truncating without saying so would just move the failure from a
+    crash to a wrong answer.
+    """
+    total = (
+        await db.execute(
+            select(func.count())
+            .select_from(ERPSyncLog)
+            .where(ERPSyncLog.connectorId == connector_id)
+        )
+    ).scalar_one()
+    response.headers["X-Total-Count"] = str(total)
+
     result = await db.execute(
         select(ERPSyncLog)
         .where(ERPSyncLog.connectorId == connector_id)
         .order_by(ERPSyncLog.createdAt.desc())
+        .limit(limit)
+        .offset(offset)
     )
     logs = result.scalars().all()
     return [

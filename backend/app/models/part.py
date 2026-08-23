@@ -22,7 +22,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.db.base import Base
-from app.models.mixins import TenantAwareMixin
+from app.models.mixins import OptimisticLockMixin, TenantAwareMixin
 
 # Association tables for many-to-many relationships
 part_tags = Table(
@@ -54,7 +54,7 @@ part_compliance = Table(
 )
 
 
-class Part(Base, TenantAwareMixin):
+class Part(Base, TenantAwareMixin, OptimisticLockMixin):
     __tablename__ = "parts"
 
     id = Column(Integer, primary_key=True)

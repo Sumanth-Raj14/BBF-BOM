@@ -33278,6 +33278,7 @@
     },
     "/api/v1/erp-connectors/{connector_id}/logs": {
       "get": {
+        "description": "Newest-first sync log for one connector, capped.\n\nThis used to SELECT the whole table. erp_sync_logs gains a row per sync run\nforever, so on a connector polling every few minutes the response grows\nwithout bound until the request OOMs the worker and takes the instance down\nwith it -- and the older the deployment, the likelier that becomes.\n\nThe cap is not silent: X-Total-Count carries the true number of rows, so a\ncaller can tell \"100 logs\" from \"the first 100 of 40,000\" and page with\noffset. Truncating without saying so would just move the failure from a\ncrash to a wrong answer.",
         "operationId": "get_sync_logs_api_v1_erp_connectors__connector_id__logs_get",
         "parameters": [
           {
@@ -33286,6 +33287,29 @@
             "required": true,
             "schema": {
               "title": "Connector Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
               "type": "integer"
             }
           }
@@ -34714,6 +34738,31 @@
       "get": {
         "description": "Tenant-scoped import job history (used by the Bulk Import screen).\n\nA route named /all/status used to live here, deliberately unscoped\nacross every tenant, returning every tenant's filenames/mappingConfig to\nany authenticated caller. It had no caller anywhere in the codebase (the\nfrontend only calls /mapping, /commit and this /jobs route) and its own\ndocstring admitted it was \"not safe for a tenant-facing UI to call\" \u2014\ndead, dangerous surface, so it was deleted rather than scoped.",
         "operationId": "list_import_jobs_api_v1_import_jobs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -34728,6 +34777,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

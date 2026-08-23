@@ -3,10 +3,10 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.db.base import Base
-from app.models.mixins import TenantAwareMixin
+from app.models.mixins import OptimisticLockMixin, TenantAwareMixin
 
 
-class BomItem(Base, TenantAwareMixin):
+class BomItem(Base, TenantAwareMixin, OptimisticLockMixin):
     """Normalized BOM line item linking a BOM template to parts."""
 
     __tablename__ = "bom_items"
