@@ -52,6 +52,14 @@ services:
       retries: 3
 
   backend:
+    # Naming the image serves two masters. Left unset, it is a purely local tag
+    # and `up` builds from source — the local-first default, no registry needed.
+    # Set BACKEND_IMAGE=ghcr.io/<owner>/<repo>:<tag> and `docker compose pull
+    # backend` fetches the image CI published instead. Without an `image:` key
+    # at all, `pull backend` had nothing to resolve, so a CD deploy would build
+    # from whatever source happened to be on the server rather than shipping the
+    # artifact that passed CI.
+    image: ${BACKEND_IMAGE:-blackbox-bom-backend:local}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -99,6 +107,9 @@ services:
       retries: 5
 
   frontend:
+    # See the backend service: local tag by default, overridable to a published
+    # image via FRONTEND_IMAGE.
+    image: ${FRONTEND_IMAGE:-blackbox-bom-frontend:local}
     build:
       context: ./frontend
       dockerfile: Dockerfile
