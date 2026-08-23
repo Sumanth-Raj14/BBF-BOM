@@ -1,0 +1,37 @@
+# HTTPS overlay.  Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+#
+# Required whenever ENVIRONMENT=production: the backend marks its auth cookies
+# Secure in production mode, and browsers will not send a Secure cookie over
+# plain HTTP — so production-over-HTTP means nobody can log in, with a 200 on
+# login followed by 401 on everything after it.
+#
+# Put fullchain.pem and privkey.pem in ./certs (see
+# backend/scripts/generate-self-signed-cert.sh for an internal-only cert, or
+# copy a real pair from your CA / certbot).
+services:
+  frontend:
+    # Swap the plain-HTTP server block for the TLS one baked into the image.
+    # No rebuild needed.
+    command: >
+      sh -c "cp /etc/nginx/nginx.tls.conf /etc/nginx/conf.d/default.conf
+      && nginx -g 'daemon off;'"
+    # ONLY 443 here. Compose APPENDS ports across merged files rather than
+    # replacing them, so redeclaring the base file's ${FRONTEND_PORT:-80}:80
+    # would try to bind host port 80 twice and fail with "port is already
+    # allocated".
+    ports:
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
+      # Shared with an external certbot, if you use one for renewals.
+      - certbot_webroot:/var/www/certbot
+
+  backend:
+    environment:
+      # TLS is terminated at the frontend container, so production mode is now
+      # safe: Secure cookies will actually reach the browser.
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+
+volumes:
+  certbot_webroot:

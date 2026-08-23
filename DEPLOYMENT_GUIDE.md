@@ -470,6 +470,26 @@ Also relevant behind a proxy:
 - **TrustedHost middleware** is first in the chain — configure the allowed hosts in settings to include your public hostname, or requests are rejected.
 - **HSTS is TLS-gated**: the `Strict-Transport-Security` header is only emitted when the request is over TLS, so the HTTP desktop bundle isn't broken and your HTTPS deployment gets HSTS automatically.
 - **`ENVIRONMENT=production` assumes TLS** (secure cookies, stricter CSP with trusted-types and report-uri). Terminate TLS at nginx and run the backend in production mode behind it.
+
+  **The stack now ships the TLS side of this**, which it previously did not —
+  the guide said "terminate TLS at nginx" while the only nginx config in the
+  repo listened on port 80. Three files close that gap:
+
+  | File | Purpose |
+  |---|---|
+  | `frontend/nginx.tls.conf` | :443 server with TLS 1.2+ floor, HSTS, and an http->https redirect that still serves `/.well-known/acme-challenge/` so certbot can renew |
+  | `docker-compose.tls.yml` | overlay that mounts `./certs`, publishes 443, and sets `ENVIRONMENT=production` |
+  | `backend/scripts/generate-self-signed-cert.sh` | internal-CA-less cert for on-prem hostnames, with a proper subjectAltName (browsers ignore CN) |
+
+  ```sh
+  sh backend/scripts/generate-self-signed-cert.sh bom.yourcorp.local
+  docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+  ```
+
+  Both server configs `include /etc/nginx/snippets/app-locations.conf`, so a
+  route fixed for HTTP cannot silently stay broken over HTTPS. Use a real CA
+  certificate for anything internet-facing; the generated one is for internal
+  hosts that no public CA will issue for.
 - The backend has an `ApiTrailingSlashMiddleware` and a SPA catch-all that recreates FastAPI's 307 slash-redirects — **proxy paths verbatim**; do not add your own trailing-slash rewrites in nginx.
 
 ### 9.2 Sample nginx (SPA + API + WebSockets + HTTPS)

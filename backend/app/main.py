@@ -16,6 +16,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from sqlalchemy.orm.exc import StaleDataError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.api_v1 import api_router
@@ -341,6 +342,35 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+@app.exception_handler(StaleDataError)
+async def stale_data_exception_handler(request: Request, exc: StaleDataError):
+    """A concurrent edit lost the race -> 409, never 500.
+
+    Raised by SQLAlchemy when a mapper with version_id_col (see
+    app.models.mixins.OptimisticLockMixin) issues an UPDATE/DELETE whose
+    `AND lock_version = <loaded>` matches no row, i.e. somebody else saved
+    first. Without this handler that surfaces as an opaque 500 and the client
+    cannot tell a lost update from a server fault -- so it would retry and
+    clobber the other person's work, which is the very thing the version
+    column exists to prevent.
+
+    409 tells the client to re-read and merge. The body deliberately carries no
+    row contents: the caller may no longer be allowed to see the newer value.
+    """
+    logger.info("Optimistic lock conflict on %s: %s", request.url.path, exc)
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": (
+                "This record was changed by someone else while you were editing "
+                "it. Reload to see the current version, then reapply your change."
+            ),
+            "code": "stale_write",
+            "request_id": getattr(request.state, "request_id", None),
+        },
+    )
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled exception: %s", exc)
@@ -431,6 +461,12 @@ app.add_middleware(
         "Referer",
         "User-Agent",
     ],
+    # Without expose_headers a browser can read only the six CORS-safelisted
+    # response headers, so any custom one is silently invisible to JS on a
+    # cross-origin call — the caller sees no error, just a missing header.
+    # X-Total-Count carries the untruncated row count for the capped log
+    # endpoints; X-Request-ID lets a user quote an id when reporting a fault.
+    expose_headers=["X-Total-Count", "X-Request-ID"],
 )
 app.add_middleware(
     TrustedHostMiddleware,

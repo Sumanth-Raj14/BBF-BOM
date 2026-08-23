@@ -17,7 +17,16 @@ import {
   EmptyState,
   Spinner,
 } from "../components/ui";
-import CadViewer, { isViewable } from "../components/cad/CadViewer.jsx";
+// CadViewer statically imports three plus six of its loaders (~600 kB). This
+// module is part of the eagerly-loaded src/root/* graph, so importing the
+// component directly put the entire 3D engine in the main bundle — every user
+// downloaded a renderer just to open a parts list. React.lazy moves it to its
+// own chunk, fetched only when someone actually previews a model.
+//
+// isViewable comes from ./formats.js, which imports no three.js, so the cheap
+// "can this be previewed?" check stays synchronous and costs nothing.
+const CadViewer = React.lazy(() => import("../components/cad/CadViewer.jsx"));
+import { isViewable } from "../components/cad/formats.js";
 // PDM / CAD Vault feature set: vault tree, check-in/out, CAD revision history,
 // 3D viewer, drawing markup, CAD attribute extraction, bidirectional sync,
 // drawing release workflow, watermarking.
@@ -615,7 +624,15 @@ function CADPreview({ file, onClose }) {
         </Button>
       </div>
 
-      <CadViewer buffer={buffer} name={loadedName} height={320} />
+      <React.Suspense
+        fallback={
+          <div className="cadprev__loading" style={{ padding: 24, textAlign: "center" }}>
+            <Spinner />
+          </div>
+        }
+      >
+        <CadViewer buffer={buffer} name={loadedName} height={320} />
+      </React.Suspense>
 
       <div className="cadprev__actions">
         <input

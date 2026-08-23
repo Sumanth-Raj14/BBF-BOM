@@ -91,7 +91,19 @@ def test_migration_chain_single_linear_head():
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
     script = ScriptDirectory.from_config(cfg)
 
-    assert script.get_heads() == ["063_resource_grants"]
+    # Assert the TOPOLOGY (exactly one head), not the head's name. The name was
+    # hardcoded here, which meant every new migration failed this test for no
+    # real reason — a test that cries wolf on healthy changes gets deleted or
+    # rubber-stamped. The name IS pinned, once, where it belongs: EXPECTED_HEAD
+    # in .github/workflows/postgres-ci.yml, which verifies a real database is
+    # stamped at it. What matters here is that no branch/merge point crept in,
+    # because two heads make `alembic upgrade head` ambiguous.
+    heads = script.get_heads()
+    assert len(heads) == 1, (
+        f"migration chain must be linear, found {len(heads)} heads: {heads}. "
+        "Two heads mean `alembic upgrade head` is ambiguous and a deploy can "
+        "apply only one branch."
+    )
     links = {
         "044_compliance_evaluations": "043_part_composition_declarations",
         "043_part_composition_declarations": "042_substance_reference_data",
