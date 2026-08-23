@@ -74,7 +74,7 @@ Badge.propTypes = {
  * StatusPill — dot + label; maps a domain status string to a tone
  * automatically (override with `tone`).
  */
-export function StatusPill({ status, label, tone, className = "", ...rest }) {
+export function StatusPill({ status, label, tone, className = "", children, ...rest }) {
   const resolved = tone || toneForStatus(status);
   const cls = ["ui-status", `ui-status--${resolved}`, className]
     .filter(Boolean)
@@ -82,13 +82,16 @@ export function StatusPill({ status, label, tone, className = "", ...rest }) {
   return (
     <span className={cls} {...rest}>
       <span className="ui-status__dot" aria-hidden="true" />
-      {label ?? status}
+      {label ?? children ?? status}
     </span>
   );
 }
 StatusPill.propTypes = {
   status: PropTypes.string,
   label: PropTypes.node,
+  // Callers pass the label either as `label` or as children (both were in use;
+  // children used to be swallowed by the explicit JSX children below).
+  children: PropTypes.node,
   tone: PropTypes.oneOf(TONES),
   className: PropTypes.string,
 };

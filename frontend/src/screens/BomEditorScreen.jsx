@@ -5,6 +5,7 @@ import { toast } from "../utils/toast";
 import { ComplianceReportPanel } from "../components/ComplianceReportPanel.jsx";
 import ExportDialog from "../components/modals/ExportDialog.jsx";
 import UomConverterModal from "../components/modals/UomConverterModal.jsx";
+import BomAccessModal from "../components/modals/BomAccessModal.jsx";
 import {
   BomEditor,
   BomShell,
@@ -51,6 +52,7 @@ function BomEditorScreen({
   const bomId = ctx?.bomId || p?.id || p?.bomId || 1;
   const [exportOpen, setExportOpen] = React.useState(false);
   const [uomConverterOpen, setUomConverterOpen] = React.useState(false);
+  const [accessOpen, setAccessOpen] = React.useState(false);
 
   const allCats = [
     "Assembly",
@@ -170,6 +172,17 @@ function BomEditorScreen({
                 label: __t("uom.title") || "Unit Converter",
                 onClick: () => setUomConverterOpen(true),
               },
+              // Managing grants needs the engineering role server-side
+              // (require_engineering + `manage` on the BOM), so editors only.
+              ...(perms.canEdit
+                ? [
+                    {
+                      icon: <Icon.Shield size={11} />,
+                      label: __t("bomAccess.title") || "BOM access",
+                      onClick: () => setAccessOpen(true),
+                    },
+                  ]
+                : []),
             ]}
           />
           <DropdownButton
@@ -565,6 +578,11 @@ function BomEditorScreen({
       <UomConverterModal
         open={uomConverterOpen}
         onClose={() => setUomConverterOpen(false)}
+      />
+      <BomAccessModal
+        open={accessOpen}
+        onClose={() => setAccessOpen(false)}
+        bomId={bomId}
       />
     </>
   );

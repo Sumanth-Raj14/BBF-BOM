@@ -2076,3 +2076,39 @@ export const teamsAPI = {
   list: () => apiRequest('/teams/'),
 };
 api.teams = teamsAPI;
+
+// Public read-only BOM share links (backend/app/api/endpoints/bom_shares.py).
+// The authenticated half is tenant-scoped CRUD; `resolvePublic` is the ONE
+// route a supplier with no session calls. Note what the server deliberately
+// does NOT tell it: unknown, expired, revoked and wrong-password all answer
+// the same 404, so the UI must not claim to know which happened.
+export const bomSharesAPI = {
+  list: (bomId) => {
+    const q = bomId != null ? new URLSearchParams({ bom_id: bomId }).toString() : '';
+    return apiRequest(`/bom-shares/${q ? '?' + q : ''}`);
+  },
+
+  // expires_at: ISO-8601 string (must be in the future) or null for no expiry.
+  // password: plain string, hashed server-side, or null for an open link.
+  create: ({ bom_id, expires_at, password }) =>
+    apiRequest('/bom-shares/', {
+      method: 'POST',
+      body: JSON.stringify({
+        bom_id,
+        expires_at: expires_at || null,
+        password: password || null,
+      }),
+    }),
+
+  // Revoke is one-way: there is no un-revoke route.
+  revoke: (shareId) => apiRequest(`/bom-shares/${shareId}/revoke`, { method: 'POST' }),
+
+  // No auth. The password travels in a header, not the query string, so it
+  // stays out of access logs and browser history.
+  resolvePublic: (token, password) =>
+    apiRequest(
+      `/bom-shares/public/${encodeURIComponent(token)}`,
+      password ? { headers: { 'X-Share-Password': password } } : {},
+    ),
+};
+api.bomShares = bomSharesAPI;
