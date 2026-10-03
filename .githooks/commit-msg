@@ -1,0 +1,44 @@
+#!/bin/sh
+# BLOCKING: reject a commit message carrying Claude/Anthropic attribution.
+# Activate in a fresh clone with:  git config core.hooksPath .githooks
+#
+# The committer rule for this repo is Sumanth-Raj-BBF alone. It was still
+# violated: four commits reached origin with
+#   Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+# and two landed on master, which put the `claude` GitHub account in the
+# contributor list. Undoing it took a filter-branch over 266 commits, two
+# force-pushes and four deleted branches — and some of it is permanent,
+# because refs/pull/N/head is immutable and still shows the badge on PR #11.
+#
+# Unlike the Claude Code PreToolUse hook (.claude/hooks/), this sees EVERY
+# path into a commit: -m, -F file, an editor session, amend, rebase, squash.
+# That is the point of having both.
+
+msg_file="$1"
+[ -f "$msg_file" ] || exit 0
+
+# Strip comment lines before matching. `git commit -v` appends the staged diff
+# as comments, so editing THIS FILE would otherwise match its own patterns and
+# make the hook permanently un-committable.
+body=$(grep -v '^#' "$msg_file" 2>/dev/null || true)
+
+hit=""
+printf '%s\n' "$body" | grep -Eiq 'co-?authored-by:.*(claude|anthropic)' && hit="Co-authored-by trailer naming Claude/Anthropic"
+[ -z "$hit" ] && printf '%s\n' "$body" | grep -Eiq 'generated with.*claude.*code' && hit="'Generated with Claude Code' footer"
+[ -z "$hit" ] && printf '%s\n' "$body" | grep -Eiq 'noreply@anthropic\.com' && hit="anthropic.com identity"
+
+if [ -n "$hit" ]; then
+  echo "-----------------------------------------------------------------------"
+  echo "  COMMIT REJECTED: $hit"
+  echo ""
+  echo "  This repo credits Sumanth-Raj-BBF only. A Claude co-author trailer"
+  echo "  adds the 'claude' account to the GitHub contributor list, which"
+  echo "  previously required a full history rewrite and force-push to undo"
+  echo "  and left permanent traces in immutable PR refs."
+  echo ""
+  echo "  Remove the trailer / footer from the message and commit again."
+  echo "-----------------------------------------------------------------------"
+  exit 1
+fi
+
+exit 0
