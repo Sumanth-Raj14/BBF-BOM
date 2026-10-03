@@ -273,6 +273,46 @@ export const authAPI = {
 
   getMe: () => apiRequest('/auth/me', { credentials: 'include' }),
 
+  // --- Account security -----------------------------------------------
+  // These endpoints existed server-side with NO client wrapper and no UI, so
+  // a user could not enrol in MFA or change their own password through the
+  // application at all. Contracts read from backend/app/api/endpoints/auth.py.
+
+  // POST /auth/mfa/setup -> { secret, qr_uri, backup_codes[8] }
+  // The backup codes come back in PLAINTEXT EXACTLY ONCE; the server stores
+  // only bcrypt hashes of them (auth_service.setup_mfa), so they cannot be
+  // retrieved again. Whatever renders this must say so.
+  mfaSetup: () => apiRequest('/auth/mfa/setup', { method: 'POST' }),
+
+  // Confirms the user's authenticator is in sync and ENABLES MFA.
+  // `secret` is the one returned by setup — it is not yet active until this
+  // call succeeds.
+  mfaVerify: (code, secret) =>
+    apiRequest('/auth/mfa/verify', {
+      method: 'POST',
+      body: JSON.stringify({ code, secret }),
+    }),
+
+  // Takes password + a current TOTP code. NOTE: the endpoint reads the raw
+  // request JSON rather than a pydantic model, so the field names below are
+  // load-bearing and are not validated for you — they must stay exactly
+  // `password` and `totp_code`.
+  mfaDisable: (password, totpCode) =>
+    apiRequest('/auth/mfa/disable', {
+      method: 'POST',
+      body: JSON.stringify({ password, totp_code: totpCode }),
+    }),
+
+  // POST /auth/change-password { current_password, new_password }
+  changePassword: (currentPassword, newPassword) =>
+    apiRequest('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    }),
+
   validateToken: async () => {
     try {
       const me = await apiRequest('/auth/me', { credentials: 'include' });
