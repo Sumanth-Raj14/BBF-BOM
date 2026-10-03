@@ -3,17 +3,136 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { storage } from "../utils/storage.js";
 import { dataService } from "../services/dataService.js";
 import { setNavigator } from "../services/navigation.js";
-import {
-  TWEAK_DEFAULTS,
-  INITIAL_NOTIFICATIONS,
-} from "../utils/constants.js";
+import { TWEAK_DEFAULTS } from "../utils/constants.js";
 import { convertApiPartsToTree } from "../utils/bom.js";
 import { accentTokensFor } from "../utils/accent.js";
 
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
-import { BOM_DATA, PROJECTS, ROLES, api } from "../globals";
+// fixfe: PROJECTS (frontend/projects.js) is no longer imported. It is a static
+// fixture of invented parts/vendors/costs that switchProject used to paste over
+// the user's real BOM — see switchProject below.
+import { BOM_DATA, ROLES, api } from "../globals";
 import { AppContext } from "./appContext.js";
+
+const EM_DASH = "—";
+
+// Paginated endpoints (projects, notifications) answer {items, total, ...};
+// a few answer a bare array. Normalise both, and never invent rows on failure.
+function asList(res) {
+  if (Array.isArray(res)) return res;
+  if (res && Array.isArray(res.items)) return res.items;
+  return [];
+}
+
+// A real project record (GET /api/v1/projects) shaped for the `project` context
+// value. The projects API carries no revision / version / owner, so those read
+// as an em-dash rather than the fixture's confident "Rev C · v3.2.0 · E. Chen".
+function projectFromApi(p) {
+  return {
+    id: p.id,
+    code: p.code || EM_DASH,
+    name: p.name || EM_DASH,
+    status: p.status || EM_DASH,
+    description: p.description || "",
+    rev: EM_DASH,
+    version: EM_DASH,
+    owner: EM_DASH,
+    updated: String(p.updatedAt || p.createdAt || "").slice(0, 10) || EM_DASH,
+  };
+}
+
+// fixfe: `project` used to initialise from the BOM_DATA fixture, so before (and
+// forever after a failed fetch) the crumbs and the BOM header asserted the demo
+// assembly "ATL-MFR-A · Mainframe Assembly · Rev C · Released" was open. Start
+// with a blank identity and adopt a real project once the API answers.
+const EMPTY_PROJECT = {
+  code: EM_DASH,
+  name: EM_DASH,
+  status: EM_DASH,
+  description: "",
+  rev: EM_DASH,
+  version: EM_DASH,
+  owner: EM_DASH,
+  updated: EM_DASH,
+};
+
+// fixfe: the BOM-editor KPI ribbon used to render BOM_DATA.rollup — the frozen
+// constants {parts:87, unique:64, bomCost:4218.40, lead:21, vendors:14,
+// countries:6, risk:3}. setRollup had exactly one caller (switchProject, which
+// only ever fed it more fixture data), so those seven numbers described every
+// BOM ever opened, including an empty one. They are now derived from the rows
+// actually on screen; anything the rows cannot support reads as an em-dash.
+export function deriveRollup(rows) {
+  const pns = new Set();
+  const vendorNames = new Set();
+  const origins = new Set();
+  let count = 0;
+  let cost = 0;
+  let lead = null;
+
+  const visit = (row) => {
+    if (!row) return;
+    count += 1;
+    if (row.pn) pns.add(row.pn);
+    if (row.vendor && row.vendor !== EM_DASH) vendorNames.add(row.vendor);
+    if (row.origin && row.origin !== EM_DASH) origins.add(row.origin);
+    const rowLead = Number(row.lead);
+    if (Number.isFinite(rowLead) && (lead === null || rowLead > lead)) {
+      lead = rowLead;
+    }
+    const kids = Array.isArray(row.children) ? row.children : [];
+    if (kids.length) {
+      kids.forEach(visit);
+    } else {
+      // Leaves only — an assembly's own `cost` is itself a rollup of its
+      // children, so adding both double-counts the whole sub-tree.
+      cost += (Number(row.qty) || 0) * (Number(row.cost) || 0);
+    }
+  };
+  (Array.isArray(rows) ? rows : []).forEach(visit);
+
+  return {
+    parts: count,
+    unique: pns.size,
+    bomCost: cost,
+    // No prior-revision cost is loaded anywhere in the app, so there is nothing
+    // honest to compare against. Consumers must guard before showing a delta.
+    lastCost: null,
+    lead: lead === null ? EM_DASH : lead,
+    vendors: vendorNames.size,
+    countries: origins.size,
+    // Rows carry no risk flag; the old constant "3" was invented.
+    risk: EM_DASH,
+  };
+}
+
+function relTime(iso) {
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return EM_DASH;
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (mins < 60) return mins + " min";
+  if (mins < 1440) return Math.round(mins / 60) + " hr";
+  return Math.round(mins / 1440) + " days";
+}
+
+// Server notification (title/message/status/createdAt) -> the shape the TopBar
+// bell renders. No `route` is set: the API's entityType values do not map onto
+// this app's routes, and guessing one would send the user somewhere unrelated.
+function notificationFromApi(n) {
+  const title = n.title || "";
+  return {
+    id: n.id,
+    who: title,
+    init: title.slice(0, 2).toUpperCase() || "⌬",
+    color: n.type === "error" || n.type === "warning" ? "sys" : "",
+    action: "",
+    obj: n.message || "",
+    time: relTime(n.createdAt),
+    read: n.status === "read",
+    route: null,
+  };
+}
 
 function AppCtxProvider({ children }) {
   const navigate = useNavigate();
@@ -40,7 +159,10 @@ function AppCtxProvider({ children }) {
   // line instead of silently falling back to local-only state or the
   // global Part record. See convertApiPartsToTree in utils/bom.js.
   const [apiBomItems, setApiBomItems] = React.useState(null);
-  const [, setApiProjects] = React.useState(null);
+  // fixfe: the project list was fetched and then thrown away (`const [, setApiProjects]`),
+  // which is why the project switcher had nothing real to switch between and
+  // fell back to the demo fixture. It is kept and exposed on the context now.
+  const [apiProjects, setApiProjects] = React.useState(null);
   const [apiLoading, setApiLoading] = React.useState(true);
   const [apiError, setApiError] = React.useState(null);
   const [apiConnected, setApiConnected] = React.useState(false);
@@ -169,11 +291,35 @@ function AppCtxProvider({ children }) {
           console.warn("[AppCtx] Failed to load vendors:", err?.message || err);
         }
         try {
-          const projects = await api.projects.list();
-          if (!cancelled) setApiProjects(projects);
+          const projects = asList(await api.projects.list());
+          if (!cancelled) {
+            setApiProjects(projects);
+            // Adopt the workspace's first REAL project as the active one. This
+            // replaces the BOM_DATA fixture identity that used to be shown
+            // before (and instead of) anything real. If the list is empty the
+            // crumbs stay on the blank EMPTY_PROJECT rather than inventing one.
+            if (projects.length > 0) {
+              const first = projects[0];
+              setProject(projectFromApi(first));
+              setActiveProjectKey(first.code || String(first.id));
+            }
+          }
         } catch (err) {
           console.warn(
             "[AppCtx] Failed to load projects:",
+            err?.message || err,
+          );
+        }
+        // fixfe: the notification bell used to render six invented activity
+        // entries seeded from INITIAL_NOTIFICATIONS. Real endpoint:
+        // GET /api/v1/notifications (api.notifications.list). On failure the
+        // bell stays empty — an empty bell is honest, a fabricated one is not.
+        try {
+          const notifs = asList(await api.notifications.list());
+          if (!cancelled) setNotifications(notifs.map(notificationFromApi));
+        } catch (err) {
+          console.warn(
+            "[AppCtx] Failed to load notifications:",
             err?.message || err,
           );
         }
@@ -254,32 +400,92 @@ function AppCtxProvider({ children }) {
   // like rows/vendors above, and hydrate from the real API below.
   const [comments, setComments] = React.useState({});
   const [approvals, setApprovals] = React.useState({});
-  const [notifications, setNotifications] = React.useState(() =>
-    storage.notifications.get(INITIAL_NOTIFICATIONS),
-  );
+  // fixfe: this used to default to INITIAL_NOTIFICATIONS (six fabricated
+  // activity entries) via localStorage, so a fresh install opened with an unread
+  // badge over events that never happened — and the localStorage mirror kept
+  // serving those fakes back on every later boot. Notifications are
+  // server-owned; start empty and hydrate from the API in loadFromAPI above.
+  const [notifications, setNotifications] = React.useState([]);
   const [savedViews, setSavedViews] = React.useState(() =>
     storage.savedViews.get(),
   );
-  const [project, setProject] = React.useState({ ...data.project });
-  const [rollup, setRollup] = React.useState({ ...data.rollup });
-  const [activeProjectKey, setActiveProjectKey] = React.useState("ATLAS");
+  const [project, setProject] = React.useState({ ...EMPTY_PROJECT });
+  // Derived, not stored — see deriveRollup. `setRollup` is gone: its only caller
+  // was switchProject, feeding it fixture numbers.
+  const rollup = React.useMemo(() => deriveRollup(rows), [rows]);
+  // fixfe: was hardcoded to "ATLAS", a fixture project code, so the crumb named
+  // a project that may not exist in this workspace.
+  const [activeProjectKey, setActiveProjectKey] = React.useState(EM_DASH);
   // Same instance-BOM id convention used by BomEditor/CostRollupView for the
   // structural bom_items_master API (neither the Parts-API row source nor
   // the demo fixture threads a real bom_id through yet).
   const bomId = project?.id || project?.bomId || data?.project?.id || 1;
 
-  const switchProject = React.useCallback((key) => {
-    const p = PROJECTS?.[key];
-    if (!p) return;
-    setActiveProjectKey(key);
-    setProject({ ...p.project });
-    setRows(p.rows);
-    setRollup({ ...p.rollup });
-    setSelectedRow(null);
-    setBomTab("hierarchy");
-    setActiveCats([]);
-    setSearch("");
-    toast(__t("app.crumbSwitchProject") + ": " + key, { kind: "success" });
+  // fixfe: THE WORST ONE. This used to read `PROJECTS[key]` from
+  // frontend/projects.js — a static fixture of invented parts, vendors and
+  // costs — and do `setRows(p.rows); setProject(p.project); setRollup(p.rollup)`
+  // before toasting success. Two clicks in the TopBar replaced the user's real
+  // BOM with fiction, indistinguishably, while AppCtx's load path was carefully
+  // avoiding exactly that substitution a few lines above.
+  //
+  // It now switches between the workspace's REAL projects (GET /api/v1/projects,
+  // cached in apiProjects). If the requested project is not in that list nothing
+  // changes and the failure is shown — there is no fixture to fall back to.
+  //
+  // `rows` are deliberately NOT touched: they are the tenant-wide Parts catalog
+  // (GET /api/v1/parts has no project filter), not a per-project set. What the
+  // switch really does change is `project`, and therefore `bomId`, which
+  // refetches the project's bom_items_master lines in the effect below.
+  const switchProject = React.useCallback(
+    (key) => {
+      const match = (apiProjects || []).find(
+        (p) =>
+          p.code === key || p.name === key || String(p.id) === String(key),
+      );
+      if (!match) {
+        toast(
+          __t("app.crumbSwitchProject") +
+            ": " +
+            key +
+            " — " +
+            __t("common.failed"),
+          { kind: "error" },
+        );
+        return;
+      }
+      setActiveProjectKey(match.code || String(match.id));
+      setProject(projectFromApi(match));
+      setSelectedRow(null);
+      setBomTab("hierarchy");
+      setActiveCats([]);
+      setSearch("");
+      toast(
+        __t("app.crumbSwitchProject") + ": " + (match.code || match.name),
+        { kind: "success" },
+      );
+    },
+    [apiProjects],
+  );
+
+  // fixfe: the bell's "Mark all read" / click-to-read only flipped local state,
+  // so the badge silently came back on the next reload. Persist through
+  // PUT /api/v1/notifications/{id}, and only mark read the ones that saved.
+  const markNotificationsRead = React.useCallback(async (ids) => {
+    const targets = (Array.isArray(ids) ? ids : [ids]).filter(
+      (id) => id != null,
+    );
+    if (targets.length === 0) return;
+    const results = await Promise.allSettled(
+      targets.map((id) => api.notifications.update(id, { status: "read" })),
+    );
+    const saved = targets.filter((_, i) => results[i].status === "fulfilled");
+    if (saved.length > 0) {
+      setNotifications((prev) =>
+        prev.map((n) => (saved.includes(n.id) ? { ...n, read: true } : n)),
+      );
+    }
+    const failure = results.find((r) => r.status === "rejected");
+    if (failure) throw failure.reason || new Error("Request failed");
   }, []);
 
   // LOCKED DECISIONS UI #6: data grids (Parts, BOM) default to DENSE, the rest
@@ -397,9 +603,9 @@ function AppCtxProvider({ children }) {
     // warning from this fire-and-forget effect.
     dataService.set("parts", rows).catch(() => {});
   }, [rows]);
-  React.useEffect(() => {
-    storage.notifications.set(notifications);
-  }, [notifications]);
+  // fixfe: the localStorage mirror of notifications is gone with the fixture
+  // seed. It existed only to persist the six invented entries; keeping it would
+  // keep replaying a stale copy of server-owned data on every boot.
   // comments and approvals sync removed from localStorage
   React.useEffect(() => {
     storage.savedViews.set(savedViews);
@@ -468,13 +674,14 @@ function AppCtxProvider({ children }) {
     setApprovals,
     notifications,
     setNotifications,
+    markNotificationsRead,
     savedViews,
     setSavedViews,
     project,
     setProject,
     rollup,
-    setRollup,
     activeProjectKey,
+    apiProjects,
     switchProject,
     openModal,
     closeModal,

@@ -4,10 +4,10 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.db.base import Base
-from app.models.mixins import TenantAwareMixin
+from app.models.mixins import OptimisticLockMixin, TenantAwareMixin
 
 
-class BomTemplate(Base, TenantAwareMixin):
+class BomTemplate(Base, TenantAwareMixin, OptimisticLockMixin):
     __tablename__ = "bom_templates"
 
     id = Column(Integer, primary_key=True)

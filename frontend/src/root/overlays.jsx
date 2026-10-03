@@ -781,7 +781,7 @@ NewVendorModal.propTypes = {
   open: PropTypes.bool,
   onClose: PropTypes.func,
 };
-function UploadModal({ open, onClose, title, files: externalFiles }) {
+function UploadModal({ open, onClose, title, files: externalFiles, partId }) {
   const [active, setActive] = React.useState(false);
   const [files, setFiles] = React.useState([]);
   const [fileObjects, setFileObjects] = React.useState([]);
@@ -852,7 +852,13 @@ function UploadModal({ open, onClose, title, files: externalFiles }) {
     setUploading(true);
     try {
       for (const file of fileObjects) {
-        await api.documents.upload(file, { category });
+        // partId is what ATTACHES the document to the part. The wrapper has
+        // always supported it; this caller simply never sent it, so uploads
+        // from a part's Files tab landed unattached and the tab stayed empty.
+        await api.documents.upload(file, {
+          category,
+          ...(partId != null ? { partId } : {}),
+        });
       }
       toast(
         `${fileObjects.length} ${__t("overlays.upload.fileCount") || "file(s) uploaded"}`,
@@ -997,10 +1003,16 @@ UploadModal.propTypes = {
   onClose: PropTypes.func,
   title: PropTypes.string,
   files: PropTypes.any,
+  // Set when opened from a part's Files tab; attaches the upload to that part.
+  partId: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
 };
 function NewPartModal({ open, onClose }) {
   const [form, setForm] = React.useState({});
   const [saving, setSaving] = React.useState(false);
+  // Server-side duplicate hits awaiting the user's decision, and the flag that
+  // lets them proceed anyway once they've seen them.
+  const [duplicates, setDuplicates] = React.useState(null);
+  const [dupConfirmed, setDupConfirmed] = React.useState(false);
   // Draft-safety: debounce-persist the in-progress form so a reload/crash/
   // accidental close of this modal doesn't lose what was typed. Namespaced
   // to "new" since a create form has no entity id yet.
@@ -1031,6 +1043,30 @@ function NewPartModal({ open, onClose }) {
     }
     setSaving(true);
     try {
+      // Ask the SERVER whether this part already exists before creating it.
+      // part_service.check_duplicates does exact pn, exact mpn and fuzzy name
+      // matching; the UI previously had no duplicate check on this path at all,
+      // so the same component could be created twice under slightly different
+      // names. Advisory, not blocking: the user confirms and proceeds.
+      if (!dupConfirmed && api?.duplicates?.check) {
+        try {
+          const hits = await api.duplicates.check({
+            pn: form.pn,
+            mpn: form.mpn || undefined,
+            name: form.name,
+          });
+          const list = Array.isArray(hits) ? hits : hits?.items || [];
+          if (list.length) {
+            setDuplicates(list);
+            setSaving(false);
+            return;
+          }
+        } catch {
+          // A failing duplicate check must not block part creation — it is a
+          // safeguard, not a gate. Fall through and create.
+        }
+      }
+
       await api.parts.create({
         pn: form.pn,
         name: form.name,
@@ -1088,6 +1124,65 @@ function NewPartModal({ open, onClose }) {
         </>
       }
     >
+      {duplicates && duplicates.length > 0 && (
+        <div
+          role="alert"
+          className="fs-11"
+          style={{
+            padding: "var(--sp-3)",
+            marginBottom: "var(--sp-3)",
+            border: "1px solid var(--warn, #b45309)",
+            borderRadius: "var(--r-2)",
+            background: "var(--warn-soft, rgba(180,83,9,.08))",
+          }}
+        >
+          <div className="flex items-center gap-8 mb-8">
+            <Icon.Flag size={12} />
+            <strong>
+              {__t("overlays.newPart.possibleDuplicate") ||
+                "This part may already exist"}
+            </strong>
+          </div>
+          <ul style={{ margin: "0 0 var(--sp-2)", paddingLeft: "var(--sp-4)" }}>
+            {duplicates.slice(0, 5).map((d) => (
+              <li key={d.partId}>
+                <span className="font-mono">{d.pn}</span> — {d.name}{" "}
+                <span className="fg-3">
+                  ({d.matchType}
+                  {d.matchScore != null
+                    ? " · " + Math.round(d.matchScore * 100) + "%"
+                    : ""}
+                  )
+                </span>
+              </li>
+            ))}
+          </ul>
+          {duplicates.length > 5 && (
+            <div className="fg-3 mb-8">+{duplicates.length - 5} more</div>
+          )}
+          <div className="flex gap-8">
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => {
+                setDupConfirmed(true);
+                setDuplicates(null);
+                submit();
+              }}
+            >
+              {__t("overlays.newPart.createAnyway") || "Create anyway"}
+            </button>
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={() => setDuplicates(null)}
+            >
+              {__t("common.cancel") || "Cancel"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {showRestoredBanner && (
         <div
           className="flex items-center gap-8 fs-11 font-mono"

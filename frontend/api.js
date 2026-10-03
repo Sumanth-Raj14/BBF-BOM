@@ -1000,7 +1000,14 @@ export const webhooksAPI = {
   create: (data) => apiRequest('/webhooks', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => apiRequest(`/webhooks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id) => apiRequest(`/webhooks/${id}`, { method: 'DELETE' }),
-  test: (id) => apiRequest(`/webhooks/${id}/test`, { method: 'POST' }),
+  // POST /webhooks/{id}/test takes a WebhookTestRequest body (subscriptionId +
+  // event are required) — sending no body returned 422, so the wrapper never
+  // actually fired a test. Body added; signature is unchanged for callers.
+  test: (id, event = 'test.event') =>
+    apiRequest(`/webhooks/${id}/test`, {
+      method: 'POST',
+      body: JSON.stringify({ subscriptionId: id, event }),
+    }),
   deliveries: (params = {}) => {
     const q = new URLSearchParams(params).toString();
     return apiRequest(`/webhooks/deliveries${q ? '?' + q : ''}`);
@@ -1166,7 +1173,16 @@ export const bomEnterpriseAPI = {
   list: () => apiRequest('/bom/'),
   explosion: (bomId, level = 10) => apiRequest(`/bom/${bomId}/explosion?level=${level}`),
   quantityRollup: (bomId) => apiRequest(`/bom/${bomId}/quantity-rollup`),
-  costRollup: (bomId) => apiRequest(`/bom/${bomId}/cost-rollup`),
+  // reportingCurrency (ISO 4217) converts every line into that currency
+  // server-side; omit it for the legacy as-costed roll-up. Lines with no
+  // exchange rate come back in `currency_warnings`, NOT converted at 1:1.
+  costRollup: (bomId, reportingCurrency) =>
+    apiRequest(
+      `/bom/${bomId}/cost-rollup` +
+        (reportingCurrency
+          ? `?reporting_currency=${encodeURIComponent(reportingCurrency)}`
+          : ''),
+    ),
   whereUsed: (partId) => apiRequest(`/bom/where-used/${partId}`),
   whereUsedTree: (partId) => apiRequest(`/bom/where-used/${partId}/tree`),
   compare: (bomId1, bomId2) => apiRequest('/bom/compare', { method: 'POST', body: JSON.stringify({ bom_id_1: bomId1, bom_id_2: bomId2 }) }),
@@ -1827,3 +1843,272 @@ export const apiKeysAPI = {
 };
 api.apiKeys = apiKeysAPI;
 window.apiKeysAPI = apiKeysAPI;
+
+// Appended for GlobalSearchModal.jsx (Cmd/Ctrl-K palette): tenant-scoped
+// PostgreSQL full-text search across parts, vendors, boms, pos, documents,
+// eco, work_orders, inventory and ncr — backing GET /search/ and
+// GET /search/suggestions (see backend/app/api/endpoints/search.py).
+// retries=0: a debounced palette re-fires on the next keystroke anyway, and
+// apiRequest's default backoff would keep a dead query alive for seconds.
+export const searchAPI = {
+  query: (q, params = {}) =>
+    apiRequest(
+      `/search/?${new URLSearchParams({ q, ...params }).toString()}`,
+      {},
+      0,
+    ),
+
+  suggestions: (q, params = {}) =>
+    apiRequest(
+      `/search/suggestions?${new URLSearchParams({ q, ...params }).toString()}`,
+      {},
+      0,
+    ),
+};
+api.search = searchAPI;
+window.searchAPI = searchAPI;
+
+// Appended for PlanningScreen.jsx: PO-from-BOM planning (see backend/app/api/
+// endpoints/planning.py, mounted at prefix "/planning" in api_v1.py).
+// summary() returns { bom_id, purchased_as_leaf, unique_parts,
+// total_required_qty, total_extended_cost, items:[…] }; generatePO() is a
+// WRITE that creates draft PO header(s) — one per vendor group — and returns
+// them as an array of serialized POs (id, poNumber, vendorName, poTotal, …).
+export const planningAPI = {
+  summary: (bomId, purchasedAsLeaf = true) =>
+    apiRequest(`/planning/${bomId}/summary?purchased_as_leaf=${purchasedAsLeaf}`),
+
+  generatePO: (bomId, purchasedAsLeaf = true) =>
+    apiRequest(`/planning/${bomId}/generate-po?purchased_as_leaf=${purchasedAsLeaf}`, {
+      method: 'POST',
+    }),
+};
+api.planning = planningAPI;
+window.planningAPI = planningAPI;
+
+// Appended for AdminOpsScreen.jsx: on-prem disaster recovery. Backs
+// backend/app/api/endpoints/backup.py (mounted at prefix "/backup"). Every
+// route is superuser-gated, so a normal user gets 403 — callers should check
+// err.status and show a "requires administrator" state rather than an error.
+// NOTE: create/pipeline/cleanup take QUERY params, not a JSON body; only
+// pitrRestore/restore take a body.
+export const backupAPI = {
+  history: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiRequest(`/backup/history${q ? '?' + q : ''}`);
+  },
+
+  latest: () => apiRequest('/backup/latest'),
+
+  create: (backupType = 'full', tableName) => {
+    const p = { backup_type: backupType };
+    if (tableName) p.table_name = tableName;
+    return apiRequest(`/backup/create?${new URLSearchParams(p)}`, { method: 'POST' });
+  },
+
+  physical: () => apiRequest('/backup/physical', { method: 'POST' }),
+
+  verify: (backupId) => apiRequest(`/backup/verify/${backupId}`, { method: 'POST' }),
+
+  pipeline: (includePhysical = false) =>
+    apiRequest(`/backup/pipeline?include_physical=${includePhysical}`, { method: 'POST' }),
+
+  cleanup: (dryRun = true) =>
+    apiRequest(`/backup/cleanup?dry_run=${dryRun}`, { method: 'POST' }),
+
+  // DESTRUCTIVE. dry_run defaults true server-side; pass it explicitly anyway.
+  pitrRestore: (data) =>
+    apiRequest('/backup/pitr-restore', { method: 'POST', body: JSON.stringify(data) }),
+
+  // DESTRUCTIVE — overwrites the target database from the backup dump.
+  restore: (backupId, data = {}) =>
+    apiRequest(`/backup/restore/${backupId}`, {
+      method: 'POST',
+      body: JSON.stringify({ backup_id: backupId, ...data }),
+    }),
+};
+api.backup = backupAPI;
+window.backupAPI = backupAPI;
+
+// Appended for AdminOpsScreen.jsx: active login sessions.
+// The router is mounted at prefix "/sessions" AND every route inside it is
+// declared as "/sessions/..." — so the real paths carry the segment twice
+// (/api/v1/sessions/sessions/...). That double prefix is not a typo; see
+// backend/app/api/endpoints/sessions.py and api_v1.py.
+// list() is the caller's own sessions (any user); all()/stats()/revokeAllForUser()
+// are admin-only and answer 403 otherwise.
+export const sessionsAPI = {
+  list: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiRequest(`/sessions/sessions${q ? '?' + q : ''}`);
+  },
+
+  all: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiRequest(`/sessions/sessions/all${q ? '?' + q : ''}`);
+  },
+
+  stats: () => apiRequest('/sessions/sessions/stats'),
+
+  revoke: (sessionId) =>
+    apiRequest(`/sessions/sessions/revoke/${sessionId}`, { method: 'POST' }),
+
+  revokeAll: () => apiRequest('/sessions/sessions/revoke-all', { method: 'POST' }),
+
+  revokeAllForUser: (userId) =>
+    apiRequest(`/sessions/sessions/revoke-all/${userId}`, { method: 'POST' }),
+};
+api.sessions = sessionsAPI;
+window.sessionsAPI = sessionsAPI;
+
+// Appended for CustomAttributesScreen (calculated/formula attributes):
+// backs POST /formulas/evaluate and POST /formulas/{id}/compute (see
+// backend/app/api/endpoints/formulas.py + services/formula_service.py).
+// The evaluator is a hand-walked AST whitelist: numeric literals, the named
+// variables you pass in `context`, + - * / % // ** and unary +/-. Anything
+// else (function calls, comparisons, strings, attribute access) is a 400.
+export const formulasAPI = {
+  // Stateless preview. `context` must map variable name -> plain number;
+  // an unknown name in the formula is a 400, not a silent zero.
+  evaluate: (formula, context = {}) =>
+    apiRequest('/formulas/evaluate', {
+      method: 'POST',
+      body: JSON.stringify({ formula, context }),
+    }),
+
+  // Stored definition (is_computed + formula). The server resolves the
+  // entity's numeric columns itself; `context` only supplies/overrides extras.
+  compute: (attributeDefinitionId, { entity_type, entity_id = null, context = null } = {}) =>
+    apiRequest(`/formulas/${attributeDefinitionId}/compute`, {
+      method: 'POST',
+      body: JSON.stringify({ entity_type, entity_id, context }),
+    }),
+
+  // Numeric Part columns the server exposes to a formula, plus its two
+  // aliases (see formula_service._PART_NUMERIC_FIELDS / _PART_ALIASES).
+  // Kept here so the preview builds exactly the context /compute would.
+  PART_VARIABLES: ['qty', 'cost', 'weight', 'freight', 'tax', 'landedCost', 'lead'],
+  PART_ALIASES: { unit_cost: 'cost', landed_cost: 'landedCost' },
+
+  // Build an /evaluate context from a part row the way the server would.
+  partContext(part) {
+    const ctx = {};
+    if (!part) return ctx;
+    for (const f of formulasAPI.PART_VARIABLES) {
+      const n = Number(part[f]);
+      if (part[f] !== null && part[f] !== undefined && Number.isFinite(n)) ctx[f] = n;
+    }
+    for (const [alias, source] of Object.entries(formulasAPI.PART_ALIASES)) {
+      if (source in ctx) ctx[alias] = ctx[source];
+    }
+    return ctx;
+  },
+};
+api.formulas = formulasAPI;
+window.formulasAPI = formulasAPI;
+
+// Appended for detail-drawer.jsx (CAD Derivatives tab): typed (kind, url)
+// CAD derivative links attached to a Part, backing GET/POST /derivatives/ and
+// DELETE /derivatives/{id} (see backend/app/api/endpoints/derivatives.py).
+// POST upserts on (part, kind), so re-attaching a kind replaces its url.
+export const derivativesAPI = {
+  list: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiRequest(`/derivatives/${q ? '?' + q : ''}`);
+  },
+
+  attach: (data) =>
+    apiRequest('/derivatives/', { method: 'POST', body: JSON.stringify(data) }),
+
+  delete: (id) => apiRequest(`/derivatives/${id}`, { method: 'DELETE' }),
+};
+api.derivatives = derivativesAPI;
+
+// Server-side duplicate detection for parts (POST /parts/check-duplicates).
+// part_service.check_duplicates does exact pn / exact mpn / fuzzy name matching
+// and returns a matchType + matchScore per hit. It existed with no wrapper and
+// no caller, while the UI ran a weaker heuristic of its own.
+const duplicatesAPI = {
+  check: ({ pn, mpn, name, vendor } = {}) =>
+    apiRequest('/parts/check-duplicates', {
+      method: 'POST',
+      body: JSON.stringify({ pn, mpn, name, vendor }),
+    }),
+};
+api.duplicates = duplicatesAPI;
+window.duplicatesAPI = duplicatesAPI;
+window.derivativesAPI = derivativesAPI;
+
+// Multi-currency reference data (GET /enterprise/currencies -> active
+// currency rows, bare array). Backs the reporting-currency selector on the
+// cost roll-up. See backend/app/api/endpoints/enterprise_ext_api.py.
+export const enterpriseAPI = {
+  currencies: () => apiRequest('/enterprise/currencies'),
+};
+api.enterprise = enterpriseAPI;
+window.enterpriseAPI = enterpriseAPI;
+
+// Object-level permission grants on a BOM (backend/app/api/endpoints/
+// bom_enterprise.py, migration 063). SEMANTIC WARNING, mirrored in the UI copy:
+// a BOM with ZERO grants is UNRESTRICTED — the role check alone governs, as it
+// always has. The FIRST grant flips it to restricted; from then on only the
+// grantees (plus the BOM's creator and superusers) get in. Grants NARROW, they
+// never widen. Every route also needs `manage` on the BOM, so a 403 here means
+// "you may not manage access for this BOM", not "request failed".
+export const bomGrantsAPI = {
+  list: (bomId) => apiRequest(`/bom/${bomId}/grants`),
+
+  // grantee_type: "user" | "team"; level: "view" | "edit" | "manage".
+  // Re-granting an existing grantee changes its level (server-side upsert).
+  grant: (bomId, { grantee_type, grantee_id, level }) =>
+    apiRequest(`/bom/${bomId}/grants`, {
+      method: 'POST',
+      body: JSON.stringify({ grantee_type, grantee_id, level }),
+    }),
+
+  revoke: (bomId, grantId) =>
+    apiRequest(`/bom/${bomId}/grants/${grantId}`, { method: 'DELETE' }),
+};
+api.bomGrants = bomGrantsAPI;
+
+// GET /teams/ — needed to grant BOM access to a team.
+export const teamsAPI = {
+  list: () => apiRequest('/teams/'),
+};
+api.teams = teamsAPI;
+
+// Public read-only BOM share links (backend/app/api/endpoints/bom_shares.py).
+// The authenticated half is tenant-scoped CRUD; `resolvePublic` is the ONE
+// route a supplier with no session calls. Note what the server deliberately
+// does NOT tell it: unknown, expired, revoked and wrong-password all answer
+// the same 404, so the UI must not claim to know which happened.
+export const bomSharesAPI = {
+  list: (bomId) => {
+    const q = bomId != null ? new URLSearchParams({ bom_id: bomId }).toString() : '';
+    return apiRequest(`/bom-shares/${q ? '?' + q : ''}`);
+  },
+
+  // expires_at: ISO-8601 string (must be in the future) or null for no expiry.
+  // password: plain string, hashed server-side, or null for an open link.
+  create: ({ bom_id, expires_at, password }) =>
+    apiRequest('/bom-shares/', {
+      method: 'POST',
+      body: JSON.stringify({
+        bom_id,
+        expires_at: expires_at || null,
+        password: password || null,
+      }),
+    }),
+
+  // Revoke is one-way: there is no un-revoke route.
+  revoke: (shareId) => apiRequest(`/bom-shares/${shareId}/revoke`, { method: 'POST' }),
+
+  // No auth. The password travels in a header, not the query string, so it
+  // stays out of access logs and browser history.
+  resolvePublic: (token, password) =>
+    apiRequest(
+      `/bom-shares/public/${encodeURIComponent(token)}`,
+      password ? { headers: { 'X-Share-Password': password } } : {},
+    ),
+};
+api.bomShares = bomSharesAPI;

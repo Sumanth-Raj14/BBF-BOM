@@ -8,6 +8,13 @@ import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader.js";
 import { ThreeMFLoader } from "three/examples/jsm/loaders/3MFLoader.js";
 
 import { __t } from "../../i18n";
+import {
+  MESH_EXT,
+  NATIVE_CAD_EXT,
+  OCCT_EXT,
+  extOf,
+  isViewable,
+} from "./formats.js";
 
 // ============ REAL CAD 3D VIEWER ============
 //
@@ -23,28 +30,12 @@ import { __t } from "../../i18n";
 //     with no public format; only SolidWorks can open them. Export STEP or STL
 //     from SolidWorks (or use the add-in) and those load fine. We say so
 //     instead of showing a decorative box.
-const MESH_EXT = {
-  stl: "stl",
-  obj: "obj",
-  gltf: "gltf",
-  glb: "gltf",
-  ply: "ply",
-  "3mf": "3mf",
-};
-const OCCT_EXT = { step: "step", stp: "step", iges: "iges", igs: "iges" };
-const NATIVE_CAD_EXT = ["sldprt", "sldasm", "ipt", "iam", "prt", "catpart"];
-
-export function extOf(name) {
-  return String(name || "")
-    .split(".")
-    .pop()
-    .toLowerCase();
-}
-
-export function isViewable(name) {
-  const e = extOf(name);
-  return Boolean(MESH_EXT[e] || OCCT_EXT[e]);
-}
+// Format tables and the pure predicates live in ./formats.js, which imports no
+// three.js. Re-exported here so existing `import { isViewable } from
+// "./CadViewer.jsx"` callers keep working — but anything that only needs the
+// predicate should import from ./formats.js directly, or it pulls the whole 3D
+// engine into its chunk.
+export { extOf, isViewable } from "./formats.js";
 
 /** Build three.js geometry from whatever the file turns out to be. */
 async function buildObject(arrayBuffer, ext) {

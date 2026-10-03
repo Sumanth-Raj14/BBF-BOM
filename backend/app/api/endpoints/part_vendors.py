@@ -3,7 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
@@ -23,8 +23,10 @@ class PartVendorBase(BaseModel):
     vendorId: int
     isPreferred: Optional[bool] = False
     isAlternate: Optional[bool] = False
+    avlRank: Optional[int] = None
     vendorPn: Optional[str] = None
     vendorCost: Optional[float] = None
+    vendorCurrency: Optional[str] = None
     vendorLead: Optional[int] = None
     vendorMoq: Optional[int] = None
     qualityScore: Optional[float] = 5.0
@@ -39,8 +41,10 @@ class PartVendorCreate(PartVendorBase):
 class PartVendorUpdate(BaseModel):
     isPreferred: Optional[bool] = None
     isAlternate: Optional[bool] = None
+    avlRank: Optional[int] = None
     vendorPn: Optional[str] = None
     vendorCost: Optional[float] = None
+    vendorCurrency: Optional[str] = None
     vendorLead: Optional[int] = None
     vendorMoq: Optional[int] = None
     qualityScore: Optional[float] = None
@@ -74,7 +78,14 @@ async def get_part_vendors(
     if vendorId:
         query = query.where(PartVendor.vendorId == vendorId)
 
-    query = query.order_by(PartVendor.id)
+    # AVL order: the preferred source first, then the buyer's manual ranking,
+    # then insertion order. coalesce rather than NULLS LAST because Postgres and
+    # SQLite disagree on default NULL placement in ORDER BY.
+    query = query.order_by(
+        func.coalesce(PartVendor.isPreferred, False).desc(),
+        func.coalesce(PartVendor.avlRank, 2147483647),
+        PartVendor.id,
+    )
     result = await paginate(db, query, page)
 
     enriched = []
@@ -88,8 +99,10 @@ async def get_part_vendors(
                 "vendorId": pv.vendorId,
                 "isPreferred": pv.isPreferred,
                 "isAlternate": pv.isAlternate,
+                "avlRank": pv.avlRank,
                 "vendorPn": pv.vendorPn,
                 "vendorCost": pv.vendorCost,
+                "vendorCurrency": pv.vendorCurrency,
                 "vendorLead": pv.vendorLead,
                 "vendorMoq": pv.vendorMoq,
                 "qualityScore": pv.qualityScore,
@@ -138,17 +151,15 @@ async def create_part_vendor(
 
     # If marking as preferred, unset other preferred vendors for this part
     if part_vendor.isPreferred:
-        await db.execute(
-            select(PartVendor).where(
-                PartVendor.partId == part_vendor.partId, PartVendor.isPreferred
-            )
-        )
-        # Note: In async SQLAlchemy, we need to use update() for bulk updates
-        from sqlalchemy import update
-
+        # Core update() bypasses the ORM tenant guard in app/core/tenant_events.py,
+        # so scope tenantId explicitly here.
         await db.execute(
             update(PartVendor)
-            .where(PartVendor.partId == part_vendor.partId, PartVendor.isPreferred)
+            .where(
+                PartVendor.partId == part_vendor.partId,
+                PartVendor.tenantId == current_user.tenantId,
+                PartVendor.isPreferred,
+            )
             .values(isPreferred=False)
         )
 
@@ -163,8 +174,10 @@ async def create_part_vendor(
         "vendorId": db_part_vendor.vendorId,
         "isPreferred": db_part_vendor.isPreferred,
         "isAlternate": db_part_vendor.isAlternate,
+        "avlRank": db_part_vendor.avlRank,
         "vendorPn": db_part_vendor.vendorPn,
         "vendorCost": db_part_vendor.vendorCost,
+        "vendorCurrency": db_part_vendor.vendorCurrency,
         "vendorLead": db_part_vendor.vendorLead,
         "vendorMoq": db_part_vendor.vendorMoq,
         "qualityScore": db_part_vendor.qualityScore,
@@ -196,12 +209,13 @@ async def update_part_vendor(
 
     # If setting as preferred, unset other preferred vendors for this part
     if update_dict.get("isPreferred"):
-        from sqlalchemy import update
-
+        # Same caveat as create: Core update() is invisible to the ORM tenant
+        # guard, so tenantId is filtered by hand.
         await db.execute(
             update(PartVendor)
             .where(
                 PartVendor.partId == db_link.partId,
+                PartVendor.tenantId == current_user.tenantId,
                 PartVendor.id != link_id,
                 PartVendor.isPreferred,
             )
@@ -224,8 +238,10 @@ async def update_part_vendor(
         "vendorId": db_link.vendorId,
         "isPreferred": db_link.isPreferred,
         "isAlternate": db_link.isAlternate,
+        "avlRank": db_link.avlRank,
         "vendorPn": db_link.vendorPn,
         "vendorCost": db_link.vendorCost,
+        "vendorCurrency": db_link.vendorCurrency,
         "vendorLead": db_link.vendorLead,
         "vendorMoq": db_link.vendorMoq,
         "qualityScore": db_link.qualityScore,

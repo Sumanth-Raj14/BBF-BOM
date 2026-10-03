@@ -65,6 +65,7 @@ class DocumentResponse(BaseModel):
     projectId: Optional[int] = None
     version: int = 1
     isLatest: bool = True
+    replacesDocumentId: Optional[int] = None
     accessLevel: str = "private"
     uploadedBy: Optional[str] = None
     createdAt: datetime
@@ -135,6 +136,7 @@ async def upload_document(
     partId: Optional[int] = Form(None),
     projectId: Optional[int] = Form(None),
     accessLevel: Optional[str] = Form("private"),
+    replacesDocumentId: Optional[int] = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_documents_write),
 ):
@@ -175,6 +177,19 @@ async def upload_document(
     # Sanitize the category so it cannot introduce path separators into the key.
     safe_category = os.path.basename(str(auto_category)).replace("..", "").strip() or "Other"
 
+    # A revision supersedes the previous current version instead of creating a
+    # second row that also claims version 1. The superseded row is left intact
+    # — only its isLatest flag flips — so its bytes stay downloadable forever.
+    previous = await document_service.find_superseded(
+        db,
+        replaces_id=replacesDocumentId,
+        original_name=file.filename or "upload",
+        part_id=partId,
+        project_id=projectId,
+    )
+    if previous is not None:
+        previous.isLatest = False
+
     s3_key = f"documents/{safe_category}/{safe_filename}"
     content_type = file.content_type or "application/octet-stream"
     s3_result = await s3_storage.upload_file(content, s3_key, content_type)
@@ -205,6 +220,9 @@ async def upload_document(
         storage_type=storage_backend,
         uploadedBy=current_user.email,
         tenantId=current_user.tenantId,
+        version=(previous.version or 1) + 1 if previous is not None else 1,
+        isLatest=True,
+        replacesDocumentId=previous.id if previous is not None else None,
     )
     db.add(db_doc)
     await db.commit()

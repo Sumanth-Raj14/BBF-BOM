@@ -10,6 +10,7 @@ from app.api.endpoints import (
     barcodes,
     bom_enterprise,
     bom_items,
+    bom_shares,
     bom_templates,
     budgets,
     bulk_import,

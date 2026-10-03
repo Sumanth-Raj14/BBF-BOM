@@ -80,12 +80,12 @@ def upgrade() -> None:
     # ════════════════════════════════════════════════════════════════
     # 3. Fix documents table — add missing columns and FK constraints
     # ════════════════════════════════════════════════════════════════
-    op.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS isPublic BOOLEAN DEFAULT FALSE")
+    op.execute('ALTER TABLE documents ADD COLUMN IF NOT EXISTS "isPublic" BOOLEAN DEFAULT FALSE')
     op.execute(
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS purchaseOrderId INTEGER REFERENCES purchase_orders(id)"
+        'ALTER TABLE documents ADD COLUMN IF NOT EXISTS "purchaseOrderId" INTEGER REFERENCES purchase_orders(id)'
     )
     op.execute(
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS replacesDocumentId INTEGER REFERENCES documents(id)"
+        'ALTER TABLE documents ADD COLUMN IF NOT EXISTS "replacesDocumentId" INTEGER REFERENCES documents(id)'
     )
     # Add FK constraints on existing plain Integer columns
     op.execute("""
@@ -119,7 +119,7 @@ def upgrade() -> None:
     op.create_index("idx_documents_purchase_order", "documents", ["purchaseOrderId"])
     op.create_index("idx_documents_replaces", "documents", ["replacesDocumentId"])
     op.create_index("idx_documents_category", "documents", ["category"])
-    op.create_index("idx_documents_latest", "documents", ["isLatest", sa.text("createdAt DESC")])
+    op.create_index("idx_documents_latest", "documents", ["isLatest", sa.text('"createdAt" DESC')])
 
     # ════════════════════════════════════════════════════════════════
     # 4. Fix audit_logs table — add missing columns, rename ipAddress→userIp
@@ -555,9 +555,9 @@ def downgrade() -> None:
         op.execute(f"DROP INDEX IF EXISTS {idx}")
 
     # ── Columns ──
-    op.execute("ALTER TABLE documents DROP COLUMN IF EXISTS isPublic")
-    op.execute("ALTER TABLE documents DROP COLUMN IF EXISTS purchaseOrderId")
-    op.execute("ALTER TABLE documents DROP COLUMN IF EXISTS replacesDocumentId")
+    op.execute('ALTER TABLE documents DROP COLUMN IF EXISTS "isPublic"')
+    op.execute('ALTER TABLE documents DROP COLUMN IF EXISTS "purchaseOrderId"')
+    op.execute('ALTER TABLE documents DROP COLUMN IF EXISTS "replacesDocumentId"')
     op.execute('ALTER TABLE audit_logs DROP COLUMN IF EXISTS "userEmail"')
     # Don't drop userIp as it may have replaced ipAddress — leave it
 

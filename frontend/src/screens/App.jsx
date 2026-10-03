@@ -1,11 +1,18 @@
 import { Routes, Route, useLocation } from "react-router-dom";
 import MembersScreen from "../components/screens/MembersScreen.jsx";
+import PlanningScreen from "../components/screens/PlanningScreen.jsx";
 import ContractsScreen from "../components/screens/ContractsScreen.jsx";
 import MakeVsBuyScreen from "../components/screens/MakeVsBuyScreen.jsx";
 import SupplierScorecardsScreen from "../components/screens/SupplierScorecardsScreen.jsx";
 import ESignaturesScreen from "../components/screens/ESignaturesScreen.jsx";
+import AdminOpsScreen from "../components/screens/AdminOpsScreen.jsx";
+import PublicShareScreen from "../components/screens/PublicShareScreen.jsx";
 import { storage } from "../utils/storage.js";
-import { isOfflineCapableError } from "../utils/offlineAuth.js";
+import {
+  isOfflineCapableError,
+  rememberOfflineCredential,
+  verifyOfflineCredential,
+} from "../utils/offlineAuth.js";
 import { ACCENT_PRESETS } from "../utils/constants.js";
 import { AppContext, AppCtxProvider } from "../context/AppCtx.jsx";
 import useKeyboardShortcuts from "../hooks/useKeyboardShortcuts.js";
@@ -151,6 +158,14 @@ function MembersScreenWrapper() {
   );
 }
 
+function PlanningScreenWrapper() {
+  return (
+    <ErrBD>
+      <PlanningScreen />
+    </ErrBD>
+  );
+}
+
 // These four features had a complete backend AND a working api.js client, but no
 // screen ever called them — so they were unreachable from the product. Adding the
 // missing surface; nothing existing is changed.
@@ -182,6 +197,17 @@ function ESignaturesScreenWrapper() {
   return (
     <ErrBD>
       <ESignaturesScreen />
+    </ErrBD>
+  );
+}
+
+// Backup/restore/PITR and session management: both backends were live and
+// superuser-gated, but no screen ever called them, so disaster recovery and
+// "who is signed in" were unreachable from the product.
+function AdminOpsScreenWrapper() {
+  return (
+    <ErrBD>
+      <AdminOpsScreen />
     </ErrBD>
   );
 }
@@ -372,13 +398,17 @@ function AppShell() {
       <AuthScreen
         onSignIn={async (u) => {
           if (u.email) {
+            const pw = u.password; // also needed by the offline check in catch
             try {
-              const pw = u.password;
               const result = await api.auth.login(u.email, pw);
               if (result && result.access_token) {
                 // Auth is cookie-based (credentials:'include'); do not persist
                 // the token or password. storage.auth.set strips credentials.
                 storage.auth.set(u);
+                // The server just vouched for these credentials — record the
+                // verifier so a genuinely-offline login can be checked against
+                // something instead of being waved through.
+                await rememberOfflineCredential(u.email, pw);
                 ctx.setAuthed(u);
                 toast(__t("common.apiConnected") + " - " + u.name, {
                   kind: "success",
@@ -398,21 +428,34 @@ function AppShell() {
               // utils/offlineAuth.js, where it is unit-tested.
               const isNetworkError = isOfflineCapableError(e.message);
               if (isNetworkError) {
-                storage.auth.set(u);
-                ctx.setAuthed(u);
-                toast(__t("common.offlineMode"), { kind: "warn" });
-                if (
-                  intendedRoute.current &&
-                  intendedRoute.current !== "login"
-                ) {
-                  setRoute(intendedRoute.current);
+                // WHAT WAS FALSE BEFORE: an unreachable server admitted ANY
+                // email + any 4-char password and told them "Offline mode",
+                // i.e. claimed an authentication that never happened. Offline
+                // access now requires a credential this device has already
+                // seen the server accept.
+                const known = await verifyOfflineCredential(u.email, pw);
+                if (known) {
+                  storage.auth.set(u);
+                  ctx.setAuthed(u);
+                  toast(__t("common.offlineMode"), { kind: "warn" });
+                  if (
+                    intendedRoute.current &&
+                    intendedRoute.current !== "login"
+                  ) {
+                    setRoute(intendedRoute.current);
+                  }
+                  return;
                 }
+                toast(
+                  __t("auth.loginFailed") +
+                    ": server unreachable, and this account has not signed in on this device before. Offline sign-in needs a previous successful sign-in here.",
+                  { kind: "error" },
+                );
                 return;
               }
               toast(__t("auth.loginFailed") + ": " + e.message, {
                 kind: "error",
               });
-              return;
             }
           }
         }}
@@ -533,6 +576,7 @@ function AppShell() {
             <Route path="/vendors" element={<VendorsScreenWrapper />} />
             <Route path="/members" element={<MembersScreenWrapper />} />
             <Route path="/contracts" element={<ContractsScreenWrapper />} />
+            <Route path="/planning" element={<PlanningScreenWrapper />} />
             <Route
               path="/make-vs-buy"
               element={<MakeVsBuyScreenWrapper />}
@@ -545,6 +589,7 @@ function AppShell() {
               path="/esignatures"
               element={<ESignaturesScreenWrapper />}
             />
+            <Route path="/admin-ops" element={<AdminOpsScreenWrapper />} />
             <Route path="/procurement" element={<ProcurementScreenWrapper />} />
             <Route path="/diff" element={<DiffScreenWrapper />} />
             <Route
@@ -745,6 +790,15 @@ function AppShell() {
 }
 
 export default function App() {
+  // /share/:token is the ONE public route: an external supplier has no session,
+  // and AppShell renders <AuthScreen> for anyone unauthenticated. So it is
+  // matched here, above the auth gate and outside AppCtxProvider (whose data
+  // fetches are all tenant-scoped and would 401 for a public viewer).
+  const { pathname } = useLocation();
+  const shared = /^\/share\/(.+)$/.exec(pathname);
+  if (shared) {
+    return <PublicShareScreen token={decodeURIComponent(shared[1])} />;
+  }
   return (
     <AppCtxProvider>
       <AppShell />
