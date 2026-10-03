@@ -7,6 +7,7 @@ import { storage } from "../utils/storage.js";
 import { screenData } from "../services/screenDataBridge.js";
 import { __t } from "../i18n";
 import { toast } from "../utils/toast";
+import WorkOrderShopFloorModal from "../components/modals/WorkOrderShopFloorModal.jsx";
 import {
   ScreenHeader,
   Button,
@@ -308,6 +309,10 @@ export function runUndo() {
 }
 window.runUndo = runUndo;
 function WorkOrdersScreen() {
+  // Shop-floor execution: /action, operation start/complete and material
+  // issue all existed server-side with no UI, so a work order could be
+  // created but never actually run from the application.
+  const [shopFloorId, setShopFloorId] = React.useState(null);
   const [orders, setOrders] = React.useState([]);
   React.useEffect(() => {
     // Fix: was substituting 5 hardcoded DEFAULT_ORDERS whenever the real list
@@ -413,6 +418,11 @@ function WorkOrdersScreen() {
             </Button>
           }
           items={[
+            {
+              icon: <Icon.Tools size={11} />,
+              label: __t("power.workOrders.shopFloor") || "Shop floor",
+              onSelect: () => setShopFloorId(o.id),
+            },
             {
               icon: <Icon.Plus size={11} />,
               label: __t("power.workOrders.reportBuild") || "Report build",
@@ -699,6 +709,19 @@ function WorkOrdersScreen() {
             }
           />
         }
+      />
+      <WorkOrderShopFloorModal
+        open={shopFloorId != null}
+        workOrderId={shopFloorId}
+        onClose={() => {
+          setShopFloorId(null);
+          // The list's status column is stale after a transition, so
+          // re-read it rather than leaving the row showing the old status.
+          screenData.workOrders
+            .list()
+            .then((data) => setOrders(data || []))
+            .catch(() => {});
+        }}
       />
     </div>
   );

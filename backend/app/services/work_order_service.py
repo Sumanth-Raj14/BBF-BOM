@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.cache import cache_get, cache_set
+from app.core.cache import cache_get, cache_invalidate, cache_set
 from app.core.idempotency import check_idempotency
 from app.core.tenant_context import get_tenant_id
 from app.integrations.events import emit_integration_event
@@ -222,6 +222,12 @@ async def perform_work_order_action(
         {"status": wo.status, "comments": comments},
     )
     await db.commit()
+    # get_work_order() caches its payload for 300s under this exact key and
+    # nothing used to clear it, so a refetch right after a mutation returned
+    # the pre-mutation snapshot for up to five minutes — an operation you had
+    # just started still showed as not started.
+    await cache_invalidate(f"work_order:{wo_id}")
+
     return {
         "work_order_id": wo_id,
         "action": action,
@@ -254,6 +260,12 @@ async def add_work_order_operation(
     db.add(op)
     await db.commit()
     await db.refresh(op)
+    # get_work_order() caches its payload for 300s under this exact key and
+    # nothing used to clear it, so a refetch right after a mutation returned
+    # the pre-mutation snapshot for up to five minutes — an operation you had
+    # just started still showed as not started.
+    await cache_invalidate(f"work_order:{wo_id}")
+
     return op
 
 
@@ -275,6 +287,12 @@ async def start_operation(
     if employee_id:
         op.employee_id = employee_id
     await db.commit()
+    # get_work_order() caches its payload for 300s under this exact key and
+    # nothing used to clear it, so a refetch right after a mutation returned
+    # the pre-mutation snapshot for up to five minutes — an operation you had
+    # just started still showed as not started.
+    await cache_invalidate(f"work_order:{wo_id}")
+
     return {"operation_id": op_id, "status": "in_progress", "start_time": op.start_time.isoformat()}
 
 
@@ -303,6 +321,12 @@ async def complete_operation(
     if notes:
         op.notes = notes
     await db.commit()
+    # get_work_order() caches its payload for 300s under this exact key and
+    # nothing used to clear it, so a refetch right after a mutation returned
+    # the pre-mutation snapshot for up to five minutes — an operation you had
+    # just started still showed as not started.
+    await cache_invalidate(f"work_order:{wo_id}")
+
     return {
         "operation_id": op_id,
         "status": "completed",
@@ -335,6 +359,12 @@ async def add_work_order_material(
     db.add(mat)
     await db.commit()
     await db.refresh(mat)
+    # get_work_order() caches its payload for 300s under this exact key and
+    # nothing used to clear it, so a refetch right after a mutation returned
+    # the pre-mutation snapshot for up to five minutes — an operation you had
+    # just started still showed as not started.
+    await cache_invalidate(f"work_order:{wo_id}")
+
     return mat
 
 
@@ -364,6 +394,12 @@ async def issue_material_to_work_order(
     mat.issued_at = datetime.now(UTC)
     mat.issued_by = current_user.id
     await db.commit()
+    # get_work_order() caches its payload for 300s under this exact key and
+    # nothing used to clear it, so a refetch right after a mutation returned
+    # the pre-mutation snapshot for up to five minutes — an operation you had
+    # just started still showed as not started.
+    await cache_invalidate(f"work_order:{wo_id}")
+
     return {
         "material_id": mat_id,
         "quantity_issued": float(mat.quantity_issued),
