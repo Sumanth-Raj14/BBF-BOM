@@ -113,8 +113,14 @@ describe("CostRollupView", () => {
 
     // Rs80 of Rs95 as-costed = 84.2%. Against the EUR 500 total it would be 16%.
     expect(await screen.findByText("84.2% of BOM")).toBeInTheDocument();
-    expect(screen.getByText(/percentages are of the as-costed total/i))
-      .toBeInTheDocument();
+    // findByText, NOT getByText: this notice renders only once `rc` is set from
+    // the AWAITED /cost-rollup response, whereas "84.2% of BOM" is computed
+    // client-side from props and paints immediately. So the await above does
+    // not imply the fetch has resolved, and a synchronous get here raced it —
+    // green locally, intermittently red on a loaded CI runner.
+    expect(
+      await screen.findByText(/percentages are of the as-costed total/i),
+    ).toBeInTheDocument();
     // The converted total is never run through the local INR display rate.
     expect(screen.queryByText(/Rs500\.00/)).not.toBeInTheDocument();
   });
