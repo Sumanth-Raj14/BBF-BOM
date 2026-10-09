@@ -273,6 +273,46 @@ export const authAPI = {
 
   getMe: () => apiRequest('/auth/me', { credentials: 'include' }),
 
+  // --- Account security -----------------------------------------------
+  // These endpoints existed server-side with NO client wrapper and no UI, so
+  // a user could not enrol in MFA or change their own password through the
+  // application at all. Contracts read from backend/app/api/endpoints/auth.py.
+
+  // POST /auth/mfa/setup -> { secret, qr_uri, backup_codes[8] }
+  // The backup codes come back in PLAINTEXT EXACTLY ONCE; the server stores
+  // only bcrypt hashes of them (auth_service.setup_mfa), so they cannot be
+  // retrieved again. Whatever renders this must say so.
+  mfaSetup: () => apiRequest('/auth/mfa/setup', { method: 'POST' }),
+
+  // Confirms the user's authenticator is in sync and ENABLES MFA.
+  // `secret` is the one returned by setup — it is not yet active until this
+  // call succeeds.
+  mfaVerify: (code, secret) =>
+    apiRequest('/auth/mfa/verify', {
+      method: 'POST',
+      body: JSON.stringify({ code, secret }),
+    }),
+
+  // Takes password + a current TOTP code. NOTE: the endpoint reads the raw
+  // request JSON rather than a pydantic model, so the field names below are
+  // load-bearing and are not validated for you — they must stay exactly
+  // `password` and `totp_code`.
+  mfaDisable: (password, totpCode) =>
+    apiRequest('/auth/mfa/disable', {
+      method: 'POST',
+      body: JSON.stringify({ password, totp_code: totpCode }),
+    }),
+
+  // POST /auth/change-password { current_password, new_password }
+  changePassword: (currentPassword, newPassword) =>
+    apiRequest('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    }),
+
   validateToken: async () => {
     try {
       const me = await apiRequest('/auth/me', { credentials: 'include' });
@@ -1351,8 +1391,79 @@ export const workOrdersAPI = {
   // the backend advances a work order through /work-orders/{id}/action.
   // Unused in the UI. Use action() with the intended transition instead of
   // guessing a mapping here.
-  materials: (id) => apiRequest(`/work-orders/${id}/materials`),
-  operations: (id) => apiRequest(`/work-orders/${id}/operations`),
+  // Both of these used to GET /work-orders/{id}/{materials,operations}. Those
+  // paths exist as POST ONLY (verified against openapi.json), so each was a
+  // 405 waiting for its first caller. The real source of both lists is the
+  // detail endpoint, which returns `operations[]` and `materials[]` inline.
+  materials: async (id) => (await apiRequest(`/work-orders/${id}`))?.materials || [],
+  operations: async (id) => (await apiRequest(`/work-orders/${id}`))?.operations || [],
+
+  addMaterial: (id, data) =>
+    apiRequest(`/work-orders/${id}/materials`, { method: 'POST', body: JSON.stringify(data) }),
+  addOperation: (id, data) =>
+    apiRequest(`/work-orders/${id}/operations`, { method: 'POST', body: JSON.stringify(data) }),
+};
+
+// Shop-floor execution. These routes existed with no wrapper and no UI, so a
+// work order could be created but never actually run: operations could not be
+// started or completed and materials could not be issued from anywhere in the
+// application.
+export const workOrderOpsAPI = {
+  // The ONLY accepted values, from work_order_service.perform_work_order_action's
+  // `valid_actions` list — anything else is a 400. The service maps them to
+  // released / in_progress / completed / closed / on_hold / scrapped.
+  ACTIONS: ['release', 'start', 'complete', 'close', 'hold', 'scrap'],
+
+  action: (woId, action, comments) =>
+    apiRequest(`/work-orders/${woId}/action`, {
+      method: 'POST',
+      body: JSON.stringify({ action, comments: comments || null }),
+    }),
+
+  // QUERY PARAMETERS, not a JSON body. These three handlers declare bare
+  // scalars (quantity_good: int, quantity: float, ...), which FastAPI binds
+  // from the query string — unlike /action, which takes a pydantic model.
+  // Sending a body here means the REQUIRED params never arrive and every call
+  // 422s, so the distinction is load-bearing, not stylistic.
+  startOperation: (woId, opId, employeeId) => {
+    const q = new URLSearchParams();
+    if (employeeId != null) q.set('employee_id', String(employeeId));
+    const s = q.toString();
+    return apiRequest(`/work-orders/${woId}/operations/${opId}/start${s ? '?' + s : ''}`, {
+      method: 'POST',
+    });
+  },
+
+  completeOperation: (woId, opId, quantityGood, quantityScrapped = 0, notes) => {
+    const q = new URLSearchParams({
+      quantity_good: String(quantityGood),
+      quantity_scrapped: String(quantityScrapped),
+    });
+    if (notes) q.set('notes', notes);
+    return apiRequest(
+      `/work-orders/${woId}/operations/${opId}/complete?${q.toString()}`,
+      { method: 'POST' },
+    );
+  },
+
+  issueMaterial: (woId, matId, quantity, lotNumber, serialNumber) => {
+    const q = new URLSearchParams({ quantity: String(quantity) });
+    if (lotNumber) q.set('lot_number', lotNumber);
+    if (serialNumber) q.set('serial_number', serialNumber);
+    return apiRequest(
+      `/work-orders/${woId}/materials/${matId}/issue?${q.toString()}`,
+      { method: 'POST' },
+    );
+  },
+
+  dailyReport: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiRequest(`/work-orders/reports/daily${q ? '?' + q : ''}`);
+  },
+  efficiencyReport: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiRequest(`/work-orders/reports/efficiency${q ? '?' + q : ''}`);
+  },
 };
 
 // ECO/ECR API
@@ -1821,6 +1932,11 @@ export const mbomAPI = {
   derive: (data) => apiRequest('/mbom/derive', { method: 'POST', body: JSON.stringify(data) }),
 };
 api.mbom = mbomAPI;
+// Registered HERE, below `export const api = {...}`. Assigning it beside the
+// workOrderOpsAPI definition (~300 lines earlier) referenced `api` before
+// its declaration -> "Cannot access 'api' before initialization", which
+// broke 13 test files at import time.
+api.workOrderOps = workOrderOpsAPI;
 window.mbomAPI = mbomAPI;
 
 // Appended for modals-extra.jsx (API Keys modal): user-scoped API key

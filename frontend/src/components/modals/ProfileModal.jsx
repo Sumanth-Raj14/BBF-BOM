@@ -3,6 +3,7 @@ import PropTypes from "prop-types";
 import { __t } from "../../i18n";
 import { Icon, api } from "../../globals";
 import { Field, Input, Modal, Spinner, Tooltip } from "../ui";
+import AccountSecurity from "./AccountSecurity.jsx";
 
 // Fix (dead-fakes cleanup): this modal used to show a hardcoded "Elena Chen"
 // profile with editable-looking fields, and "Save changes" only toasted
@@ -13,27 +14,33 @@ import { Field, Input, Modal, Spinner, Tooltip } from "../ui";
 export default function ProfileModal({ open, onClose }) {
   const [state, setState] = React.useState({ loading: true, user: null, error: null });
 
-  React.useEffect(() => {
-    if (!open) return undefined;
+  // Hoisted out of the effect so AccountSecurity can re-run it after enabling
+  // or disabling MFA — /auth/me carries `mfaEnabled`, so without a refetch the
+  // badge would keep showing the state from before the change.
+  const load = React.useCallback(async () => {
     if (!api?.auth?.getMe) {
       setState({ loading: false, user: null, error: "unavailable" });
-      return undefined;
+      return;
     }
+    try {
+      const user = await api.auth.getMe();
+      setState({ loading: false, user, error: null });
+    } catch (e) {
+      setState({ loading: false, user: null, error: e?.message || "Failed to load profile" });
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!open) return undefined;
     let cancelled = false;
     setState({ loading: true, user: null, error: null });
-    api.auth
-      .getMe()
-      .then((user) => {
-        if (!cancelled) setState({ loading: false, user, error: null });
-      })
-      .catch((e) => {
-        if (!cancelled)
-          setState({ loading: false, user: null, error: e?.message || "Failed to load profile" });
-      });
+    load().then(() => {
+      if (cancelled) return;
+    });
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, load]);
 
   if (!open) return null;
 
@@ -88,6 +95,7 @@ export default function ProfileModal({ open, onClose }) {
               <Input value={user.department || ""} readOnly disabled />
             </Field>
           </div>
+          <AccountSecurity mfaEnabled={Boolean(user.mfaEnabled)} onChanged={load} />
           <Tooltip label={__t("modals.profile.editUnavailable") || "Self-service profile editing isn't available yet — this requires admin action."}>
             <p className="fs-11 fg-3" style={{ margin: "8px 0 0" }}>
               {__t("modals.profile.editUnavailable") ||
